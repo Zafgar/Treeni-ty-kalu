@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#1a1d24"/>
+  <g fill="#4f8cff">
+    <!-- tanko -->
+    <rect x="120" y="236" width="272" height="40" rx="8"/>
+    <!-- vasen levypino -->
+    <rect x="70" y="196" width="34" height="120" rx="10"/>
+    <rect x="108" y="216" width="28" height="80" rx="8" fill="#34d399"/>
+    <!-- oikea levypino -->
+    <rect x="408" y="196" width="34" height="120" rx="10"/>
+    <rect x="376" y="216" width="28" height="80" rx="8" fill="#34d399"/>
+  </g>
+</svg>

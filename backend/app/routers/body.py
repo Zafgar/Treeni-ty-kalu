@@ -110,11 +110,14 @@ def body_summary(profile_id: int = Query(...), db: Session = Depends(get_db)):
     composition = None
     latest_w = next((e for e in reversed(entries) if e.bodyweight is not None), None)
     latest_bf = next((e for e in reversed(entries) if e.body_fat_pct is not None), None)
+    physique = None
     if latest_w and latest_bf:
         height = profile.height_cm if profile else None
         composition = engine.body_composition(latest_w.bodyweight, latest_bf.body_fat_pct, height)
         composition["bodyweight"] = latest_w.bodyweight
         composition["body_fat_pct"] = latest_bf.body_fat_pct
+        # Fysiikkataso (aloittelija → IFBB Pro) FFMI:stä
+        physique = engine.physique_level(composition.get("ffmi"), profile.sex if profile else None)
 
     # Mitta-aikasarjat kohdittain
     measurements = (
@@ -131,5 +134,6 @@ def body_summary(profile_id: int = Query(...), db: Session = Depends(get_db)):
         "weight_series": weight_series,
         "body_fat_series": bf_series,
         "composition": composition,
+        "physique": physique,
         "measurement_sites": by_site,
     }

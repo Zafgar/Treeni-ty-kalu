@@ -85,8 +85,15 @@ python -m pytest backend/tests/ -q
   käsipainot, talja, kone, keho, kahvakuula); kukin järkevillä oletussarjoilla.
   Kategorioittain ryhmitelty valitsin treeniin/ohjelmaan, sarjat alustetaan
   liikkeen oletuksista.
+- **Treenin kesto ja poltetut kalorit:** kirjaa treenin kesto (min) ja kcal
+  (esim. älykellosta); mukana kuormitusaikajanassa ja korrelaatioissa
+  treenin ja syömisen suhteen arviointiin
 - **Voimatasot:** 8 porrasta (aloittelija → SM/EM/MM-luokka) kehon painoon ja
   sukupuoleen suhteutettuna, edistymispalkki ja seuraavan tason kynnys
+- **Fysiikkataso:** 8 porrasta (aloittelija → IFBB Pro) FFMI:n perusteella
+  (paino + rasva-% + pituus), edistymispalkki Keho-välilehdellä
+- **PWA:** asennettavissa puhelimen kotinäytölle (manifest + service worker),
+  responsiivinen käyttöliittymä toimii sekä PC:llä että puhelimella
 - **Ennustava graafi:** realistinen kehitysennuste haarukoineen — vähenevä
   tuotto kohti fysiologista kattoa (johdettu painosta ja voimastandardista)
 - **Vanhojen tulosten kirjaus:** merkitse aiempia tuloksia taaksepäin, niin
@@ -128,7 +135,6 @@ Exercise: + category, equipment, default_sets/reps (valmis liikekirjasto)
 
 Rakenne on suunniteltu laajennettavaksi seuraaviin ilman ydinmallien rikkomista:
 
-- Fysiikkatasot mitoista (aloittelija → IFBB Pro)
 - Dieettimallien per-päivä-tavoitteet (treeni- vs. lepopäivä) ja viikkoyhteenveto
 - Ohjelman seuraavien treenien siirto/aikataulutus skipatessa
-- PWA puhelimelle
+- Älykellon/terveysdatan automaattinen tuonti (nyt manuaalinen kirjaus)

@@ -48,6 +48,8 @@ def ensure_columns():
         ("exercises", "default_sets", "INTEGER DEFAULT 3"),
         ("exercises", "default_reps", "INTEGER DEFAULT 10"),
         ("body_entries", "sleep_score", "FLOAT"),
+        ("workout_sessions", "duration_min", "INTEGER"),
+        ("workout_sessions", "kcal_burned", "FLOAT"),
     ]
     inspector = inspect(engine)
     existing_tables = set(inspector.get_table_names())

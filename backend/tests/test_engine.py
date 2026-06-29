@@ -149,6 +149,21 @@ def test_forecast_progress():
     assert fc[0]["low"] < fc[0]["mid"] < fc[0]["high"]
 
 
+def test_physique_level():
+    # FFMI 19 -> Harrastaja-luokkaa (miehet)
+    p = engine.physique_level(19.0, "mies")
+    assert p["level_index"] == 1
+    assert p["level"] == "Harrastaja"
+    # FFMI 27 -> kilpataso
+    high = engine.physique_level(27.0, "mies")
+    assert high["level_index"] >= 6
+    # Naisilla kynnykset matalammat -> sama FFMI antaa korkeamman tason
+    f = engine.physique_level(21.0, "nainen")
+    m = engine.physique_level(21.0, "mies")
+    assert f["level_index"] > m["level_index"]
+    assert engine.physique_level(None) is None
+
+
 def test_pearson():
     assert engine.pearson([1, 2, 3, 4], [2, 4, 6, 8]) == 1.0
     assert engine.pearson([1, 2, 3, 4], [8, 6, 4, 2]) == -1.0

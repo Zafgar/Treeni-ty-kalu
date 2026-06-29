@@ -157,6 +157,8 @@ class WorkoutSessionBase(BaseModel):
     program_day_id: int | None = None
     name: str | None = None
     bodyweight: float | None = None
+    duration_min: int | None = None
+    kcal_burned: float | None = None
     status: str = "completed"
     notes: str | None = None
 
@@ -169,6 +171,8 @@ class WorkoutSessionUpdate(BaseModel):
     session_date: date | None = None
     name: str | None = None
     bodyweight: float | None = None
+    duration_min: int | None = None
+    kcal_burned: float | None = None
     status: str | None = None
     notes: str | None = None
 

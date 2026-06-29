@@ -205,6 +205,37 @@ def strength_level(lift_key: str, one_rm: float, bodyweight: float, sex: str | N
     }
 
 
+# Fysiikkatasot (8) rasvattoman massan indeksin (FFMI) mukaan. Miesten asteikko;
+# naisille kynnyksiä lasketaan FEMALE_FFMI_OFFSETilla.
+PHYSIQUE_LEVELS = [
+    "Aloittelija", "Harrastaja", "Keskitaso", "Edistynyt",
+    "Kokenut", "Eliitti (natural-huippu)", "Kilpataso", "IFBB Pro -luokka",
+]
+FFMI_THRESHOLDS = [18.0, 20.0, 22.0, 23.5, 25.0, 26.5, 28.0]  # 7 kynnystä -> 8 tasoa
+FEMALE_FFMI_OFFSET = 3.5
+
+
+def physique_level(ffmi: float | None, sex: str | None = None) -> dict | None:
+    """Luokittele fysiikan kehitysaste FFMI:n perusteella (aloittelija → IFBB Pro)."""
+    if not ffmi or ffmi <= 0:
+        return None
+    offset = FEMALE_FFMI_OFFSET if (sex or "").lower().startswith("nain") else 0.0
+    thresholds = [t - offset for t in FFMI_THRESHOLDS]
+    level_idx = 0
+    for i, t in enumerate(thresholds):
+        if ffmi >= t:
+            level_idx = i + 1
+    next_threshold = thresholds[level_idx] if level_idx < len(thresholds) else None
+    return {
+        "ffmi": round(ffmi, 1),
+        "level_index": level_idx,
+        "level": PHYSIQUE_LEVELS[level_idx],
+        "next_level": PHYSIQUE_LEVELS[level_idx + 1] if level_idx < len(PHYSIQUE_LEVELS) - 1 else None,
+        "next_ffmi": round(next_threshold, 1) if next_threshold else None,
+        "levels": PHYSIQUE_LEVELS,
+    }
+
+
 def _linear_rate(points: list[tuple]) -> float:
     """Lineaarisen sovituksen kulmakerroin (y-yksikköä / päivä). points: [(ordinal_day, value)]."""
     n = len(points)

@@ -78,3 +78,16 @@ if FRONTEND_DIR.exists():
     @app.get("/")
     def index():
         return FileResponse(FRONTEND_DIR / "index.html")
+
+    # PWA-tiedostot juuresta (jotta service workerin scope on koko sovellus)
+    @app.get("/manifest.json")
+    def manifest():
+        return FileResponse(FRONTEND_DIR / "manifest.json", media_type="application/manifest+json")
+
+    @app.get("/sw.js")
+    def service_worker():
+        return FileResponse(FRONTEND_DIR / "sw.js", media_type="application/javascript")
+
+    @app.get("/icon.svg")
+    def icon():
+        return FileResponse(FRONTEND_DIR / "icon.svg", media_type="image/svg+xml")

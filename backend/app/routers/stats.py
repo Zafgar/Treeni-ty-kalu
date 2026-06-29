@@ -331,7 +331,12 @@ def load_timeline(profile_id: int | None = Query(None), db: Session = Depends(ge
 
     by_date: dict[date, dict] = {}
     for s in sessions:
-        agg = by_date.setdefault(s.session_date, {"total_kg": 0.0, "reps": 0, "sets": 0})
+        agg = by_date.setdefault(s.session_date,
+                                 {"total_kg": 0.0, "reps": 0, "sets": 0, "kcal_burned": 0.0, "duration_min": 0})
+        if s.kcal_burned:
+            agg["kcal_burned"] += s.kcal_burned
+        if s.duration_min:
+            agg["duration_min"] += s.duration_min
         for we in s.exercises:
             top_w = max((st.weight for st in we.sets if st.completed), default=0.0)
             for st in we.sets:
@@ -360,6 +365,8 @@ def load_timeline(profile_id: int | None = Query(None), db: Session = Depends(ge
             "total_kg": round(agg["total_kg"], 1),
             "reps": agg["reps"],
             "sets": agg["sets"],
+            "kcal_burned": round(agg["kcal_burned"]) if agg["kcal_burned"] else None,
+            "duration_min": agg["duration_min"] or None,
             "bodyweight": b.bodyweight if b else None,
             "kcal": round(kcal_by_date.get(d), 0) if d in kcal_by_date else None,
         })
@@ -391,12 +398,14 @@ def levels(profile_id: int | None = Query(None), db: Session = Depends(get_db)):
 # Metriikat joita voi korreloida (nimi -> kuvaus)
 CORRELATION_METRICS = {
     "bodyweight": "Kehon paino",
-    "kcal": "Kalorit",
+    "kcal": "Kalorit (syöty)",
     "sleep_hours": "Uni (h)",
     "sleep_score": "Unipisteet",
     "hrv": "HRV",
     "resting_hr": "Leposyke",
     "tonnage": "Kokonaisrauta (kg)",
+    "workout_kcal": "Treenin kcal",
+    "duration_min": "Treenin kesto (min)",
 }
 
 
@@ -427,18 +436,25 @@ def correlation(
         if metric == "kcal":
             for fl in db.query(models.FoodLog).filter(models.FoodLog.profile_id == profile_id).all():
                 out[fl.entry_date] = out.get(fl.entry_date, 0.0) + fl.food.kcal * fl.grams / 100.0
-        elif metric == "tonnage":
+        elif metric in ("tonnage", "workout_kcal", "duration_min"):
             wq = db.query(models.WorkoutSession).filter(
                 models.WorkoutSession.profile_id == profile_id,
                 models.WorkoutSession.status != "skipped")
             for s in wq.all():
-                tot = 0.0
-                for we in s.exercises:
-                    top_w = max((st.weight for st in we.sets if st.completed), default=0.0)
-                    tot += sum(st.weight * st.reps for st in we.sets if st.completed)
-                    if we.missed_reps:
-                        tot = max(0.0, tot - we.missed_reps * top_w)
-                out[s.session_date] = out.get(s.session_date, 0.0) + tot
+                if metric == "workout_kcal":
+                    if s.kcal_burned:
+                        out[s.session_date] = out.get(s.session_date, 0.0) + s.kcal_burned
+                elif metric == "duration_min":
+                    if s.duration_min:
+                        out[s.session_date] = out.get(s.session_date, 0.0) + s.duration_min
+                else:
+                    tot = 0.0
+                    for we in s.exercises:
+                        top_w = max((st.weight for st in we.sets if st.completed), default=0.0)
+                        tot += sum(st.weight * st.reps for st in we.sets if st.completed)
+                        if we.missed_reps:
+                            tot = max(0.0, tot - we.missed_reps * top_w)
+                    out[s.session_date] = out.get(s.session_date, 0.0) + tot
         else:
             for e in db.query(models.BodyEntry).filter(models.BodyEntry.profile_id == profile_id).all():
                 val = getattr(e, metric, None)

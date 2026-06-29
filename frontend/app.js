@@ -305,7 +305,8 @@ async function loadWorkouts() {
           el("button", { class: "small danger", onclick: async () => {
             if (confirm("Poista treeni?")) { await api.del(`/api/workouts/${w.id}`); loadWorkouts(); }
           } }, "Poista"))),
-      el("div", { class: "muted" }, `${w.exercises.length} liikettä · kokonaiskuorma ${Math.round(total)} kg`)
+      el("div", { class: "muted" }, `${w.exercises.length} liikettä · kokonaiskuorma ${Math.round(total)} kg` +
+        (w.duration_min ? ` · ${w.duration_min} min` : "") + (w.kcal_burned ? ` · ${Math.round(w.kcal_burned)} kcal` : ""))
     );
     list.append(item);
   }
@@ -327,16 +328,21 @@ async function openWorkoutEditor(id) {
   const nameInput = el("input", { value: w.name || "", placeholder: "Treenin nimi" });
   const dateInput = el("input", { type: "date", value: w.session_date });
   const bw = el("input", { type: "number", step: "0.1", value: w.bodyweight ?? "", placeholder: "kg" });
+  const dur = el("input", { type: "number", value: w.duration_min ?? "", placeholder: "min" });
+  const kcal = el("input", { type: "number", value: w.kcal_burned ?? "", placeholder: "kcal" });
   const notes = el("input", { value: w.notes || "", placeholder: "Huomiot" });
 
   async function saveMeta() {
     await api.patch(`/api/workouts/${id}`, {
       name: nameInput.value, session_date: dateInput.value,
-      bodyweight: bw.value ? +bw.value : null, notes: notes.value,
+      bodyweight: bw.value ? +bw.value : null,
+      duration_min: dur.value ? +dur.value : null,
+      kcal_burned: kcal.value ? +kcal.value : null,
+      notes: notes.value,
     });
     loadWorkouts();
   }
-  [nameInput, dateInput, bw, notes].forEach((i) => i.addEventListener("change", saveMeta));
+  [nameInput, dateInput, bw, dur, kcal, notes].forEach((i) => i.addEventListener("change", saveMeta));
 
   const statusLabel = { planned: "Suunniteltu", completed: "Suoritettu", skipped: "Skipattu" }[w.status] || w.status;
   editor.append(el("div", { class: "row-between" },
@@ -354,7 +360,8 @@ async function openWorkoutEditor(id) {
       el("button", { class: "small", onclick: () => { editor.classList.add("hidden"); } }, "Sulje"))));
   editor.append(el("div", { class: "grid" },
     el("label", {}, "Nimi", nameInput), el("label", {}, "Päivä", dateInput),
-    el("label", {}, "Kehon paino", bw), el("label", {}, "Huomiot", notes)));
+    el("label", {}, "Kehon paino", bw), el("label", {}, "Kesto (min)", dur),
+    el("label", {}, "Poltetut kcal", kcal), el("label", {}, "Huomiot", notes)));
 
   for (const we of w.exercises) editor.append(renderWorkoutExercise(id, we));
 
@@ -655,8 +662,10 @@ async function loadLoadTimeline() {
     const latest = data[data.length - 1];
     const totalAll = data.reduce((a, d) => a + d.total_kg, 0);
     sum.append(el("div", { class: "muted" },
-      `Viimeisin treeni: ${Math.round(latest.total_kg)} kg · ${latest.reps} toistoa · ${latest.sets} sarjaa · ` +
-      `kaikkiaan siirretty ${Math.round(totalAll).toLocaleString("fi-FI")} kg`));
+      `Viimeisin treeni: ${Math.round(latest.total_kg)} kg · ${latest.reps} toistoa · ${latest.sets} sarjaa` +
+      (latest.duration_min ? ` · ${latest.duration_min} min` : "") +
+      (latest.kcal_burned ? ` · ${latest.kcal_burned} kcal poltettu` : "") +
+      ` · kaikkiaan siirretty ${Math.round(totalAll).toLocaleString("fi-FI")} kg`));
   }
   drawLineChart(document.getElementById("load-chart"),
     [{ points: data.map((d) => ({ x: new Date(d.date).getTime(), y: d.total_kg })) }], { unit: "kg" });
@@ -918,6 +927,17 @@ async function loadBody() {
       el("div", { class: "muted" },
         `Rasvamassa ~${c.fat_mass_kg} kg` +
         (c.bmi ? ` · BMI ${c.bmi}` : "") + (c.ffmi ? ` · FFMI ${c.ffmi}` : ""))));
+    // Fysiikkataso (aloittelija → IFBB Pro)
+    if (s.physique) {
+      const p = s.physique;
+      const pct = Math.min(100, Math.round(((p.level_index + 1) / p.levels.length) * 100));
+      comp.append(el("div", { style: "margin-top:12px" },
+        el("div", { class: "row-between" },
+          el("strong", {}, "Fysiikkataso"),
+          el("span", { class: "tag main" }, `${p.level} (FFMI ${p.ffmi})`)),
+        el("div", { class: "level-bar" }, el("div", { class: "level-fill", style: `width:${pct}%` })),
+        el("div", { class: "muted" }, p.next_level ? `Seuraava: ${p.next_level} @ FFMI ${p.next_ffmi}` : "Huipputaso!")));
+    }
   } else {
     comp.append(el("p", { class: "muted" }, "Anna paino ja rasva-% nähdäksesi koostumusarvion."));
   }

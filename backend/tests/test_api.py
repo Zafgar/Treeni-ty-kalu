@@ -140,10 +140,25 @@ def test_diet_status(client):
 def test_load_timeline(client):
     ex = client.post("/api/exercises", json={"name": "Kyykky"}).json()
     client.post("/api/workouts", json={
-        "profile_id": 1, "session_date": "2026-06-01",
+        "profile_id": 1, "session_date": "2026-06-01", "duration_min": 65, "kcal_burned": 450,
         "exercises": [{"exercise_id": ex["id"], "sets": [
             {"set_index": 0, "reps": 5, "weight": 100, "completed": True}]}],
     })
     tl = client.get("/api/stats/load-timeline?profile_id=1").json()
     assert tl[0]["total_kg"] == 500.0
     assert tl[0]["reps"] == 5
+    assert tl[0]["duration_min"] == 65
+    assert tl[0]["kcal_burned"] == 450
+
+
+def test_physique_in_body_summary(client):
+    # Aseta pituus profiilille, kirjaa paino + rasva-% -> fysiikkataso
+    # (profiili 1 luodaan fixturessa ilman pituutta -> päivitetään)
+    from backend.app import models
+    s = client.get("/api/profiles").json()
+    pid = s[0]["id"]
+    client.patch(f"/api/profiles/{pid}", json={"height_cm": 180})
+    client.post(f"/api/body/entries?profile_id={pid}", json={"bodyweight": 85, "body_fat_pct": 12})
+    summary = client.get(f"/api/body/summary?profile_id={pid}").json()
+    assert summary["composition"]["ffmi"] is not None
+    assert summary["physique"]["level"] is not None
