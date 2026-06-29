@@ -237,6 +237,7 @@ class BodyEntryBase(BaseModel):
     bodyweight: float | None = None
     body_fat_pct: float | None = None
     sleep_hours: float | None = None
+    sleep_score: float | None = None
     hrv: float | None = None
     resting_hr: float | None = None
     kcal: float | None = None

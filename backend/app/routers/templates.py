@@ -47,6 +47,34 @@ TEMPLATES = {
             "uupumukseen joka kerta)."
         ),
     },
+    "huippuunajo": {
+        "name": "Huippuunajo (peaking)",
+        "goal": "maksimivoima",
+        "schedule_type": "cycle",
+        "rep_scheme": "3,2,1,1",
+        "percent_scheme": "85,90,95,100",
+        "rest_seconds": 300,
+        "guidance": (
+            "Lyhyt huippuunajo ennen testiä tai kisaa. Sarjat nousevat aina "
+            "ykkösnostoon (jopa 100 % nykyisestä arvioidusta 1RM:stä). MIKSI: terävöittää "
+            "hermoston maksimisuoritukseen. Käytä vain 1-3 viikkoa, lepää hyvin ja "
+            "vähennä apuliikkeiden määrää tällä jaksolla."
+        ),
+    },
+    "volyymivoima_6x6": {
+        "name": "Volyymivoima 6×6",
+        "goal": "voima",
+        "schedule_type": "cycle",
+        "rep_scheme": "6,6,6,6,6,6",
+        "percent_scheme": "72,72,72,72,72,72",
+        "rest_seconds": 150,
+        "guidance": (
+            "Kuusi tasaista sarjaa kohtuukuormalla (~72 % 1RM). MIKSI: kerää paljon "
+            "laadukasta volyymiä voiman ja lihasmassan pohjaksi ilman jatkuvaa "
+            "uupumista. Hyvä perusjakso ennen raskaampia voimajaksoja. Lisää painoa "
+            "kun kaikki 6×6 menee 1-2 varastolla."
+        ),
+    },
     "pyramidi_hypertrofia": {
         "name": "Pyramidi (lihasmassa)",
         "goal": "hypertrofia",

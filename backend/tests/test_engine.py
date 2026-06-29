@@ -115,6 +115,46 @@ def test_waist_assessment_bulk():
     assert high["level"] == "korkea"
 
 
+def test_classify_lift():
+    assert engine.classify_lift("Takakyykky") == "squat"
+    assert engine.classify_lift("Penkkipunnerrus") == "bench"
+    assert engine.classify_lift("Maastaveto") == "deadlift"
+    assert engine.classify_lift("Pystypunnerrus") == "ohp"
+    assert engine.classify_lift("Hauiskääntö") is None
+
+
+def test_strength_level():
+    # 200 kg kyykky 100 kg painolla = 2.0x -> korkea taso
+    lvl = engine.strength_level("squat", 200, 100, "mies")
+    assert lvl["ratio"] == 2.0
+    assert lvl["level_index"] == 4  # 1.75x <= 2.0x < 2.1x -> "Kokenut"
+    assert lvl["level"] == "Kokenut"
+    # heikko nostaja
+    low = engine.strength_level("squat", 60, 100, "mies")
+    assert low["level_index"] <= 0
+    # naisten kertoimet skaalaavat kynnyksiä alas
+    f = engine.strength_level("squat", 140, 100, "nainen")
+    assert f["level_index"] > engine.strength_level("squat", 140, 100, "mies")["level_index"]
+
+
+def test_forecast_progress():
+    from datetime import date, timedelta
+    base = date(2026, 1, 1)
+    # nouseva 1RM 100 -> 120 kahdessa kuukaudessa
+    hist = [(base + timedelta(days=7 * i), 100 + i * 2.5) for i in range(8)]
+    fc = engine.forecast_progress(hist, horizon_weeks=12, ceiling=160)
+    assert len(fc) == 12
+    assert fc[0]["mid"] > 100  # ennuste nousee
+    assert fc[-1]["mid"] <= 160  # ei ylitä kattoa
+    assert fc[0]["low"] < fc[0]["mid"] < fc[0]["high"]
+
+
+def test_pearson():
+    assert engine.pearson([1, 2, 3, 4], [2, 4, 6, 8]) == 1.0
+    assert engine.pearson([1, 2, 3, 4], [8, 6, 4, 2]) == -1.0
+    assert engine.pearson([1, 2], [1, 2]) is None  # liian vähän pisteitä
+
+
 def test_estimate_total():
     lifts = {
         "kyykky": {"weight": 200, "reps": 5, "rir": 1},

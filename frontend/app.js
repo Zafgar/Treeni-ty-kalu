@@ -491,7 +491,10 @@ function drawLineChart(canvas, series, opts = {}) {
     ctx.fillText("Ei dataa vielä — kirjaa treenejä nähdäksesi kehityksen.", pad.l, H / 2);
     return;
   }
-  const xs = allPts.map((p) => p.x), ys = allPts.map((p) => p.y);
+  // Sisällytä ennustehaarukan (band) pisteet akseleihin
+  const bandPts = series.flatMap((s) => s.band || []);
+  const xs = allPts.map((p) => p.x).concat(bandPts.map((p) => p.x));
+  const ys = allPts.map((p) => p.y).concat(bandPts.flatMap((p) => [p.low, p.high]));
   let minX = Math.min(...xs), maxX = Math.max(...xs);
   let minY = Math.min(...ys), maxY = Math.max(...ys);
   if (minX === maxX) maxX = minX + 1;
@@ -518,14 +521,28 @@ function drawLineChart(canvas, series, opts = {}) {
   ctx.fillText(fmt(minX), pad.l, H - 12);
   ctx.textAlign = "right"; ctx.fillText(fmt(maxX), W - pad.r, H - 12); ctx.textAlign = "left";
 
+  // Piirrä ennustehaarukat (band) ensin taustalle
+  series.forEach((s, idx) => {
+    if (!s.band || !s.band.length) return;
+    const color = s.color || CHART_COLORS[idx % CHART_COLORS.length];
+    const b = [...s.band].sort((a, p) => a.x - p.x);
+    ctx.fillStyle = color + "22";
+    ctx.beginPath();
+    b.forEach((p, i) => { const X = xPix(p.x), Y = yPix(p.high); i ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y); });
+    for (let i = b.length - 1; i >= 0; i--) ctx.lineTo(xPix(b[i].x), yPix(b[i].low));
+    ctx.closePath(); ctx.fill();
+  });
+
   series.forEach((s, idx) => {
     const color = s.color || CHART_COLORS[idx % CHART_COLORS.length];
     const pts = [...s.points].sort((a, b) => a.x - b.x);
     ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = 2;
+    ctx.setLineDash(s.dashed ? [6, 5] : []);
     ctx.beginPath();
     pts.forEach((p, i) => { const X = xPix(p.x), Y = yPix(p.y); i ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y); });
     ctx.stroke();
-    pts.forEach((p) => { ctx.beginPath(); ctx.arc(xPix(p.x), yPix(p.y), 3, 0, Math.PI * 2); ctx.fill(); });
+    ctx.setLineDash([]);
+    if (!s.dashed) pts.forEach((p) => { ctx.beginPath(); ctx.arc(xPix(p.x), yPix(p.y), 3, 0, Math.PI * 2); ctx.fill(); });
   });
 }
 
@@ -574,10 +591,61 @@ let selectedProgress = new Set();
 
 async function loadProgress() {
   renderProgressChips();
+  renderBackfill();
+  await loadLevels();
   await loadSports();
   await loadLoadTimeline();
   await loadRecordsTable();
 }
+
+async function loadLevels() {
+  const data = await api.get(pq("/api/stats/levels"));
+  const div = document.getElementById("levels-content");
+  div.innerHTML = "";
+  if (!data.bodyweight) {
+    div.append(el("p", { class: "muted" }, "Lisää kehon paino (Keho-välilehti) ja kirjaa pääliikkeitä nähdäksesi voimatason."));
+    return;
+  }
+  if (!data.lifts.length) {
+    div.append(el("p", { class: "muted" }, "Kirjaa pääliikkeitä (kyykky, penkki, maastaveto, pystypunnerrus) nähdäksesi tason."));
+    return;
+  }
+  data.lifts.forEach((l) => {
+    const pct = Math.min(100, Math.round(((l.level_index + 1) / data.all_levels.length) * 100));
+    const box = el("div", { class: "item" },
+      el("div", { class: "row-between" },
+        el("strong", {}, l.exercise_name),
+        el("span", { class: "tag main" }, `${l.level} (${l.ratio}× paino)`)),
+      el("div", { class: "level-bar" }, el("div", { class: "level-fill", style: `width:${pct}%` })),
+      el("div", { class: "muted" },
+        `${l.current_1rm} kg` + (l.next_level ? ` · seuraava: ${l.next_level} @ ${l.next_threshold_kg} kg` : " · huipputaso!")));
+    div.append(box);
+  });
+}
+
+let backfillExId = null;
+function renderBackfill() {
+  const span = document.getElementById("backfill-ex");
+  span.innerHTML = "";
+  const sel = exerciseSelect((e) => (backfillExId = +e.target.value));
+  backfillExId = exercisesCache.length ? exercisesCache[0].id : null;
+  if (exercisesCache.length) sel.value = backfillExId;
+  span.append(sel);
+}
+
+document.getElementById("bf-save").addEventListener("click", async () => {
+  const v = (id) => document.getElementById(id).value;
+  if (!backfillExId || !v("bf-date") || !v("bf-weight") || !v("bf-reps")) return alert("Täytä liike, päivä, paino ja toistot.");
+  // Vanha tulos = oma treenikerta menneellä päivällä (yksi sarja)
+  await api.post("/api/workouts", {
+    profile_id: currentProfileId, session_date: v("bf-date"), name: "Vanha tulos", status: "completed",
+    exercises: [{ exercise_id: backfillExId, done: true,
+      sets: [{ set_index: 0, reps: +v("bf-reps"), weight: +v("bf-weight"), completed: true }] }],
+  });
+  ["bf-weight", "bf-reps"].forEach((id) => (document.getElementById(id).value = ""));
+  await loadLevels(); await drawProgressChart(); await loadLoadTimeline(); await loadRecordsTable();
+  alert("Tulos tallennettu.");
+});
 
 async function loadLoadTimeline() {
   const data = await api.get(pq("/api/stats/load-timeline"));
@@ -615,6 +683,7 @@ async function drawProgressChart() {
   const legend = document.getElementById("progress-legend");
   legend.innerHTML = "";
   let idx = 0;
+  const single = selectedProgress.size === 1;
   for (const id of selectedProgress) {
     const h = await api.get(pq(`/api/stats/exercises/${id}/history`));
     const color = CHART_COLORS[idx % CHART_COLORS.length];
@@ -623,6 +692,15 @@ async function drawProgressChart() {
       color,
     });
     legend.append(el("span", { class: "tag", style: `color:${color};border-color:${color}` }, h.exercise_name));
+    // Ennuste (katkoviiva + haarukka) vain kun yksi liike valittuna -> selkeä
+    if (single && h.forecast && h.forecast.length) {
+      const lastPt = h.points[h.points.length - 1];
+      const anchor = { x: new Date(lastPt.date).getTime(), y: lastPt.estimated_1rm };
+      const fc = h.forecast.map((p) => ({ x: new Date(p.date).getTime(), y: p.mid }));
+      const band = h.forecast.map((p) => ({ x: new Date(p.date).getTime(), low: p.low, high: p.high }));
+      series.push({ points: [anchor, ...fc], band, color, dashed: true });
+      legend.append(el("span", { class: "muted" }, " — katkoviiva = ennuste, alue = haarukka"));
+    }
     idx++;
   }
   drawLineChart(document.getElementById("progress-chart"), series, { unit: "kg" });
@@ -869,12 +947,13 @@ document.getElementById("b-save").addEventListener("click", async () => {
     bodyweight: v("b-weight") ? +v("b-weight") : null,
     body_fat_pct: v("b-bf") ? +v("b-bf") : null,
     sleep_hours: v("b-sleep") ? +v("b-sleep") : null,
+    sleep_score: v("b-sscore") ? +v("b-sscore") : null,
     hrv: v("b-hrv") ? +v("b-hrv") : null,
     resting_hr: v("b-rhr") ? +v("b-rhr") : null,
     kcal: v("b-kcal") ? +v("b-kcal") : null,
   };
   await api.post(pq("/api/body/entries"), body);
-  ["b-weight", "b-bf", "b-sleep", "b-hrv", "b-rhr", "b-kcal"].forEach((id) => (document.getElementById(id).value = ""));
+  ["b-weight", "b-bf", "b-sleep", "b-sscore", "b-hrv", "b-rhr", "b-kcal"].forEach((id) => (document.getElementById(id).value = ""));
   loadBody();
 });
 
@@ -1027,9 +1106,77 @@ async function renderDietStatus() {
   }
 }
 
+// =================== PALAUTUMINEN & KORRELAATIO ===================
+function normalize01to100(points) {
+  const ys = points.map((p) => p.y);
+  const lo = Math.min(...ys), hi = Math.max(...ys);
+  return points.map((p) => ({ x: p.x, y: hi === lo ? 50 : ((p.y - lo) / (hi - lo)) * 100 }));
+}
+
+async function loadRecovery() {
+  const entries = await api.get(pq("/api/body/entries"));
+  const fields = [
+    ["sleep_score", "Unipisteet"], ["sleep_hours", "Uni (h)"],
+    ["hrv", "HRV"], ["resting_hr", "Leposyke"],
+  ];
+  const series = [];
+  const legend = document.getElementById("recovery-legend");
+  legend.innerHTML = "";
+  let idx = 0;
+  for (const [key, label] of fields) {
+    const pts = entries.filter((e) => e[key] != null)
+      .map((e) => ({ x: new Date(e.entry_date).getTime(), y: e[key] }));
+    if (pts.length < 2) continue;
+    const color = CHART_COLORS[idx % CHART_COLORS.length];
+    series.push({ points: normalize01to100(pts), color });
+    const latest = pts.sort((a, b) => a.x - b.x)[pts.length - 1].y;
+    legend.append(el("span", { class: "tag", style: `color:${color};border-color:${color}` }, `${label} (nyt ${latest})`));
+    idx++;
+  }
+  if (!series.length) legend.append(el("span", { class: "muted" }, "Lisää uni-/HRV-/syke-dataa Keho-välilehdellä."));
+  else legend.append(el("span", { class: "muted" }, " · arvot normalisoitu 0–100 vertailtavuuden vuoksi"));
+  drawLineChart(document.getElementById("recovery-chart"), series, {});
+
+  // Korrelaatiotyökalu
+  const metrics = await api.get("/api/stats/correlation/metrics");
+  const selA = document.getElementById("corr-a"), selB = document.getElementById("corr-b");
+  if (!selA.options.length) {
+    Object.entries(metrics).forEach(([k, label]) => {
+      selA.append(el("option", { value: k }, label));
+      selB.append(el("option", { value: k }, label));
+    });
+    selA.value = "sleep_score"; selB.value = "tonnage";
+    selA.onchange = drawCorrelation; selB.onchange = drawCorrelation;
+  }
+  await drawCorrelation();
+}
+
+async function drawCorrelation() {
+  const a = document.getElementById("corr-a").value, b = document.getElementById("corr-b").value;
+  const r = await api.get(pq(`/api/stats/correlation?a=${a}&b=${b}`));
+  const div = document.getElementById("corr-result");
+  div.innerHTML = "";
+  if (r.pearson == null) {
+    div.append(el("p", { class: "muted" }, `Liian vähän yhteistä viikkodataa (${r.n} viikkoa). Kirjaa molempia muuttujia.`));
+    drawLineChart(document.getElementById("corr-chart"), []);
+    return;
+  }
+  const strength = Math.abs(r.pearson) >= 0.7 ? "vahva" : Math.abs(r.pearson) >= 0.4 ? "kohtalainen" : "heikko";
+  const dir = r.pearson > 0 ? "samaan suuntaan" : "vastakkaisiin suuntiin";
+  div.append(el("div", { class: "result-box" },
+    el("div", { class: "big" }, `r = ${r.pearson}`),
+    el("div", { class: "muted" }, `${r.a_label} ja ${r.b_label}: ${strength} yhteys, muuttuvat ${dir} (${r.n} viikkoa). ` +
+      "Korrelaatio ei tarkoita syy-seuraussuhdetta.")));
+  drawLineChart(document.getElementById("corr-chart"), [
+    { points: normalize01to100(r.series.map((s) => ({ x: new Date(s.date).getTime(), y: s.a }))), color: CHART_COLORS[0] },
+    { points: normalize01to100(r.series.map((s) => ({ x: new Date(s.date).getTime(), y: s.b }))), color: CHART_COLORS[1] },
+  ], {});
+}
+
 // ---------- Välilehtien laiskat lataukset ----------
 TAB_LOADERS.overview = loadOverview;
 TAB_LOADERS.progress = loadProgress;
+TAB_LOADERS.recovery = loadRecovery;
 TAB_LOADERS.body = loadBody;
 TAB_LOADERS.nutrition = loadNutrition;
 TAB_LOADERS.diet = loadDiet;

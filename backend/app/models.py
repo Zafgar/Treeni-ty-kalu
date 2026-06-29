@@ -229,6 +229,8 @@ class BodyEntry(Base):
     bodyweight: Mapped[float | None] = mapped_column(Float, nullable=True)
     body_fat_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
     sleep_hours: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Unipisteet 0-100 (esim. sormus/kello), vapaaehtoinen
+    sleep_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     hrv: Mapped[float | None] = mapped_column(Float, nullable=True)
     resting_hr: Mapped[float | None] = mapped_column(Float, nullable=True)
     kcal: Mapped[float | None] = mapped_column(Float, nullable=True)

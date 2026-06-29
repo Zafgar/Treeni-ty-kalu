@@ -47,6 +47,7 @@ def ensure_columns():
         ("exercises", "equipment", "VARCHAR(40)"),
         ("exercises", "default_sets", "INTEGER DEFAULT 3"),
         ("exercises", "default_reps", "INTEGER DEFAULT 10"),
+        ("body_entries", "sleep_score", "FLOAT"),
     ]
     inspector = inspect(engine)
     existing_tables = set(inspector.get_table_names())

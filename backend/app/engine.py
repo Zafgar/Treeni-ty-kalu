@@ -144,6 +144,141 @@ def age_from_birthdate(birthdate, today) -> int | None:
 # Energiatiheys: rasvakudoksen muutos ~7700 kcal / kg
 KCAL_PER_KG = 7700.0
 
+# Voimatasot (8 porrasta). Kynnykset ovat 1RM / kehon paino -kertoimia
+# miehille; naisille kerrotaan FEMALE_FACTORilla. Liikekohtaiset standardit.
+STRENGTH_LEVELS = [
+    "Aloittelija", "Harrastaja", "Keskitaso", "Edistynyt",
+    "Kokenut", "Alueellinen (piiri)", "Kansallinen (SM)", "Maailmanluokka (EM/MM)",
+]
+FEMALE_FACTOR = 0.72
+
+# (matala -> korkea) kahdeksan kynnyksen kertoimet per liiketyyppi
+STRENGTH_STANDARDS = {
+    "squat":    [0.75, 1.0, 1.25, 1.5, 1.75, 2.1, 2.5, 3.0],
+    "bench":    [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.3],
+    "deadlift": [1.0, 1.25, 1.5, 1.75, 2.1, 2.5, 3.0, 3.5],
+    "ohp":      [0.35, 0.5, 0.65, 0.8, 0.95, 1.1, 1.3, 1.5],
+}
+
+
+def classify_lift(name: str) -> str | None:
+    """Tunnista liike voimastandardiksi nimen perusteella."""
+    n = (name or "").lower()
+    if "kyykky" in n:
+        return "squat"
+    if "penkki" in n and "kapea" not in n:
+        return "bench"
+    if "maasta" in n or "mave" in n:
+        return "deadlift"
+    if "pystypunnerrus" in n or " pp" in n:
+        return "ohp"
+    return None
+
+
+def strength_level(lift_key: str, one_rm: float, bodyweight: float, sex: str | None = None) -> dict | None:
+    """Luokittele 1RM voimatasolle kehon painoon suhteutettuna.
+
+    Palauttaa tason, suhdeluvun ja seuraavan tason kynnyksen (kg).
+    """
+    if lift_key not in STRENGTH_STANDARDS or not bodyweight or bodyweight <= 0 or one_rm <= 0:
+        return None
+    factor = FEMALE_FACTOR if (sex or "").lower().startswith("nain") else 1.0
+    thresholds = [t * factor for t in STRENGTH_STANDARDS[lift_key]]
+    ratio = one_rm / bodyweight
+    level_idx = 0
+    for i, t in enumerate(thresholds):
+        if ratio >= t:
+            level_idx = i
+    # Onko ylittänyt ensimmäisenkin kynnyksen?
+    reached_first = ratio >= thresholds[0]
+    next_threshold_kg = None
+    if level_idx < len(thresholds) - 1:
+        next_threshold_kg = round(thresholds[level_idx + 1] * bodyweight, 1)
+    return {
+        "lift": lift_key,
+        "level_index": level_idx if reached_first else -1,
+        "level": STRENGTH_LEVELS[level_idx] if reached_first else "Alle aloittelija",
+        "ratio": round(ratio, 2),
+        "next_level": STRENGTH_LEVELS[level_idx + 1] if level_idx < len(STRENGTH_LEVELS) - 1 else None,
+        "next_threshold_kg": next_threshold_kg,
+        "ceiling_kg": round(thresholds[-1] * bodyweight, 1),
+    }
+
+
+def _linear_rate(points: list[tuple]) -> float:
+    """Lineaarisen sovituksen kulmakerroin (y-yksikköä / päivä). points: [(ordinal_day, value)]."""
+    n = len(points)
+    if n < 2:
+        return 0.0
+    xs = [p[0] for p in points]
+    ys = [p[1] for p in points]
+    mx = sum(xs) / n
+    my = sum(ys) / n
+    denom = sum((x - mx) ** 2 for x in xs)
+    if denom == 0:
+        return 0.0
+    return sum((xs[i] - mx) * (ys[i] - my) for i in range(n)) / denom
+
+
+def forecast_progress(
+    history: list[tuple], horizon_weeks: int = 26, ceiling: float | None = None
+) -> list[dict]:
+    """Ennusta kehitys realistisesti vähenevällä tuotolla.
+
+    history: [(date, value)] (esim. arvioitu 1RM). Lähihistoriasta lasketaan
+    viikkotahti, jota vaimennetaan kun arvo lähestyy kattoa (fysiologinen raja).
+    Palauttaa viikoittaiset pisteet keski-, ala- ja yläennusteineen.
+    """
+    valid = [(d, v) for d, v in history if v and v > 0]
+    if len(valid) < 2:
+        return []
+    valid.sort(key=lambda p: p[0])
+    base_date = valid[0][0]
+    pts = [((d - base_date).days, v) for d, v in valid]
+    # Käytä korkeintaan viimeistä ~84 päivää tahdin arviointiin
+    last_day = pts[-1][0]
+    recent = [p for p in pts if p[0] >= last_day - 84] or pts
+    rate_per_day = max(0.0, _linear_rate(recent))  # ei ennusteta laskua
+    rate_per_week = rate_per_day * 7
+
+    current = valid[-1][1]
+    if ceiling is None or ceiling <= current:
+        ceiling = current * 1.5  # ilman standardia oletetaan 50 % varaa
+
+    from datetime import timedelta
+
+    out = []
+    value = current
+    for w in range(1, horizon_weeks + 1):
+        # Vähenevä tuotto: tahti hidastuu kattoa lähestyttäessä
+        damp = max(0.1, 1 - (value / ceiling))
+        value = min(ceiling, value + rate_per_week * damp)
+        gain = value - current
+        # Epävarmuus kasvaa ajan myötä
+        spread = max(0.5, 0.35 * gain) + 0.015 * current * (w ** 0.5)
+        out.append({
+            "date": (valid[-1][0] + timedelta(weeks=w)).isoformat(),
+            "mid": round(value, 1),
+            "low": round(value - spread, 1),
+            "high": round(value + spread, 1),
+        })
+    return out
+
+
+def pearson(xs: list[float], ys: list[float]) -> float | None:
+    """Pearsonin korrelaatiokerroin kahden sarjan välillä."""
+    n = len(xs)
+    if n < 3:
+        return None
+    mx = sum(xs) / n
+    my = sum(ys) / n
+    sx = sum((x - mx) ** 2 for x in xs) ** 0.5
+    sy = sum((y - my) ** 2 for y in ys) ** 0.5
+    if sx == 0 or sy == 0:
+        return None
+    cov = sum((xs[i] - mx) * (ys[i] - my) for i in range(n))
+    return round(cov / (sx * sy), 2)
+
 
 def weekly_average(points: list[tuple], end_date, days: int = 7) -> float | None:
     """Keskimääräinen paino [end_date-days, end_date] -ikkunassa.

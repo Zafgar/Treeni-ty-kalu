@@ -90,17 +90,46 @@ def _records_for_exercise(points: list[dict], window_days: int) -> dict | None:
     }
 
 
+def _latest_bodyweight(db: Session, profile_id: int | None) -> float | None:
+    if profile_id is None:
+        return None
+    b = (
+        db.query(models.BodyEntry)
+        .filter(models.BodyEntry.profile_id == profile_id, models.BodyEntry.bodyweight.isnot(None))
+        .order_by(models.BodyEntry.entry_date.desc())
+        .first()
+    )
+    return b.bodyweight if b else None
+
+
 @router.get("/exercises/{exercise_id}/history")
 def exercise_history(
     exercise_id: int,
     profile_id: int | None = Query(None),
     window_days: int = Query(DEFAULT_WINDOW_DAYS),
+    forecast: bool = Query(True),
+    horizon_weeks: int = Query(26),
     db: Session = Depends(get_db),
 ):
-    """Yhden liikkeen kehityskäyrä + ennätykset."""
+    """Yhden liikkeen kehityskäyrä + ennätykset + realistinen ennuste."""
     ex = db.get(models.Exercise, exercise_id)
     points = _exercise_session_points(db, exercise_id, profile_id)
     records = _records_for_exercise(points, window_days)
+
+    forecast_points = []
+    if forecast and len([p for p in points if p["estimated_1rm"] > 0]) >= 2:
+        # Katto fysiologisesta voimastandardista jos liike ja paino tunnetaan
+        ceiling = None
+        bw = _latest_bodyweight(db, profile_id)
+        lift_key = engine.classify_lift(ex.name) if ex else None
+        if lift_key and bw:
+            profile = db.get(models.Profile, profile_id) if profile_id else None
+            lvl = engine.strength_level(lift_key, records["current_1rm"], bw,
+                                        profile.sex if profile else None)
+            ceiling = lvl["ceiling_kg"] if lvl else None
+        history = [(p["date"], p["estimated_1rm"]) for p in points if p["estimated_1rm"] > 0]
+        forecast_points = engine.forecast_progress(history, horizon_weeks, ceiling)
+
     return {
         "exercise_id": exercise_id,
         "exercise_name": ex.name if ex else None,
@@ -114,6 +143,7 @@ def exercise_history(
             for p in points
         ],
         "records": _serialize_records(records),
+        "forecast": forecast_points,
     }
 
 
@@ -334,6 +364,106 @@ def load_timeline(profile_id: int | None = Query(None), db: Session = Depends(ge
             "kcal": round(kcal_by_date.get(d), 0) if d in kcal_by_date else None,
         })
     return timeline
+
+
+@router.get("/levels")
+def levels(profile_id: int | None = Query(None), db: Session = Depends(get_db)):
+    """Voimatasot pääliikkeille (8 porrasta) kehon painoon suhteutettuna."""
+    bw = _latest_bodyweight(db, profile_id)
+    profile = db.get(models.Profile, profile_id) if profile_id else None
+    sex = profile.sex if profile else None
+    result = []
+    for ex in db.query(models.Exercise).filter(models.Exercise.is_main_lift.is_(True)).all():
+        lift_key = engine.classify_lift(ex.name)
+        if not lift_key:
+            continue
+        points = _exercise_session_points(db, ex.id, profile_id)
+        rec = _records_for_exercise(points, DEFAULT_WINDOW_DAYS)
+        if not rec or not bw:
+            continue
+        lvl = engine.strength_level(lift_key, rec["current_1rm"], bw, sex)
+        if lvl:
+            result.append({"exercise_name": ex.name, "current_1rm": rec["current_1rm"],
+                           "bodyweight": bw, **lvl})
+    return {"bodyweight": bw, "all_levels": engine.STRENGTH_LEVELS, "lifts": result}
+
+
+# Metriikat joita voi korreloida (nimi -> kuvaus)
+CORRELATION_METRICS = {
+    "bodyweight": "Kehon paino",
+    "kcal": "Kalorit",
+    "sleep_hours": "Uni (h)",
+    "sleep_score": "Unipisteet",
+    "hrv": "HRV",
+    "resting_hr": "Leposyke",
+    "tonnage": "Kokonaisrauta (kg)",
+}
+
+
+def _weekly_series(by_date: dict, dates: list) -> dict:
+    """Muodosta viikoittainen keskiarvosarja päiväkohtaisesta datasta."""
+    from collections import defaultdict
+    weeks = defaultdict(list)
+    for d in dates:
+        if d in by_date and by_date[d] is not None:
+            iso = d.isocalendar()
+            weeks[(iso[0], iso[1])].append(by_date[d])
+    return {wk: sum(v) / len(v) for wk, v in weeks.items()}
+
+
+@router.get("/correlation/metrics")
+def correlation_metrics():
+    return CORRELATION_METRICS
+
+
+@router.get("/correlation")
+def correlation(
+    a: str = Query(...), b: str = Query(...),
+    profile_id: int = Query(...), db: Session = Depends(get_db),
+):
+    """Kahden muuttujan viikkotason korrelaatio + normalisoidut sarjat overlaylle."""
+    def metric_by_date(metric: str) -> dict:
+        out: dict = {}
+        if metric == "kcal":
+            for fl in db.query(models.FoodLog).filter(models.FoodLog.profile_id == profile_id).all():
+                out[fl.entry_date] = out.get(fl.entry_date, 0.0) + fl.food.kcal * fl.grams / 100.0
+        elif metric == "tonnage":
+            wq = db.query(models.WorkoutSession).filter(
+                models.WorkoutSession.profile_id == profile_id,
+                models.WorkoutSession.status != "skipped")
+            for s in wq.all():
+                tot = 0.0
+                for we in s.exercises:
+                    top_w = max((st.weight for st in we.sets if st.completed), default=0.0)
+                    tot += sum(st.weight * st.reps for st in we.sets if st.completed)
+                    if we.missed_reps:
+                        tot = max(0.0, tot - we.missed_reps * top_w)
+                out[s.session_date] = out.get(s.session_date, 0.0) + tot
+        else:
+            for e in db.query(models.BodyEntry).filter(models.BodyEntry.profile_id == profile_id).all():
+                val = getattr(e, metric, None)
+                if val is not None:
+                    out[e.entry_date] = val
+        return out
+
+    a_data, b_data = metric_by_date(a), metric_by_date(b)
+    all_dates = sorted(set(a_data) | set(b_data))
+    a_weekly = _weekly_series(a_data, all_dates)
+    b_weekly = _weekly_series(b_data, all_dates)
+    common = sorted(set(a_weekly) & set(b_weekly))
+    xs = [a_weekly[w] for w in common]
+    ys = [b_weekly[w] for w in common]
+    r = engine.pearson(xs, ys)
+
+    from datetime import date as _date
+    series = [{"week": f"{w[0]}-{w[1]:02d}",
+               "date": _date.fromisocalendar(w[0], w[1], 1).isoformat(),
+               "a": round(a_weekly[w], 1), "b": round(b_weekly[w], 1)} for w in common]
+    return {
+        "a": a, "b": b, "a_label": CORRELATION_METRICS.get(a, a),
+        "b_label": CORRELATION_METRICS.get(b, b),
+        "pearson": r, "n": len(common), "series": series,
+    }
 
 
 @router.get("/sports")
