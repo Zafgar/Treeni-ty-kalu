@@ -66,6 +66,7 @@ TEMPLATES = {
 class TemplateBuild(BaseModel):
     template_id: str
     exercise_ids: list[int]
+    profile_id: int | None = None
     name: str | None = None
     accessory_ids: list[int] = []  # lisäliikkeet (oletustavoittein)
 
@@ -90,6 +91,7 @@ def build_program(payload: TemplateBuild, db: Session = Depends(get_db)):
 
     program = models.Program(
         name=payload.name or tpl["name"],
+        profile_id=payload.profile_id,
         schedule_type=tpl["schedule_type"],
         goal=tpl["goal"],
         description=tpl["guidance"],

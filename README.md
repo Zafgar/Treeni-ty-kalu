@@ -61,6 +61,13 @@ python -m pytest backend/tests/ -q
   liikkeitä samassa kuvaajassa), ennätystaulukko ja yleisnäkymä haulla
 - **Lajitotalit:** esim. voimanoston total ala-/yläraja-arvioineen ja
   kehityskäyrä ajan yli
+- **Profiilit:** seuraa omaa kehitystä, valmennettavia tai läheisiä; vaihda
+  aktiivista profiilia yläpalkista. Jokaisella profiililla on oma data
+  (ohjelmat, treenit, kehodata); liikkeet ovat yhteisiä.
+- **Kehon seuranta:** paino, rasva-% ja koostumusarvio (rasva-/lihasmassa,
+  BMI, FFMI), hyvinvointidata (uni, HRV, leposyke, kalorit) ja joustavat
+  ympärysmitat (hauis, pohje, rintakehä, hartia, reisi, vyötärö, kyynärvarsi…)
+  aikasarjagraafeineen
 
 ### Tämänhetkisen 1RM:n sääntö (kahden ohjelman "kiista")
 
@@ -73,20 +80,18 @@ vanha ohjelma "kiistele" uuden kanssa. Kaikkien aikojen ennätys säilyy eriksee
 ## Tietomalli
 
 ```
-Exercise ──< ProgramExercise >── ProgramDay >── Program
-                                      │
-WorkoutSession ──< WorkoutExercise ──< SetLog
+Profile ──< Program ──< ProgramDay ──< ProgramExercise >── Exercise
+   │
+   ├──< WorkoutSession ──< WorkoutExercise ──< SetLog
+   ├──< BodyEntry        (paino, rasva-%, uni, HRV, syke, kcal)
+   └──< Measurement      (ympärysmitat per kohta)
 ```
 
 ## Suunniteltu jatko (visio)
 
 Rakenne on suunniteltu laajennettavaksi seuraaviin ilman ydinmallien rikkomista:
 
-- Kehon mitat (haukkari, pohje, rintakehä, hartia, reisi, vyötärö, kyynärvarsi…),
-  paino ja rasva-% → arvio kehon koostumuksesta
-- Uni, HRV, syke, kalorit ym. päivittäiset muuttujat (vapaaehtoisia)
 - Kehitysennuste todelliseen kehoreagointiin perustuen
 - Palautumis-välilehti (nopea painojen kasvu sarjoissa, total-kg)
-- Olympianostojen totalit ja monivuotinen kehityskäyrä
-- Muuttujien väliset korrelaatiot (esim. uni/kalorit vs. suoritus)
+- Muuttujien väliset korrelaatiot (esim. uni/kalorit vs. suoritus ja kehitys)
 - PWA puhelimelle

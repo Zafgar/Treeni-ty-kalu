@@ -3,7 +3,7 @@
 Kaikkea voi muokata lennossa: päiviä ja liikkeitä lisätään/poistetaan
 omilla päätepisteillään ilman että koko ohjelmaa tarvitsee luoda uudelleen.
 """
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from .. import models, schemas
@@ -13,14 +13,18 @@ router = APIRouter(prefix="/api/programs", tags=["programs"])
 
 
 @router.get("", response_model=list[schemas.ProgramOut])
-def list_programs(db: Session = Depends(get_db)):
-    return db.query(models.Program).order_by(models.Program.created_at.desc()).all()
+def list_programs(profile_id: int | None = Query(None), db: Session = Depends(get_db)):
+    q = db.query(models.Program)
+    if profile_id is not None:
+        q = q.filter(models.Program.profile_id == profile_id)
+    return q.order_by(models.Program.created_at.desc()).all()
 
 
 @router.post("", response_model=schemas.ProgramOut, status_code=201)
 def create_program(payload: schemas.ProgramCreate, db: Session = Depends(get_db)):
     program = models.Program(
         name=payload.name,
+        profile_id=payload.profile_id,
         schedule_type=payload.schedule_type,
         description=payload.description,
         goal=payload.goal,

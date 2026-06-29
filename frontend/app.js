@@ -20,6 +20,14 @@ const api = {
 };
 
 let exercisesCache = [];
+let currentProfileId = null;
+let profilesCache = [];
+
+// Lisää profile_id-parametri polkuun (skooppaa datan aktiiviseen profiiliin).
+function pq(path) {
+  if (currentProfileId == null) return path;
+  return path + (path.includes("?") ? "&" : "?") + "profile_id=" + currentProfileId;
+}
 
 // ---------- Välilehdet ----------
 const TAB_LOADERS = {}; // täytetään myöhemmin: { tabName: async () => {...} }
@@ -113,7 +121,7 @@ document.getElementById("new-exercise-btn").addEventListener("click", () => {
 
 // =================== OHJELMAT ===================
 async function loadPrograms() {
-  const programs = await api.get("/api/programs");
+  const programs = await api.get(pq("/api/programs"));
   const list = document.getElementById("program-list");
   list.innerHTML = "";
   if (!programs.length) {
@@ -216,6 +224,7 @@ document.getElementById("new-program-btn").addEventListener("click", () => {
         if (!name.value.trim()) return alert("Anna ohjelmalle nimi.");
         const payload = {
           name: name.value.trim(), goal: goal.value.trim() || null, schedule_type: type.value,
+          profile_id: currentProfileId,
           days: days.map((d, i) => ({ order_index: i, day_type: d.dayType, label: d.label || null,
             exercises: d.exercises.map((e, ei) => ({ ...e, order_index: ei })) })),
         };
@@ -229,7 +238,7 @@ document.getElementById("new-program-btn").addEventListener("click", () => {
 
 // =================== TREENIT ===================
 async function loadWorkouts() {
-  const workouts = await api.get("/api/workouts");
+  const workouts = await api.get(pq("/api/workouts"));
   const list = document.getElementById("workout-list");
   list.innerHTML = "";
   if (!workouts.length) list.append(el("p", { class: "muted" }, "Ei treenejä vielä."));
@@ -251,7 +260,7 @@ async function loadWorkouts() {
 }
 
 document.getElementById("new-workout-btn").addEventListener("click", async () => {
-  const w = await api.post("/api/workouts", { name: "Vapaa treeni", exercises: [] });
+  const w = await api.post("/api/workouts", { name: "Vapaa treeni", profile_id: currentProfileId, exercises: [] });
   await loadWorkouts();
   openWorkoutEditor(w.id);
 });
@@ -396,11 +405,13 @@ function drawLineChart(canvas, series, opts = {}) {
   // Ruudukko + y-akselin arvot
   ctx.strokeStyle = "#2e333f"; ctx.fillStyle = "#9aa3b2"; ctx.font = "11px system-ui";
   ctx.lineWidth = 1;
+  const span = maxY - minY;
+  const fmtY = (v) => (span < 10 ? v.toFixed(1) : String(Math.round(v)));
   for (let i = 0; i <= 4; i++) {
     const y = pad.t + (plotH / 4) * i;
-    const val = maxY - ((maxY - minY) / 4) * i;
+    const val = maxY - (span / 4) * i;
     ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(W - pad.r, y); ctx.stroke();
-    ctx.fillText(Math.round(val) + (opts.unit || ""), 6, y + 3);
+    ctx.fillText(fmtY(val) + (opts.unit || ""), 6, y + 3);
   }
   // X-akselin päivämäärät (alku ja loppu)
   const fmt = (ms) => new Date(ms).toLocaleDateString("fi-FI", { day: "numeric", month: "numeric", year: "2-digit" });
@@ -420,7 +431,7 @@ function drawLineChart(canvas, series, opts = {}) {
 
 // =================== YLEISNÄKYMÄ ===================
 async function loadOverview() {
-  const o = await api.get("/api/stats/overview");
+  const o = await api.get(pq("/api/stats/overview"));
   const cards = document.getElementById("overview-cards");
   cards.innerHTML = "";
   const card = (label, val) => el("div", { class: "card" },
@@ -428,7 +439,7 @@ async function loadOverview() {
   cards.append(card("Treenejä", o.total_workouts), card("Liikkeitä", o.total_exercises),
     card("Ohjelmia", o.total_programs));
 
-  const recs = await api.get("/api/stats/records?main_only=true");
+  const recs = await api.get(pq("/api/stats/records?main_only=true"));
   const rdiv = document.getElementById("overview-records");
   rdiv.innerHTML = "";
   if (!recs.length) rdiv.append(el("p", { class: "muted" }, "Ei vielä dataa pääliikkeistä."));
@@ -489,7 +500,7 @@ async function drawProgressChart() {
   legend.innerHTML = "";
   let idx = 0;
   for (const id of selectedProgress) {
-    const h = await api.get(`/api/stats/exercises/${id}/history`);
+    const h = await api.get(pq(`/api/stats/exercises/${id}/history`));
     const color = CHART_COLORS[idx % CHART_COLORS.length];
     series.push({
       points: h.points.map((p) => ({ x: new Date(p.date).getTime(), y: p.estimated_1rm })),
@@ -525,7 +536,7 @@ document.getElementById("sport-select").addEventListener("change", drawTotal);
 async function drawTotal() {
   const sport = document.getElementById("sport-select").value;
   if (!sport) return;
-  const t = await api.get(`/api/stats/total?sport=${encodeURIComponent(sport)}`);
+  const t = await api.get(pq(`/api/stats/total?sport=${encodeURIComponent(sport)}`));
   const sum = document.getElementById("total-summary");
   sum.innerHTML = "";
   sum.append(el("div", { class: "result-box" },
@@ -539,7 +550,7 @@ async function drawTotal() {
 
 // ---- Ennätystaulukko ----
 async function loadRecordsTable() {
-  const recs = await api.get("/api/stats/records");
+  const recs = await api.get(pq("/api/stats/records"));
   window._allRecords = recs;
   renderRecordsTable();
 }
@@ -584,19 +595,192 @@ document.getElementById("template-btn").addEventListener("click", async () => {
       el("button", { class: "success", onclick: async () => {
         const ids = liftBoxes.filter((b) => b.cb.checked).map((b) => +b.cb.value);
         if (!ids.length) return alert("Valitse vähintään yksi liike.");
-        await api.post("/api/templates/build", { template_id: tSel.value, exercise_ids: ids });
+        await api.post("/api/templates/build", { template_id: tSel.value, exercise_ids: ids, profile_id: currentProfileId });
         panel.classList.add("hidden"); loadPrograms();
       } }, "Luo ohjelma pohjasta"),
       el("button", { onclick: () => panel.classList.add("hidden") }, "Peruuta")));
   updateGuidance();
 });
 
+// =================== PROFIILIT ===================
+function initials(name) {
+  return name.split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase();
+}
+
+async function loadProfiles() {
+  profilesCache = await api.get("/api/profiles");
+  if (!profilesCache.length) return;
+  if (currentProfileId == null || !profilesCache.some((p) => p.id === currentProfileId)) {
+    currentProfileId = profilesCache[0].id;
+  }
+  renderProfileSwitch();
+}
+
+function renderProfileSwitch() {
+  const sel = document.getElementById("profile-select");
+  sel.innerHTML = "";
+  profilesCache.forEach((p) => {
+    const o = el("option", { value: p.id }, p.name);
+    sel.append(o);
+  });
+  sel.value = currentProfileId;
+  const cur = profilesCache.find((p) => p.id === currentProfileId);
+  const av = document.getElementById("profile-avatar");
+  av.textContent = cur ? initials(cur.name) : "";
+  av.style.background = cur && cur.color ? cur.color : "var(--accent)";
+}
+
+document.getElementById("profile-select").addEventListener("change", async (e) => {
+  currentProfileId = +e.target.value;
+  renderProfileSwitch();
+  await refreshActiveTab();
+});
+
+async function refreshActiveTab() {
+  // Lataa nykyiset perusnäkymät + aktiivisen välilehden data.
+  await loadPrograms();
+  await loadWorkouts();
+  const activeTab = document.querySelector("nav#tabs button.active");
+  const loader = activeTab && TAB_LOADERS[activeTab.dataset.tab];
+  if (loader) await loader(); else await loadOverview();
+}
+
+async function loadProfilesTab() {
+  await loadProfiles();
+  const list = document.getElementById("profile-list");
+  list.innerHTML = "";
+  for (const p of profilesCache) {
+    const isCurrent = p.id === currentProfileId;
+    const item = el("div", { class: "item" },
+      el("div", { class: "row-between" },
+        el("div", { class: "btn-row", style: "align-items:center" },
+          el("span", { class: "avatar", style: `background:${p.color || "var(--accent)"}` }, initials(p.name)),
+          el("strong", {}, p.name + (isCurrent ? " (aktiivinen)" : ""))),
+        el("div", { class: "btn-row" },
+          isCurrent ? "" : el("button", { class: "small primary", onclick: async () => {
+            currentProfileId = p.id; renderProfileSwitch(); await refreshActiveTab(); loadProfilesTab();
+          } }, "Valitse"),
+          el("button", { class: "small danger", onclick: async () => {
+            if (confirm(`Poista profiili "${p.name}" ja kaikki sen data?`)) {
+              try { await api.del(`/api/profiles/${p.id}`); await loadProfiles(); loadProfilesTab(); }
+              catch (e) { alert("Virhe: " + e.message); }
+            }
+          } }, "Poista"))));
+    const info = [];
+    if (p.age != null) info.push(`${p.age} v`);
+    if (p.sex) info.push(p.sex);
+    if (p.height_cm) info.push(`${p.height_cm} cm`);
+    if (p.latest_bodyweight) info.push(`${p.latest_bodyweight} kg`);
+    info.push(`${p.workouts} treeniä`, `${p.programs} ohjelmaa`);
+    item.append(el("div", { class: "muted" }, info.join(" · ")));
+    list.append(item);
+  }
+}
+
+document.getElementById("new-profile-btn").addEventListener("click", () => {
+  const form = document.getElementById("profile-form");
+  form.classList.remove("hidden");
+  form.innerHTML = "";
+  const name = el("input", { placeholder: "Nimi" });
+  const sex = el("select", {}, el("option", { value: "" }, "—"),
+    el("option", { value: "mies" }, "mies"), el("option", { value: "nainen" }, "nainen"),
+    el("option", { value: "muu" }, "muu"));
+  const bd = el("input", { type: "date" });
+  const height = el("input", { type: "number", step: "0.5", placeholder: "cm" });
+  const color = el("input", { type: "color", value: "#4f8cff" });
+  form.append(
+    el("div", { class: "grid" },
+      el("label", {}, "Nimi", name), el("label", {}, "Sukupuoli", sex),
+      el("label", {}, "Syntymäaika", bd), el("label", {}, "Pituus", height),
+      el("label", {}, "Väri", color)),
+    el("div", { class: "btn-row" },
+      el("button", { class: "success", onclick: async () => {
+        if (!name.value.trim()) return alert("Anna nimi.");
+        const p = await api.post("/api/profiles", {
+          name: name.value.trim(), sex: sex.value || null, birthdate: bd.value || null,
+          height_cm: height.value ? +height.value : null, color: color.value,
+        });
+        form.classList.add("hidden");
+        currentProfileId = p.id;
+        await loadProfiles(); loadProfilesTab(); await refreshActiveTab();
+      } }, "Tallenna"),
+      el("button", { onclick: () => form.classList.add("hidden") }, "Peruuta")));
+});
+
+// =================== KEHO ===================
+async function loadBody() {
+  document.getElementById("b-date").value = new Date().toISOString().slice(0, 10);
+  document.getElementById("m-date").value = new Date().toISOString().slice(0, 10);
+  const s = await api.get(pq("/api/body/summary"));
+
+  // Koostumus
+  const comp = document.getElementById("composition");
+  comp.innerHTML = "";
+  if (s.composition) {
+    const c = s.composition;
+    comp.append(el("div", { class: "result-box" },
+      el("div", {}, `Paino ${c.bodyweight} kg · rasva ${c.body_fat_pct}%`),
+      el("div", { class: "big" }, `Lihasmassa ~${c.lean_mass_kg} kg`),
+      el("div", { class: "muted" },
+        `Rasvamassa ~${c.fat_mass_kg} kg` +
+        (c.bmi ? ` · BMI ${c.bmi}` : "") + (c.ffmi ? ` · FFMI ${c.ffmi}` : ""))));
+  } else {
+    comp.append(el("p", { class: "muted" }, "Anna paino ja rasva-% nähdäksesi koostumusarvion."));
+  }
+
+  // Painokäyrä
+  drawLineChart(document.getElementById("weight-chart"),
+    [{ points: s.weight_series.map((p) => ({ x: new Date(p.date).getTime(), y: p.value })) }], { unit: "kg" });
+
+  // Mitat
+  const legend = document.getElementById("measure-legend");
+  legend.innerHTML = "";
+  const series = [];
+  let idx = 0;
+  for (const [site, pts] of Object.entries(s.measurement_sites)) {
+    const color = CHART_COLORS[idx % CHART_COLORS.length];
+    series.push({ color, points: pts.map((p) => ({ x: new Date(p.date).getTime(), y: p.value })) });
+    legend.append(el("span", { class: "tag", style: `color:${color};border-color:${color}` }, site));
+    idx++;
+  }
+  drawLineChart(document.getElementById("measure-chart"), series, { unit: "cm" });
+}
+
+document.getElementById("b-save").addEventListener("click", async () => {
+  const v = (id) => document.getElementById(id).value;
+  const body = {
+    entry_date: v("b-date") || null,
+    bodyweight: v("b-weight") ? +v("b-weight") : null,
+    body_fat_pct: v("b-bf") ? +v("b-bf") : null,
+    sleep_hours: v("b-sleep") ? +v("b-sleep") : null,
+    hrv: v("b-hrv") ? +v("b-hrv") : null,
+    resting_hr: v("b-rhr") ? +v("b-rhr") : null,
+    kcal: v("b-kcal") ? +v("b-kcal") : null,
+  };
+  await api.post(pq("/api/body/entries"), body);
+  ["b-weight", "b-bf", "b-sleep", "b-hrv", "b-rhr", "b-kcal"].forEach((id) => (document.getElementById(id).value = ""));
+  loadBody();
+});
+
+document.getElementById("m-save").addEventListener("click", async () => {
+  const v = (id) => document.getElementById(id).value;
+  if (!v("m-site") || !v("m-value")) return alert("Anna kohta ja mitta.");
+  await api.post(pq("/api/body/measurements"), {
+    entry_date: v("m-date") || null, site: v("m-site").trim(), value_cm: +v("m-value"),
+  });
+  document.getElementById("m-value").value = "";
+  loadBody();
+});
+
 // ---------- Välilehtien laiskat lataukset ----------
 TAB_LOADERS.overview = loadOverview;
 TAB_LOADERS.progress = loadProgress;
+TAB_LOADERS.body = loadBody;
+TAB_LOADERS.profiles = loadProfilesTab;
 
 // ---------- Käynnistys ----------
 (async function init() {
+  await loadProfiles();
   await loadExercises();
   await loadPrograms();
   await loadWorkouts();

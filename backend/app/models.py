@@ -29,6 +29,27 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .database import Base
 
 
+class Profile(Base):
+    """Henkilö jota seurataan (oma profiili, valmennettava tai läheinen).
+
+    Ohjelmat, treenit ja kehodata skoopataan profiiliin, jotta voi vaihtaa
+    ketä seuraa. Liikkeet ovat yhteisiä (kyykky on kyykky kaikille), mutta
+    ennätykset ja 1RM lasketaan kunkin profiilin omista treeneistä.
+    """
+
+    __tablename__ = "profiles"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(120), index=True)
+    sex: Mapped[str | None] = mapped_column(String(10), nullable=True)  # "mies"/"nainen"/muu
+    birthdate: Mapped[date | None] = mapped_column(Date, nullable=True)
+    height_cm: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Korostusväri UI:ssa (esim. "#4f8cff")
+    color: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class Exercise(Base):
     __tablename__ = "exercises"
 
@@ -51,6 +72,7 @@ class Program(Base):
     __tablename__ = "programs"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    profile_id: Mapped[int | None] = mapped_column(ForeignKey("profiles.id"), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(120), index=True)
     # "cycle" (treeni-lepo-sykli) tai "weekly" (viikon päivät)
     schedule_type: Mapped[str] = mapped_column(String(20), default="cycle")
@@ -119,6 +141,7 @@ class WorkoutSession(Base):
     __tablename__ = "workout_sessions"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    profile_id: Mapped[int | None] = mapped_column(ForeignKey("profiles.id"), nullable=True, index=True)
     session_date: Mapped[date] = mapped_column(Date, default=date.today, index=True)
     # Vapaaehtoinen kytkös ohjelman päivään
     program_day_id: Mapped[int | None] = mapped_column(
@@ -174,3 +197,41 @@ class SetLog(Base):
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     workout_exercise: Mapped["WorkoutExercise"] = relationship(back_populates="sets")
+
+
+class BodyEntry(Base):
+    """Päiväkohtainen kehon- ja hyvinvointidata (kaikki kentät vapaaehtoisia).
+
+    Sisältää painon ja rasva-%:n (koostumusarviota varten) sekä hyvinvoinnin
+    muuttujat (uni, HRV, leposyke, kalorit) myöhempää korrelaatioanalyysiä
+    varten. Data on aina parempaa jos sitä kerää, mutta mikään ei ole pakollista.
+    """
+
+    __tablename__ = "body_entries"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    profile_id: Mapped[int] = mapped_column(ForeignKey("profiles.id", ondelete="CASCADE"), index=True)
+    entry_date: Mapped[date] = mapped_column(Date, default=date.today, index=True)
+    bodyweight: Mapped[float | None] = mapped_column(Float, nullable=True)
+    body_fat_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    sleep_hours: Mapped[float | None] = mapped_column(Float, nullable=True)
+    hrv: Mapped[float | None] = mapped_column(Float, nullable=True)
+    resting_hr: Mapped[float | None] = mapped_column(Float, nullable=True)
+    kcal: Mapped[float | None] = mapped_column(Float, nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class Measurement(Base):
+    """Kehon ympärysmitta (cm) tietyltä kohdalta tiettynä päivänä.
+
+    Joustava: site on vapaateksti (esim. hauis, pohje, rintakehä, hartia,
+    reisi, vyötärö, kyynärvarsi), joten mitä tahansa kohtaa voi seurata.
+    """
+
+    __tablename__ = "measurements"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    profile_id: Mapped[int] = mapped_column(ForeignKey("profiles.id", ondelete="CASCADE"), index=True)
+    entry_date: Mapped[date] = mapped_column(Date, default=date.today, index=True)
+    site: Mapped[str] = mapped_column(String(60), index=True)
+    value_cm: Mapped[float] = mapped_column(Float)

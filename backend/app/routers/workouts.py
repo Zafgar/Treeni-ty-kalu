@@ -6,7 +6,7 @@ päivästä pohjaksi tai täysin vapaasti.
 """
 from datetime import date
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from .. import engine, models, schemas
@@ -17,18 +17,20 @@ router = APIRouter(prefix="/api/workouts", tags=["workouts"])
 
 
 @router.get("", response_model=list[schemas.WorkoutSessionOut])
-def list_workouts(db: Session = Depends(get_db)):
-    return (
-        db.query(models.WorkoutSession)
-        .order_by(models.WorkoutSession.session_date.desc(), models.WorkoutSession.id.desc())
-        .all()
-    )
+def list_workouts(profile_id: int | None = Query(None), db: Session = Depends(get_db)):
+    q = db.query(models.WorkoutSession)
+    if profile_id is not None:
+        q = q.filter(models.WorkoutSession.profile_id == profile_id)
+    return q.order_by(
+        models.WorkoutSession.session_date.desc(), models.WorkoutSession.id.desc()
+    ).all()
 
 
 @router.post("", response_model=schemas.WorkoutSessionOut, status_code=201)
 def create_workout(payload: schemas.WorkoutSessionCreate, db: Session = Depends(get_db)):
     session = models.WorkoutSession(
         session_date=payload.session_date or date.today(),
+        profile_id=payload.profile_id,
         program_day_id=payload.program_day_id,
         name=payload.name,
         bodyweight=payload.bodyweight,
@@ -61,6 +63,7 @@ def create_from_program_day(day_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Päivää ei löytynyt.")
     session = models.WorkoutSession(
         session_date=date.today(),
+        profile_id=day.program.profile_id if day.program else None,
         program_day_id=day_id,
         name=day.label,
     )

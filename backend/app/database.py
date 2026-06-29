@@ -39,6 +39,8 @@ def ensure_columns():
     added = [
         ("program_exercises", "rep_scheme", "VARCHAR(120)"),
         ("program_exercises", "percent_scheme", "VARCHAR(120)"),
+        ("programs", "profile_id", "INTEGER"),
+        ("workout_sessions", "profile_id", "INTEGER"),
     ]
     inspector = inspect(engine)
     existing_tables = set(inspector.get_table_names())
@@ -49,3 +51,22 @@ def ensure_columns():
             cols = {c["name"] for c in inspector.get_columns(table)}
             if column not in cols:
                 conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}"))
+
+
+def ensure_default_profile():
+    """Varmista että vähintään yksi profiili on olemassa ja että vanha
+    profiloimaton data liitetään siihen. Näin sovellus toimii heti."""
+    from sqlalchemy import text
+
+    with engine.begin() as conn:
+        row = conn.execute(text("SELECT id FROM profiles ORDER BY id LIMIT 1")).fetchone()
+        if row is None:
+            conn.execute(text(
+                "INSERT INTO profiles (name, color, created_at) "
+                "VALUES ('Minä', '#4f8cff', CURRENT_TIMESTAMP)"
+            ))
+            row = conn.execute(text("SELECT id FROM profiles ORDER BY id LIMIT 1")).fetchone()
+        default_id = row[0]
+        # Liitä profiloimaton (NULL) data oletusprofiiliin.
+        conn.execute(text("UPDATE programs SET profile_id = :pid WHERE profile_id IS NULL"), {"pid": default_id})
+        conn.execute(text("UPDATE workout_sessions SET profile_id = :pid WHERE profile_id IS NULL"), {"pid": default_id})

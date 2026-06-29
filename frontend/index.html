@@ -8,13 +8,21 @@
 </head>
 <body>
   <header>
-    <h1>🏋️ Treeni-ty-kalu</h1>
+    <div class="row-between header-top">
+      <h1>🏋️ Treeni-ty-kalu</h1>
+      <div class="profile-switch">
+        <span id="profile-avatar" class="avatar"></span>
+        <select id="profile-select" title="Vaihda profiilia"></select>
+      </div>
+    </div>
     <nav id="tabs">
       <button data-tab="overview" class="active">Yleisnäkymä</button>
       <button data-tab="progress">Kehitys</button>
+      <button data-tab="body">Keho</button>
       <button data-tab="workouts">Treenit</button>
       <button data-tab="programs">Ohjelmat</button>
       <button data-tab="exercises">Liikkeet</button>
+      <button data-tab="profiles">Profiilit</button>
       <button data-tab="calc">Painolaskuri</button>
     </nav>
   </header>
@@ -32,6 +40,66 @@
         <h3>Viimeisimmät treenit</h3>
         <div id="overview-recent"></div>
       </div>
+    </section>
+
+    <!-- KEHO -->
+    <section id="tab-body" class="tab">
+      <h2>Kehon seuranta</h2>
+      <div class="card">
+        <h3>Lisää päivän kehodata</h3>
+        <p class="muted">Kaikki kentät vapaaehtoisia — data on parempaa jos sitä kerää,
+          mutta mikään ei ole pakollista.</p>
+        <div class="grid">
+          <label>Päivä<input id="b-date" type="date" /></label>
+          <label>Paino (kg)<input id="b-weight" type="number" step="0.1" /></label>
+          <label>Rasva-%<input id="b-bf" type="number" step="0.1" /></label>
+          <label>Uni (h)<input id="b-sleep" type="number" step="0.1" /></label>
+          <label>HRV<input id="b-hrv" type="number" /></label>
+          <label>Leposyke<input id="b-rhr" type="number" /></label>
+          <label>Kalorit<input id="b-kcal" type="number" /></label>
+        </div>
+        <button id="b-save" class="success">Tallenna kehodata</button>
+      </div>
+
+      <div class="card">
+        <h3>Kehon koostumus (viimeisin)</h3>
+        <div id="composition"></div>
+      </div>
+
+      <div class="card">
+        <h3>Painon kehitys</h3>
+        <canvas id="weight-chart" width="840" height="280"></canvas>
+      </div>
+
+      <div class="card">
+        <h3>Ympärysmitat (cm)</h3>
+        <div class="grid">
+          <label>Päivä<input id="m-date" type="date" /></label>
+          <label>Kohta<input id="m-site" list="m-sites" placeholder="esim. hauis" />
+            <datalist id="m-sites">
+              <option>hauis</option><option>pohje</option><option>rintakehä</option>
+              <option>hartia</option><option>reisi</option><option>vyötärö</option>
+              <option>kyynärvarsi</option><option>kaula</option><option>lantio</option>
+            </datalist>
+          </label>
+          <label>Mitta (cm)<input id="m-value" type="number" step="0.1" /></label>
+        </div>
+        <button id="m-save" class="success">Lisää mittaus</button>
+        <div id="measure-legend" class="btn-row"></div>
+        <canvas id="measure-chart" width="840" height="280"></canvas>
+      </div>
+    </section>
+
+    <!-- PROFIILIT -->
+    <section id="tab-profiles" class="tab">
+      <div class="row-between">
+        <h2>Profiilit</h2>
+        <button id="new-profile-btn" class="primary">+ Uusi profiili</button>
+      </div>
+      <p class="muted">Seuraa omaa kehitystäsi, valmennettavia tai läheisiäsi.
+        Jokaisella profiililla on oma data — vaihda aktiivista profiilia yläpalkista.</p>
+      <div id="profile-form" class="hidden card"></div>
+      <div id="profile-list" class="list"></div>
     </section>
 
     <!-- KEHITYS -->

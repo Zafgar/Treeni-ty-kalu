@@ -79,6 +79,7 @@ class ProgramDayOut(ProgramDayBase):
 # ---------- Program ----------
 class ProgramBase(BaseModel):
     name: str
+    profile_id: int | None = None
     schedule_type: str = "cycle"  # cycle | weekly
     description: str | None = None
     goal: str | None = None
@@ -144,6 +145,7 @@ class WorkoutExerciseOut(WorkoutExerciseBase):
 # ---------- WorkoutSession ----------
 class WorkoutSessionBase(BaseModel):
     session_date: date | None = None
+    profile_id: int | None = None
     program_day_id: int | None = None
     name: str | None = None
     bodyweight: float | None = None
@@ -188,3 +190,71 @@ class SchemeConversionOut(BaseModel):
     from_scheme: str
     to_scheme: str
     note: str
+
+
+# ---------- Profile ----------
+class ProfileBase(BaseModel):
+    name: str
+    sex: str | None = None
+    birthdate: date | None = None
+    height_cm: float | None = None
+    color: str | None = None
+    notes: str | None = None
+
+
+class ProfileCreate(ProfileBase):
+    pass
+
+
+class ProfileUpdate(BaseModel):
+    name: str | None = None
+    sex: str | None = None
+    birthdate: date | None = None
+    height_cm: float | None = None
+    color: str | None = None
+    notes: str | None = None
+
+
+class ProfileOut(ProfileBase):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    created_at: datetime
+
+
+# ---------- BodyEntry ----------
+class BodyEntryBase(BaseModel):
+    entry_date: date | None = None
+    bodyweight: float | None = None
+    body_fat_pct: float | None = None
+    sleep_hours: float | None = None
+    hrv: float | None = None
+    resting_hr: float | None = None
+    kcal: float | None = None
+    notes: str | None = None
+
+
+class BodyEntryCreate(BodyEntryBase):
+    pass
+
+
+class BodyEntryOut(BodyEntryBase):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    profile_id: int
+
+
+# ---------- Measurement ----------
+class MeasurementBase(BaseModel):
+    entry_date: date | None = None
+    site: str
+    value_cm: float
+
+
+class MeasurementCreate(MeasurementBase):
+    pass
+
+
+class MeasurementOut(MeasurementBase):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    profile_id: int

@@ -30,15 +30,18 @@ def _sets_payload(we: models.WorkoutExercise) -> list[dict]:
     ]
 
 
-def _exercise_session_points(db: Session, exercise_id: int) -> list[dict]:
+def _exercise_session_points(
+    db: Session, exercise_id: int, profile_id: int | None = None
+) -> list[dict]:
     """Aikasarja: per treenipäivä paras arvioitu 1RM, paras sarja ja volyymi."""
-    rows = (
+    q = (
         db.query(models.WorkoutExercise, models.WorkoutSession)
         .join(models.WorkoutSession, models.WorkoutExercise.session_id == models.WorkoutSession.id)
         .filter(models.WorkoutExercise.exercise_id == exercise_id)
-        .order_by(models.WorkoutSession.session_date)
-        .all()
     )
+    if profile_id is not None:
+        q = q.filter(models.WorkoutSession.profile_id == profile_id)
+    rows = q.order_by(models.WorkoutSession.session_date).all()
     # Yhdistä saman päivän treenit (jos sama liike useassa treenissä per päivä)
     by_date: dict[date, dict] = {}
     for we, session in rows:
@@ -83,12 +86,13 @@ def _records_for_exercise(points: list[dict], window_days: int) -> dict | None:
 @router.get("/exercises/{exercise_id}/history")
 def exercise_history(
     exercise_id: int,
+    profile_id: int | None = Query(None),
     window_days: int = Query(DEFAULT_WINDOW_DAYS),
     db: Session = Depends(get_db),
 ):
     """Yhden liikkeen kehityskäyrä + ennätykset."""
     ex = db.get(models.Exercise, exercise_id)
-    points = _exercise_session_points(db, exercise_id)
+    points = _exercise_session_points(db, exercise_id, profile_id)
     records = _records_for_exercise(points, window_days)
     return {
         "exercise_id": exercise_id,
@@ -118,6 +122,7 @@ def _serialize_records(records: dict | None) -> dict | None:
 
 @router.get("/records")
 def records(
+    profile_id: int | None = Query(None),
     main_only: bool = Query(False),
     window_days: int = Query(DEFAULT_WINDOW_DAYS),
     db: Session = Depends(get_db),
@@ -128,7 +133,7 @@ def records(
         q = q.filter(models.Exercise.is_main_lift.is_(True))
     result = []
     for ex in q.order_by(models.Exercise.name).all():
-        points = _exercise_session_points(db, ex.id)
+        points = _exercise_session_points(db, ex.id, profile_id)
         rec = _records_for_exercise(points, window_days)
         if not rec:
             continue
@@ -147,6 +152,7 @@ def records(
 @router.get("/total")
 def total(
     sport: str = Query(...),
+    profile_id: int | None = Query(None),
     window_days: int = Query(DEFAULT_WINDOW_DAYS),
     db: Session = Depends(get_db),
 ):
@@ -162,7 +168,7 @@ def total(
     lift_timeseries: dict[str, list[dict]] = {}
     total_low = total_mid = total_high = 0.0
     for ex in lifts:
-        points = _exercise_session_points(db, ex.id)
+        points = _exercise_session_points(db, ex.id, profile_id)
         rec = _records_for_exercise(points, window_days)
         lift_timeseries[ex.name] = points
         if not rec or not rec["current_best_set"]:
@@ -222,14 +228,18 @@ def sports(db: Session = Depends(get_db)):
 
 
 @router.get("/overview")
-def overview(db: Session = Depends(get_db)):
+def overview(profile_id: int | None = Query(None), db: Session = Depends(get_db)):
     """Yleisnäkymä: tunnusluvut, viimeisimmät treenit ja kärkiennätykset."""
-    total_workouts = db.query(models.WorkoutSession).count()
+    wq = db.query(models.WorkoutSession)
+    pq = db.query(models.Program)
+    if profile_id is not None:
+        wq = wq.filter(models.WorkoutSession.profile_id == profile_id)
+        pq = pq.filter(models.Program.profile_id == profile_id)
+    total_workouts = wq.count()
     total_exercises = db.query(models.Exercise).count()
-    total_programs = db.query(models.Program).count()
+    total_programs = pq.count()
     recent_sessions = (
-        db.query(models.WorkoutSession)
-        .order_by(models.WorkoutSession.session_date.desc(), models.WorkoutSession.id.desc())
+        wq.order_by(models.WorkoutSession.session_date.desc(), models.WorkoutSession.id.desc())
         .limit(5)
         .all()
     )

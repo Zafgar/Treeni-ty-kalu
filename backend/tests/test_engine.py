@@ -62,6 +62,24 @@ def test_best_1rm_ignores_empty():
     assert engine.best_1rm_from_sets([{"weight": 0, "reps": 0, "completed": True}]) is None
 
 
+def test_body_composition():
+    c = engine.body_composition(100, 20, height_cm=180)
+    assert c["fat_mass_kg"] == 20.0
+    assert c["lean_mass_kg"] == 80.0
+    assert "bmi" in c and "ffmi" in c
+    # ilman pituutta vain massat
+    c2 = engine.body_composition(80, 15)
+    assert c2["fat_mass_kg"] == 12.0
+    assert "bmi" not in c2
+
+
+def test_age_from_birthdate():
+    from datetime import date
+    assert engine.age_from_birthdate(date(1991, 1, 1), date(2026, 6, 29)) == 35
+    assert engine.age_from_birthdate(date(1991, 12, 31), date(2026, 6, 29)) == 34
+    assert engine.age_from_birthdate(None, date(2026, 1, 1)) is None
+
+
 def test_estimate_total():
     lifts = {
         "kyykky": {"weight": 200, "reps": 5, "rir": 1},

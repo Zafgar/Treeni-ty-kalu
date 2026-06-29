@@ -113,6 +113,34 @@ def convert_scheme(
     )
 
 
+def body_composition(bodyweight: float, body_fat_pct: float, height_cm: float | None = None) -> dict:
+    """Arvioi kehon koostumus painosta ja rasvaprosentista.
+
+    Palauttaa rasvamassan, rasvattoman massan (lihakset+luut+vesi), FFMI:n
+    (rasvattoman massan indeksi, jos pituus annettu) ja BMI:n.
+    """
+    fat_mass = round(bodyweight * body_fat_pct / 100.0, 1)
+    lean_mass = round(bodyweight - fat_mass, 1)
+    out = {"fat_mass_kg": fat_mass, "lean_mass_kg": lean_mass}
+    if height_cm and height_cm > 0:
+        h_m = height_cm / 100.0
+        out["bmi"] = round(bodyweight / (h_m * h_m), 1)
+        # FFMI = rasvaton massa / pituus^2 (vakioidaan 1.8 m pituuteen)
+        ffmi = lean_mass / (h_m * h_m)
+        out["ffmi"] = round(ffmi + 6.1 * (1.8 - h_m), 1)
+    return out
+
+
+def age_from_birthdate(birthdate, today) -> int | None:
+    """Laske ikä vuosina syntymäpäivästä."""
+    if not birthdate:
+        return None
+    years = today.year - birthdate.year
+    if (today.month, today.day) < (birthdate.month, birthdate.day):
+        years -= 1
+    return years
+
+
 def best_1rm_from_sets(sets: list[dict]) -> dict | None:
     """Palauta paras arvioitu 1RM joukosta sarjoja.
 
