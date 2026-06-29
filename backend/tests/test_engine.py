@@ -107,6 +107,32 @@ def test_macro_targets_cut():
     assert t["carbs_g"] >= 0
 
 
+def test_day_targets_cycling():
+    targets = {"kcal": 2500, "protein_g": 180, "fat_g": 70, "carbs_g": 250}
+    dt = engine.day_targets(targets, training_days=4, workout_kcal_avg=500)
+    assert dt["cycled"] is True
+    # Treenipäivä > lepopäivä kaloreissa
+    assert dt["train_day"]["kcal"] > dt["rest_day"]["kcal"]
+    # Viikkokeskiarvo pysyy ~tavoitteessa
+    weekly = dt["train_day"]["kcal"] * 4 + dt["rest_day"]["kcal"] * 3
+    assert abs(weekly - 2500 * 7) <= 10
+    # Proteiini vakio
+    assert dt["train_day"]["protein_g"] == 180 and dt["rest_day"]["protein_g"] == 180
+
+
+def test_day_targets_no_cycling():
+    targets = {"kcal": 2500, "protein_g": 180, "fat_g": 70, "carbs_g": 250}
+    assert engine.day_targets(targets, 0)["cycled"] is False
+    assert engine.day_targets(targets, 7)["cycled"] is False
+
+
+def test_weekly_review():
+    r = engine.weekly_review(2500, 2480, -0.5, -0.5)
+    assert r["target_weekly_kcal"] == 17500
+    assert r["adherence_pct"] >= 95
+    assert "tavoitteessa" in r["verdict"].lower()
+
+
 def test_waist_assessment_bulk():
     a = engine.waist_assessment(110, 180, "bulk")
     assert a["waist_height_ratio"] == round(110 / 180, 3)

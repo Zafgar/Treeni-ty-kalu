@@ -389,6 +389,72 @@ def diet_recommendation(goal: str, target_rate: float, actual_rate: float | None
             f"{suunta.capitalize()} kaloreita ~{abs(adjust)} kcal/pv (kohti {tgt + adjust} kcal).")
 
 
+def day_targets(targets: dict, training_days: int, workout_kcal_avg: float | None = None) -> dict:
+    """Jaa viikon kalorit treeni- ja lepopäiville (hiilarisyklitys).
+
+    Viikkokeskiarvo pysyy tavoitteessa: treenipäivinä syödään enemmän
+    (lisäkalorit hiileinä suorituskykyä varten), lepopäivinä vähemmän.
+    Proteiini pidetään vakiona, rasva hieman korkeampana lepopäivinä.
+    """
+    daily = targets["kcal"]
+    protein = targets["protein_g"]
+    training_days = max(0, min(7, training_days))
+    rest_days = 7 - training_days
+    weekly = daily * 7
+
+    if training_days == 0 or rest_days == 0:
+        # Ei syklitystä jos kaikki päivät samanlaisia
+        return {
+            "training_days_per_week": training_days,
+            "train_day": targets, "rest_day": targets, "cycled": False,
+        }
+
+    # Treenipäivän lisä: puolet poltetuista kaloreista, max 20 % päivätavoitteesta
+    if workout_kcal_avg:
+        delta = min(workout_kcal_avg * 0.5, daily * 0.2)
+    else:
+        delta = daily * 0.12
+    train_kcal = daily + delta
+    # Pidä viikkosumma vakiona -> lepopäivät kompensoivat
+    rest_kcal = (weekly - train_kcal * training_days) / rest_days
+
+    def macros(kcal):
+        fat = round(targets["fat_g"])  # rasva vakaa
+        carbs = round(max(0.0, (kcal - protein * 4 - fat * 9) / 4))
+        return {"kcal": round(kcal), "protein_g": protein, "fat_g": fat, "carbs_g": carbs}
+
+    # Rasva hieman korkeampi lepopäivänä, matalampi treenipäivänä
+    train = macros(train_kcal)
+    rest = macros(rest_kcal)
+    train["fat_g"] = round(targets["fat_g"] * 0.85)
+    train["carbs_g"] = round(max(0.0, (train_kcal - protein * 4 - train["fat_g"] * 9) / 4))
+    rest["fat_g"] = round(targets["fat_g"] * 1.15)
+    rest["carbs_g"] = round(max(0.0, (rest_kcal - protein * 4 - rest["fat_g"] * 9) / 4))
+    return {
+        "training_days_per_week": training_days,
+        "train_day": train, "rest_day": rest, "cycled": True,
+    }
+
+
+def weekly_review(target_daily_kcal: float, actual_avg_kcal: float | None,
+                  target_rate: float, actual_rate: float | None) -> dict:
+    """Viikkoyhteenveto: kalorien noudattaminen ja tahdin osuvuus tavoitteeseen."""
+    out = {"target_weekly_kcal": round(target_daily_kcal * 7)}
+    if actual_avg_kcal is not None:
+        out["actual_weekly_kcal"] = round(actual_avg_kcal * 7)
+        adherence = round(100 - abs(actual_avg_kcal - target_daily_kcal) / target_daily_kcal * 100)
+        out["adherence_pct"] = max(0, adherence)
+    if actual_rate is not None:
+        diff = actual_rate - target_rate
+        if abs(diff) <= 0.15:
+            out["verdict"] = "Tahti tavoitteessa — jatka samaan malliin."
+        elif diff > 0:
+            out["verdict"] = "Paino nousee tavoitetta nopeammin / laskee hitaammin — tarkista kalorit."
+        else:
+            out["verdict"] = "Paino laskee tavoitetta nopeammin — harkitse kalorien nostoa."
+    return out
+
+
 def waist_assessment(waist_cm: float | None, height_cm: float | None, goal: str) -> dict | None:
     """Bulkin vyötärö-raja-arvio. Vyötärö/pituus -suhde on hyvä terveysmittari.
 

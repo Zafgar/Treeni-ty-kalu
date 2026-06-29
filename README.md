@@ -107,6 +107,9 @@ python -m pytest backend/tests/ -q
   bulk), suositus kalorien säädöstä, bulkin vyötärö/pituus-raja-arvio, voiman
   säilymisen seuranta dieetillä ja kehon alueiden kehitys (uuden lihaksen
   indikaattori vyötäröön nähden)
+- **Per-päivä-tavoitteet:** treeni- ja lepopäivän kalorijako (hiilarisyklitys)
+  treenitiheyden ja poltettujen kalorien mukaan — viikkokeskiarvo pysyy
+  tavoitteessa — sekä viikkoyhteenveto (kalorien osuvuus ja tahdin arvio)
 
 ### Tämänhetkisen 1RM:n sääntö (kahden ohjelman "kiista")
 
@@ -135,6 +138,5 @@ Exercise: + category, equipment, default_sets/reps (valmis liikekirjasto)
 
 Rakenne on suunniteltu laajennettavaksi seuraaviin ilman ydinmallien rikkomista:
 
-- Dieettimallien per-päivä-tavoitteet (treeni- vs. lepopäivä) ja viikkoyhteenveto
 - Ohjelman seuraavien treenien siirto/aikataulutus skipatessa
 - Älykellon/terveysdatan automaattinen tuonti (nyt manuaalinen kirjaus)

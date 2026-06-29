@@ -1093,6 +1093,33 @@ async function renderDietStatus() {
         el("div", { class: "big" }, `${t.tdee} kcal`),
         el("div", { class: "muted" }, `Vaje/ylijäämä ${t.daily_delta} kcal/pv`)))));
 
+  // Per-päivä-tavoitteet (treeni- vs lepopäivä)
+  const dt = s.day_targets;
+  if (dt && dt.cycled) {
+    const dayCard = (title, m, hint) => el("div", { class: "result-box" },
+      el("div", { class: "muted" }, title),
+      el("div", { class: "big" }, `${m.kcal} kcal`),
+      el("div", { class: "muted" }, `P ${m.protein_g}g · H ${m.carbs_g}g · R ${m.fat_g}g`),
+      el("div", { class: "muted" }, hint));
+    div.append(el("div", { class: "card" },
+      el("h3", {}, `Per-päivä-tavoitteet (${dt.training_days_per_week} treenipäivää/vk)`),
+      el("p", { class: "muted" }, "Viikkokeskiarvo pysyy tavoitteessa — treenipäivinä enemmän hiilareita suorituskykyyn, lepopäivinä vähemmän."),
+      el("div", { class: "grid" },
+        dayCard("Treenipäivä", dt.train_day, "enemmän hiilaria"),
+        dayCard("Lepopäivä", dt.rest_day, "vähemmän hiilaria, hieman enemmän rasvaa"))));
+  }
+
+  // Viikkoyhteenveto
+  const wr = s.weekly_review;
+  if (wr) {
+    const parts = [`Viikkotavoite ${wr.target_weekly_kcal} kcal`];
+    if (wr.actual_weekly_kcal != null) parts.push(`toteutunut ${wr.actual_weekly_kcal} kcal`);
+    if (wr.adherence_pct != null) parts.push(`osuvuus ${wr.adherence_pct} %`);
+    div.append(el("div", { class: "card" }, el("h3", {}, "Viikkoyhteenveto"),
+      el("div", { class: "muted" }, parts.join(" · ")),
+      wr.verdict ? el("div", { class: "result-box", style: "margin-top:10px" }, wr.verdict) : ""));
+  }
+
   // Trendi & suositus
   div.append(el("div", { class: "card" },
     el("h3", {}, "Kehitys (viikkokeskiarvo)"),

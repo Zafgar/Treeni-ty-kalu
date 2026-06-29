@@ -157,6 +157,23 @@ def _area_assessment(db: Session, profile_id: int) -> dict:
     return {"areas": areas, "waist_change_cm": round(waist_change, 1)}
 
 
+def _training_profile(db: Session, profile_id: int, ref_date: date) -> tuple[int, float | None]:
+    """Arvioi treenipäivät/viikko (tuoreesta tiheydestä) ja keskim. treenin kcal."""
+    sessions = (
+        db.query(models.WorkoutSession)
+        .filter(models.WorkoutSession.profile_id == profile_id,
+                models.WorkoutSession.status != "skipped")
+        .all()
+    )
+    recent = [s for s in sessions if 0 <= (ref_date - s.session_date).days < 21]
+    per_week = round(len(recent) / 3) if recent else 3
+    per_week = max(1, min(7, per_week))
+    kcals = [s.kcal_burned for s in sessions
+             if s.kcal_burned and 0 <= (ref_date - s.session_date).days < 30]
+    kcal_avg = round(sum(kcals) / len(kcals)) if kcals else None
+    return per_week, kcal_avg
+
+
 @router.get("/status")
 def diet_status(profile_id: int = Query(...), db: Session = Depends(get_db)):
     """Kooste: trendi, TDEE, makrotavoitteet, suositus, vyötärö ja alueet."""
@@ -218,6 +235,11 @@ def diet_status(profile_id: int = Query(...), db: Session = Depends(get_db)):
     elif strength and strength["change_pct"] > 0:
         strength_note = f"Rauta kehittyy edelleen ({strength['change_pct']:+}%)."
 
+    # Per-päivä-tavoitteet (treeni- vs lepopäivä) ja viikkoyhteenveto
+    training_days, workout_kcal_avg = _training_profile(db, profile_id, ref_date)
+    day_targets = engine.day_targets(targets, training_days, workout_kcal_avg)
+    review = engine.weekly_review(targets["kcal"], avg_intake, target_rate, trend)
+
     return {
         "goal": goal,
         "target_rate": target_rate,
@@ -226,6 +248,8 @@ def diet_status(profile_id: int = Query(...), db: Session = Depends(get_db)):
         "trend_kg_per_week": trend,
         "intake_avg_kcal": round(avg_intake) if avg_intake else None,
         "targets": targets,
+        "day_targets": day_targets,
+        "weekly_review": review,
         "recommendation": recommendation,
         "waist": waist_info,
         "strength_trend": strength,
