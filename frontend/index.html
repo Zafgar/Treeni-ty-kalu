@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="fi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Treeni-ty-kalu</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header>
+    <h1>🏋️ Treeni-ty-kalu</h1>
+    <nav id="tabs">
+      <button data-tab="workouts" class="active">Treenit</button>
+      <button data-tab="programs">Ohjelmat</button>
+      <button data-tab="exercises">Liikkeet</button>
+      <button data-tab="calc">Painolaskuri</button>
+    </nav>
+  </header>
+
+  <main>
+    <!-- TREENIT -->
+    <section id="tab-workouts" class="tab active">
+      <div class="row-between">
+        <h2>Treenikerrat</h2>
+        <button id="new-workout-btn" class="primary">+ Uusi treeni</button>
+      </div>
+      <div id="workout-editor" class="hidden card"></div>
+      <div id="workout-list" class="list"></div>
+    </section>
+
+    <!-- OHJELMAT -->
+    <section id="tab-programs" class="tab">
+      <div class="row-between">
+        <h2>Treeniohjelmat</h2>
+        <button id="new-program-btn" class="primary">+ Uusi ohjelma</button>
+      </div>
+      <div id="program-editor" class="hidden card"></div>
+      <div id="program-list" class="list"></div>
+    </section>
+
+    <!-- LIIKKEET -->
+    <section id="tab-exercises" class="tab">
+      <div class="row-between">
+        <h2>Liikkeet</h2>
+        <button id="new-exercise-btn" class="primary">+ Lisää liike</button>
+      </div>
+      <div id="exercise-form" class="hidden card"></div>
+      <div id="exercise-list" class="list"></div>
+    </section>
+
+    <!-- PAINOLASKURI -->
+    <section id="tab-calc" class="tab">
+      <h2>Painolaskuri — sarjaohjelman vaihto</h2>
+      <p class="muted">Esim. teit 4×5 painolla 100 kg ja vaihdat 4×8 — laskuri arvioi uuden painon
+        joka vastaa samaa rasitusta (varasto huomioiden).</p>
+      <div class="card">
+        <div class="grid">
+          <label>Nykyinen paino (kg)<input id="c-weight" type="number" value="100" step="0.5" /></label>
+          <label>Nyk. sarjat<input id="c-sets" type="number" value="4" /></label>
+          <label>Nyk. toistot<input id="c-reps" type="number" value="5" /></label>
+          <label>Nyk. varasto (RIR)<input id="c-rir" type="number" value="2" step="0.5" /></label>
+          <label>Tavoite sarjat<input id="c-tsets" type="number" value="4" /></label>
+          <label>Tavoite toistot<input id="c-treps" type="number" value="8" /></label>
+          <label>Tavoite varasto<input id="c-trir" type="number" value="2" step="0.5" /></label>
+          <label>Pyöristys (kg)<input id="c-inc" type="number" value="2.5" step="0.5" /></label>
+        </div>
+        <button id="calc-btn" class="primary">Laske</button>
+        <div id="calc-result"></div>
+      </div>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
