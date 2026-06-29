@@ -103,6 +103,40 @@ def test_nutrition_logging(client):
     assert round(s["today"]["kcal"]) == 178  # 89 * 2
 
 
+def test_exercise_with_defaults(client):
+    ex = client.post("/api/exercises", json={
+        "name": "Sivunostot", "category": "olkapäät", "equipment": "käsipainot",
+        "default_sets": 3, "default_reps": 15}).json()
+    assert ex["equipment"] == "käsipainot"
+    assert ex["default_sets"] == 3 and ex["default_reps"] == 15
+
+
+def test_diet_models_and_phase(client):
+    models_ = client.get("/api/diet/models").json()
+    assert len(models_) == 4
+    phase = client.post("/api/diet/phase", json={"profile_id": 1, "model": "cut_maltillinen"}).json()
+    assert phase["goal"] == "cut"
+    assert phase["target_rate"] == -0.5
+    got = client.get("/api/diet/phase?profile_id=1").json()
+    assert got["model"] == "Maltillinen pudotus"
+
+
+def test_diet_status(client):
+    from datetime import date, timedelta
+    client.post("/api/diet/phase", json={"profile_id": 1, "model": "cut_maltillinen"})
+    ref = date(2026, 6, 28)
+    # 14 päivää laskevaa painoa
+    for i in range(14):
+        d = (ref - timedelta(days=i)).isoformat()
+        w = round(85 - (13 - i) * 0.07, 1)
+        client.post("/api/body/entries?profile_id=1", json={"entry_date": d, "bodyweight": w})
+    status = client.get("/api/diet/status?profile_id=1").json()
+    assert status["goal"] == "cut"
+    assert status["targets"]["protein_g"] > 0
+    assert status["targets"]["kcal"] > 0
+    assert status["trend_kg_per_week"] is not None
+
+
 def test_load_timeline(client):
     ex = client.post("/api/exercises", json={"name": "Kyykky"}).json()
     client.post("/api/workouts", json={

@@ -141,6 +141,110 @@ def age_from_birthdate(birthdate, today) -> int | None:
     return years
 
 
+# Energiatiheys: rasvakudoksen muutos ~7700 kcal / kg
+KCAL_PER_KG = 7700.0
+
+
+def weekly_average(points: list[tuple], end_date, days: int = 7) -> float | None:
+    """Keskimääräinen paino [end_date-days, end_date] -ikkunassa.
+
+    points: [(date, value), ...]. Viikkokeskiarvo vaimentaa päivän heilahdukset,
+    jolloin trendi ja korjaukset osuvat oikeaan suuntaan.
+    """
+    from datetime import timedelta
+
+    start = end_date - timedelta(days=days - 1)
+    window = [v for d, v in points if start <= d <= end_date and v is not None]
+    if not window:
+        return None
+    return round(sum(window) / len(window), 2)
+
+
+def weight_trend(points: list[tuple], today) -> float | None:
+    """Painon muutos kg/viikko vertaamalla tämän ja edellisen viikon keskiarvoja."""
+    from datetime import timedelta
+
+    this_week = weekly_average(points, today, 7)
+    last_week = weekly_average(points, today - timedelta(days=7), 7)
+    if this_week is None or last_week is None:
+        return None
+    return round(this_week - last_week, 2)
+
+
+def adaptive_tdee(avg_intake_kcal: float, weight_change_kg: float, days: int) -> float | None:
+    """Arvioi ylläpitokalorit (TDEE) toteutuneesta syönnistä ja painomuutoksesta.
+
+    Jos paino nousi enemmän kuin syönti selittäisi -> TDEE pienempi, ja päinvastoin.
+    TDEE = keskisyönti - (painomuutos * 7700 / päivät)
+    """
+    if not avg_intake_kcal or days <= 0:
+        return None
+    return round(avg_intake_kcal - (weight_change_kg * KCAL_PER_KG / days), 0)
+
+
+def macro_targets(bodyweight: float, goal: str, tdee: float, target_rate: float) -> dict:
+    """Laske kcal- ja makrotavoitteet kehon painosta, tavoitteesta ja tahdista.
+
+    target_rate kg/viikko -> päivittäinen energiavaje/ylijäämä = rate*7700/7.
+    Proteiini painotetaan korkeaksi etenkin dieetillä lihasten säilyttämiseksi.
+    """
+    daily_delta = target_rate * KCAL_PER_KG / 7.0
+    kcal = max(1200.0, tdee + daily_delta)
+    protein_per_kg = {"cut": 2.2, "maintain": 1.8, "bulk": 2.0}.get(goal, 1.8)
+    protein_g = round(bodyweight * protein_per_kg)
+    fat_g = round(bodyweight * 0.8)
+    carbs_g = round(max(0.0, (kcal - protein_g * 4 - fat_g * 9) / 4))
+    return {
+        "kcal": round(kcal),
+        "protein_g": protein_g,
+        "fat_g": fat_g,
+        "carbs_g": carbs_g,
+        "tdee": round(tdee),
+        "daily_delta": round(daily_delta),
+    }
+
+
+def diet_recommendation(goal: str, target_rate: float, actual_rate: float | None,
+                        current_kcal: float | None, targets: dict) -> str:
+    """Tuota suositus: pitäisikö kaloreita nostaa/laskea jotta tahti vastaa tavoitetta."""
+    if actual_rate is None:
+        return "Kirjaa painoa ja ruokaa noin viikon ajan, niin saat tarkan suosituksen."
+    diff = actual_rate - target_rate  # positiivinen = nousee liikaa / laskee liian hitaasti
+    tgt = targets["kcal"]
+    if abs(diff) <= 0.15:
+        return f"Tahti on tavoitteessa ({actual_rate:+.2f} kg/vk). Pidä noin {tgt} kcal/pv."
+    # Karkea korjaus: 0.1 kg/vk ~ 110 kcal/pv
+    adjust = round(-diff * KCAL_PER_KG / 7.0 / 10) * 10
+    suunta = "nosta" if adjust > 0 else "laske"
+    if goal == "maintain":
+        return (f"Paino muuttuu {actual_rate:+.2f} kg/vk vaikka tavoite on ylläpito. "
+                f"{suunta.capitalize()} kaloreita ~{abs(adjust)} kcal/pv (kohti {tgt + adjust} kcal).")
+    return (f"Tahti {actual_rate:+.2f} kg/vk vs. tavoite {target_rate:+.2f} kg/vk. "
+            f"{suunta.capitalize()} kaloreita ~{abs(adjust)} kcal/pv (kohti {tgt + adjust} kcal).")
+
+
+def waist_assessment(waist_cm: float | None, height_cm: float | None, goal: str) -> dict | None:
+    """Bulkin vyötärö-raja-arvio. Vyötärö/pituus -suhde on hyvä terveysmittari.
+
+    > 0.55 alkaa olla koholla, > 0.58 korkea -> bulkkaaminen kannattaa lopettaa.
+    """
+    if not waist_cm:
+        return None
+    out = {"waist_cm": waist_cm}
+    if height_cm and height_cm > 0:
+        ratio = round(waist_cm / height_cm, 3)
+        out["waist_height_ratio"] = ratio
+        if ratio >= 0.58:
+            level, msg = "korkea", "Vyötärö on jo korkealla — lopeta bulkki ja harkitse dieettiä."
+        elif ratio >= 0.55:
+            level, msg = "koholla", "Vyötärö alkaa olla koholla — bulkkia kannattaa hidastaa pian."
+        else:
+            level, msg = "ok", "Vyötärö järkevällä tasolla bulkkiin."
+        out["level"] = level
+        out["message"] = msg if goal == "bulk" else f"Vyötärö/pituus {ratio} ({level})."
+    return out
+
+
 def best_1rm_from_sets(sets: list[dict]) -> dict | None:
     """Palauta paras arvioitu 1RM joukosta sarjoja.
 

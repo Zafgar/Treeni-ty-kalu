@@ -29,6 +29,26 @@ function pq(path) {
   return path + (path.includes("?") ? "&" : "?") + "profile_id=" + currentProfileId;
 }
 
+// Rakentaa <select>:n liikkeistä kategorioittain ryhmiteltynä (optgroup).
+function exerciseSelect(onchange) {
+  const sel = document.createElement("select");
+  if (onchange) sel.addEventListener("change", onchange);
+  const byCat = {};
+  exercisesCache.forEach((ex) => (byCat[ex.category || "muu"] = byCat[ex.category || "muu"] || []).push(ex));
+  Object.keys(byCat).sort().forEach((cat) => {
+    const og = document.createElement("optgroup");
+    og.label = cat;
+    byCat[cat].forEach((ex) => {
+      const o = document.createElement("option");
+      o.value = ex.id;
+      o.textContent = ex.name + (ex.equipment ? ` (${ex.equipment})` : "");
+      og.append(o);
+    });
+    sel.append(og);
+  });
+  return sel;
+}
+
 // ---------- Välilehdet ----------
 const TAB_LOADERS = {}; // täytetään myöhemmin: { tabName: async () => {...} }
 
@@ -63,22 +83,27 @@ async function loadExercises() {
   if (!exercisesCache.length) {
     list.append(el("p", { class: "muted" }, "Ei liikkeitä vielä. Lisää ensimmäinen liike."));
   }
-  for (const ex of exercisesCache) {
-    const tags = [];
-    if (ex.is_main_lift) tags.push(el("span", { class: "tag main" }, "pääliike"));
-    if (ex.category) tags.push(el("span", { class: "tag" }, ex.category));
-    if (ex.sport) tags.push(el("span", { class: "tag" }, ex.sport));
-    const item = el("div", { class: "item" },
-      el("div", { class: "row-between" },
-        el("strong", {}, ex.name),
-        el("button", { class: "small danger", onclick: async () => {
-          if (confirm(`Poista liike "${ex.name}"?`)) { await api.del(`/api/exercises/${ex.id}`); loadExercises(); }
-        } }, "Poista")
-      ),
-      el("div", {}, ...tags)
-    );
-    if (ex.muscle_group) item.append(el("div", { class: "muted" }, ex.muscle_group));
-    list.append(item);
+  // Ryhmittele kategorioittain
+  const byCat = {};
+  exercisesCache.forEach((ex) => (byCat[ex.category || "muu"] = byCat[ex.category || "muu"] || []).push(ex));
+  for (const cat of Object.keys(byCat).sort()) {
+    list.append(el("h3", { style: "text-transform:capitalize;margin-bottom:4px" }, cat));
+    for (const ex of byCat[cat]) {
+      const tags = [];
+      if (ex.is_main_lift) tags.push(el("span", { class: "tag main" }, "pääliike"));
+      if (ex.equipment) tags.push(el("span", { class: "tag" }, ex.equipment));
+      tags.push(el("span", { class: "tag" }, `${ex.default_sets}×${ex.default_reps}`));
+      if (ex.sport) tags.push(el("span", { class: "tag" }, ex.sport));
+      const item = el("div", { class: "item" },
+        el("div", { class: "row-between" },
+          el("div", {}, el("strong", {}, ex.name),
+            ex.muscle_group ? el("span", { class: "muted" }, " · " + ex.muscle_group) : ""),
+          el("button", { class: "small danger", onclick: async () => {
+            if (confirm(`Poista liike "${ex.name}"?`)) { await api.del(`/api/exercises/${ex.id}`); loadExercises(); }
+          } }, "Poista")),
+        el("div", { class: "btn-row" }, ...tags));
+      list.append(item);
+    }
   }
 }
 
@@ -87,15 +112,25 @@ document.getElementById("new-exercise-btn").addEventListener("click", () => {
   form.classList.remove("hidden");
   form.innerHTML = "";
   const name = el("input", { placeholder: "Esim. Kyykky" });
-  const category = el("input", { placeholder: "Kategoria (esim. jalat)" });
+  const category = el("input", { list: "cat-list", placeholder: "esim. jalat" });
+  const catList = el("datalist", { id: "cat-list" });
+  ["rinta", "selkä", "jalat", "olkapäät", "hauis", "ojentajat", "vatsa", "pohkeet", "olympia"]
+    .forEach((c) => catList.append(el("option", {}, c)));
   const muscle = el("input", { placeholder: "Lihasryhmä" });
+  const equip = el("select", {}, ...["", "tanko", "käsipainot", "talja", "kone", "keho", "kahvakuula", "muu"]
+    .map((e) => el("option", { value: e }, e || "(väline)")));
+  const dsets = el("input", { type: "number", value: 3 });
+  const dreps = el("input", { type: "number", value: 10 });
   const sport = el("input", { placeholder: "Laji (esim. voimanosto)" });
   const main = el("input", { type: "checkbox" });
   form.append(
     el("div", { class: "grid" },
-      el("label", {}, "Nimi", name),
+      el("label", {}, "Nimi", name, catList),
       el("label", {}, "Kategoria", category),
       el("label", {}, "Lihasryhmä", muscle),
+      el("label", {}, "Väline", equip),
+      el("label", {}, "Oletussarjat", dsets),
+      el("label", {}, "Oletustoistot", dreps),
       el("label", {}, "Laji", sport),
       el("label", {}, "Pääliike (total)", main)
     ),
@@ -107,6 +142,9 @@ document.getElementById("new-exercise-btn").addEventListener("click", () => {
             name: name.value.trim(),
             category: category.value.trim() || null,
             muscle_group: muscle.value.trim() || null,
+            equipment: equip.value || null,
+            default_sets: +dsets.value || 3,
+            default_reps: +dreps.value || 10,
             sport: sport.value.trim() || null,
             is_main_lift: main.checked,
           });
@@ -188,8 +226,7 @@ document.getElementById("new-program-btn").addEventListener("click", () => {
         el("button", { class: "small danger", onclick: () => { days.splice(di, 1); renderDays(); } }, "Poista päivä")));
       if (day.dayType === "train") {
         day.exercises.forEach((pe, ei) => {
-          const sel = el("select", { onchange: (e) => (pe.exercise_id = +e.target.value) });
-          exercisesCache.forEach((ex) => sel.append(el("option", { value: ex.id }, ex.name)));
+          const sel = exerciseSelect((e) => (pe.exercise_id = +e.target.value));
           sel.value = pe.exercise_id;
           const sets = el("input", { type: "number", value: pe.target_sets, oninput: (e) => (pe.target_sets = +e.target.value) });
           const reps = el("input", { type: "number", value: pe.target_reps, oninput: (e) => (pe.target_reps = +e.target.value) });
@@ -205,7 +242,9 @@ document.getElementById("new-program-btn").addEventListener("click", () => {
             el("button", { class: "small danger", onclick: () => { day.exercises.splice(ei, 1); renderDays(); } }, "x")));
         });
         block.append(el("button", { class: "small", onclick: () => {
-          day.exercises.push({ exercise_id: exercisesCache[0].id, order_index: day.exercises.length, target_sets: 3, target_reps: 5, target_weight: null, rest_seconds: null });
+          const ex0 = exercisesCache[0];
+          day.exercises.push({ exercise_id: ex0.id, order_index: day.exercises.length,
+            target_sets: ex0.default_sets || 3, target_reps: ex0.default_reps || 10, target_weight: null, rest_seconds: null });
           renderDays();
         } }, "+ Liike"));
       }
@@ -319,19 +358,21 @@ async function openWorkoutEditor(id) {
 
   for (const we of w.exercises) editor.append(renderWorkoutExercise(id, we));
 
-  // Liikkeen lisäys
-  const addSel = el("select", {});
-  exercisesCache.forEach((ex) => addSel.append(el("option", { value: ex.id }, ex.name)));
+  // Liikkeen lisäys (kategorioittain ryhmitelty valinta)
+  const addSel = exerciseSelect();
   editor.append(el("div", { class: "exercise-block btn-row" }, addSel,
     el("button", { class: "small primary", onclick: async () => {
       if (!exercisesCache.length) return alert("Lisää ensin liikkeitä.");
-      // Liikearkisto: esitäytä edellisellä painolla/toistoilla jos löytyy.
-      const last = await api.get(pq(`/api/stats/exercises/${+addSel.value}/last`));
+      const exId = +addSel.value;
+      const ex = exercisesCache.find((e) => e.id === exId) || {};
+      // Liikearkisto: esitäytä edellisellä painolla; sarjat liikkeen oletuksista.
+      const last = await api.get(pq(`/api/stats/exercises/${exId}/last`));
       const w0 = last.last ? last.last.weight : 0;
-      const r0 = last.last ? last.last.reps : 5;
+      const nSets = ex.default_sets || 3;
+      const reps = ex.default_reps || (last.last ? last.last.reps : 10);
+      const sets = Array.from({ length: nSets }, (_, i) => ({ set_index: i, reps, weight: w0 }));
       await api.post(`/api/workouts/${id}/exercises`, {
-        exercise_id: +addSel.value, order_index: w.exercises.length,
-        sets: [{ set_index: 0, reps: r0, weight: w0 }],
+        exercise_id: exId, order_index: w.exercises.length, sets,
       });
       openWorkoutEditor(id);
     } }, "+ Lisää liike treeniin")));
@@ -907,11 +948,91 @@ document.getElementById("nf-save").addEventListener("click", async () => {
   } catch (e) { alert("Virhe: " + e.message); }
 });
 
+// =================== DIEETTI ===================
+let dietModelsCache = [];
+
+async function loadDiet() {
+  dietModelsCache = await api.get("/api/diet/models");
+  const sel = document.getElementById("diet-model");
+  sel.innerHTML = "";
+  dietModelsCache.forEach((m) => sel.append(el("option", { value: m.id }, `${m.name} (${m.target_rate >= 0 ? "+" : ""}${m.target_rate} kg/vk)`)));
+  const showInfo = () => {
+    const m = dietModelsCache.find((x) => x.id === sel.value);
+    document.getElementById("diet-model-info").textContent = m ? m.info : "";
+  };
+  sel.onchange = showInfo;
+
+  const phase = await api.get(pq("/api/diet/phase"));
+  if (phase) { sel.value = dietModelsCache.find((m) => m.name === phase.model)?.id || sel.value; }
+  showInfo();
+  await renderDietStatus();
+}
+
+document.getElementById("diet-start").addEventListener("click", async () => {
+  const model = document.getElementById("diet-model").value;
+  await api.post("/api/diet/phase", { profile_id: currentProfileId, model });
+  renderDietStatus();
+});
+
+async function renderDietStatus() {
+  const s = await api.get(pq("/api/diet/status"));
+  const div = document.getElementById("diet-status");
+  div.innerHTML = "";
+  if (s.message && !s.targets) {
+    div.append(el("div", { class: "card muted" }, s.message));
+    return;
+  }
+  const t = s.targets;
+  // Tavoitekortti
+  div.append(el("div", { class: "card" },
+    el("h3", {}, `Tavoite: ${s.model || s.goal} (${s.target_rate >= 0 ? "+" : ""}${s.target_rate} kg/vk)`),
+    el("div", { class: "grid" },
+      el("div", { class: "result-box" }, el("div", { class: "muted" }, "Päivätavoite"),
+        el("div", { class: "big" }, `${t.kcal} kcal`),
+        el("div", { class: "muted" }, `P ${t.protein_g}g · H ${t.carbs_g}g · R ${t.fat_g}g`)),
+      el("div", { class: "result-box" }, el("div", { class: "muted" }, "Ylläpito (TDEE)"),
+        el("div", { class: "big" }, `${t.tdee} kcal`),
+        el("div", { class: "muted" }, `Vaje/ylijäämä ${t.daily_delta} kcal/pv`)))));
+
+  // Trendi & suositus
+  div.append(el("div", { class: "card" },
+    el("h3", {}, "Kehitys (viikkokeskiarvo)"),
+    el("div", { class: "muted" },
+      `Paino ${s.week_avg_weight ?? "—"} kg · trendi ${s.trend_kg_per_week != null ? (s.trend_kg_per_week >= 0 ? "+" : "") + s.trend_kg_per_week + " kg/vk" : "—"}` +
+      (s.intake_avg_kcal ? ` · keskisyönti ${s.intake_avg_kcal} kcal` : "")),
+    el("div", { class: "result-box", style: "margin-top:10px" }, s.recommendation)));
+
+  // Voiman seuranta dieetillä
+  if (s.strength_note) {
+    div.append(el("div", { class: "card" }, el("h3", {}, "Voiman seuranta"),
+      el("div", { class: "muted" }, s.strength_note)));
+  }
+
+  // Vyötärö / bulk-raja
+  if (s.waist && s.waist.message) {
+    div.append(el("div", { class: "card" }, el("h3", {}, "Vyötärö"),
+      el("div", { class: "muted" }, s.waist.message)));
+  }
+
+  // Kehon alueet
+  if (s.body_areas && s.body_areas.areas.length) {
+    const card = el("div", { class: "card" }, el("h3", {}, "Kehon alueiden kehitys"));
+    const tbl = el("table", {});
+    tbl.append(el("tr", {}, el("th", {}, "Kohta"), el("th", {}, "Nyt (cm)"), el("th", {}, "Muutos"), el("th", {}, "Huomio")));
+    s.body_areas.areas.forEach((a) => tbl.append(el("tr", {},
+      el("td", {}, a.site), el("td", {}, String(a.latest_cm)),
+      el("td", {}, `${a.change_cm >= 0 ? "+" : ""}${a.change_cm} cm`), el("td", { class: "muted" }, a.note || ""))));
+    card.append(tbl);
+    div.append(card);
+  }
+}
+
 // ---------- Välilehtien laiskat lataukset ----------
 TAB_LOADERS.overview = loadOverview;
 TAB_LOADERS.progress = loadProgress;
 TAB_LOADERS.body = loadBody;
 TAB_LOADERS.nutrition = loadNutrition;
+TAB_LOADERS.diet = loadDiet;
 TAB_LOADERS.profiles = loadProfilesTab;
 
 // ---------- Käynnistys ----------

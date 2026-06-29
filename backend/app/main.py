@@ -16,10 +16,12 @@ from .database import (
     engine,
     ensure_columns,
     ensure_default_profile,
+    ensure_seed_exercises,
     ensure_seed_foods,
 )
 from .routers import (
     body,
+    diet,
     engine_api,
     exercises,
     nutrition,
@@ -31,10 +33,11 @@ from .routers import (
 )
 
 # Luo tietokantataulut jos niitä ei vielä ole, lisää puuttuvat sarakkeet ja
-# varmista oletusprofiili + yleiset ruoat (jolloin sovellus toimii heti).
+# varmista oletusprofiili + valmiit liikkeet ja yleiset ruoat.
 Base.metadata.create_all(bind=engine)
 ensure_columns()
 ensure_default_profile()
+ensure_seed_exercises()
 ensure_seed_foods()
 
 app = FastAPI(
@@ -59,6 +62,7 @@ app.include_router(stats.router)
 app.include_router(templates.router)
 app.include_router(body.router)
 app.include_router(nutrition.router)
+app.include_router(diet.router)
 
 
 @app.get("/api/health")

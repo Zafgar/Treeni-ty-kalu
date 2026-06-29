@@ -80,6 +80,41 @@ def test_age_from_birthdate():
     assert engine.age_from_birthdate(None, date(2026, 1, 1)) is None
 
 
+def test_weekly_average_and_trend():
+    from datetime import date, timedelta
+    today = date(2026, 6, 28)
+    # Kaksi viikkoa dataa: edellinen viikko 80, tämä viikko 79
+    pts = []
+    for i in range(7):
+        pts.append((today - timedelta(days=i), 79.0))
+        pts.append((today - timedelta(days=7 + i), 80.0))
+    assert engine.weekly_average(pts, today, 7) == 79.0
+    # Trendi: 79 - 80 = -1 kg/viikko
+    assert engine.weight_trend(pts, today) == -1.0
+
+
+def test_adaptive_tdee():
+    # Söi 2500 kcal/pv, paino putosi 1 kg 14 vrk -> TDEE > 2500
+    tdee = engine.adaptive_tdee(2500, -1.0, 14)
+    assert tdee == round(2500 + 7700 / 14)
+
+
+def test_macro_targets_cut():
+    t = engine.macro_targets(80, "cut", 2800, -0.5)
+    assert t["protein_g"] == 176  # 80 * 2.2
+    assert t["fat_g"] == 64       # 80 * 0.8
+    assert t["kcal"] < 2800       # vaje
+    assert t["carbs_g"] >= 0
+
+
+def test_waist_assessment_bulk():
+    a = engine.waist_assessment(110, 180, "bulk")
+    assert a["waist_height_ratio"] == round(110 / 180, 3)
+    assert a["level"] in ("ok", "koholla", "korkea")
+    high = engine.waist_assessment(110, 180, "bulk")  # 0.611 -> korkea
+    assert high["level"] == "korkea"
+
+
 def test_estimate_total():
     lifts = {
         "kyykky": {"weight": 200, "reps": 5, "rir": 1},

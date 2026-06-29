@@ -23,6 +23,7 @@
       <button data-tab="programs">Ohjelmat</button>
       <button data-tab="exercises">Liikkeet</button>
       <button data-tab="nutrition">Ruoka</button>
+      <button data-tab="diet">Dieetti</button>
       <button data-tab="profiles">Profiilit</button>
       <button data-tab="calc">Painolaskuri</button>
     </nav>
@@ -89,6 +90,22 @@
         <div id="measure-legend" class="btn-row"></div>
         <canvas id="measure-chart" width="840" height="280"></canvas>
       </div>
+    </section>
+
+    <!-- DIEETTI -->
+    <section id="tab-diet" class="tab">
+      <h2>Dieetti & ravinto-ohjaus</h2>
+      <div class="card">
+        <h3>Valitse dieettimalli</h3>
+        <p class="muted">Järjestelmä seuraa painoa viikkokeskiarvona ja säätää
+          suositukset oikeaan suuntaan — ei yksittäisten päivien mukaan.</p>
+        <div class="btn-row">
+          <select id="diet-model"></select>
+          <button id="diet-start" class="primary">Aloita / vaihda vaihe</button>
+        </div>
+        <div id="diet-model-info" class="muted"></div>
+      </div>
+      <div id="diet-status"></div>
     </section>
 
     <!-- PROFIILIT -->

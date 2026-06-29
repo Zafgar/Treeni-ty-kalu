@@ -44,6 +44,9 @@ def ensure_columns():
         ("workout_sessions", "status", "VARCHAR(12) DEFAULT 'completed'"),
         ("workout_exercises", "done", "BOOLEAN DEFAULT 0"),
         ("workout_exercises", "missed_reps", "INTEGER DEFAULT 0"),
+        ("exercises", "equipment", "VARCHAR(40)"),
+        ("exercises", "default_sets", "INTEGER DEFAULT 3"),
+        ("exercises", "default_reps", "INTEGER DEFAULT 10"),
     ]
     inspector = inspect(engine)
     existing_tables = set(inspector.get_table_names())
@@ -73,6 +76,83 @@ def ensure_default_profile():
         # Liitä profiloimaton (NULL) data oletusprofiiliin.
         conn.execute(text("UPDATE programs SET profile_id = :pid WHERE profile_id IS NULL"), {"pid": default_id})
         conn.execute(text("UPDATE workout_sessions SET profile_id = :pid WHERE profile_id IS NULL"), {"pid": default_id})
+
+
+def ensure_seed_exercises():
+    """Siemennä kattava liikekirjasto (kategoria + väline + oletussarjat) jos
+    liikkeitä ei vielä ole. Moniniveliset saavat matalat toistot (voima),
+    eristävät korkeammat (hypertrofia)."""
+    from sqlalchemy import text
+
+    # (nimi, kategoria, lihasryhmä, väline, sarjat, toistot, pääliike, laji)
+    lib = [
+        # Rinta
+        ("Penkkipunnerrus", "rinta", "rintalihas", "tanko", 5, 5, True, "voimanosto"),
+        ("Vinopenkki tanko", "rinta", "ylärinta", "tanko", 4, 8, False, None),
+        ("Penkkipunnerrus käsipainoilla", "rinta", "rintalihas", "käsipainot", 4, 10, False, None),
+        ("Vinopenkki käsipainoilla", "rinta", "ylärinta", "käsipainot", 3, 10, False, None),
+        ("Taljaristikko", "rinta", "rintalihas", "talja", 3, 12, False, None),
+        ("Dippi", "rinta", "alarinta", "keho", 3, 10, False, None),
+        ("Punnerrus", "rinta", "rintalihas", "keho", 3, 15, False, None),
+        # Selkä
+        ("Maastaveto", "selkä", "selkä/takaketju", "tanko", 5, 5, True, "voimanosto"),
+        ("Ylätalja eteen", "selkä", "leveä selkälihas", "talja", 4, 10, False, None),
+        ("Alatalja soutu", "selkä", "selkä", "talja", 4, 10, False, None),
+        ("Tankosoutu", "selkä", "selkä", "tanko", 4, 8, False, None),
+        ("Käsipainosoutu", "selkä", "selkä", "käsipainot", 3, 10, False, None),
+        ("Leuanveto", "selkä", "leveä selkälihas", "keho", 4, 8, False, None),
+        ("T-tankosoutu", "selkä", "selkä", "tanko", 4, 10, False, None),
+        # Jalat
+        ("Takakyykky", "jalat", "etureisi", "tanko", 5, 5, True, "voimanosto"),
+        ("Etukyykky", "jalat", "etureisi", "tanko", 4, 6, False, None),
+        ("Jalkaprässi", "jalat", "etureisi", "kone", 4, 10, False, None),
+        ("Askelkyykky", "jalat", "etureisi/pakara", "käsipainot", 3, 12, False, None),
+        ("Bulgarian askelkyykky", "jalat", "etureisi/pakara", "käsipainot", 3, 10, False, None),
+        ("Romanialainen maastaveto", "jalat", "takareisi", "tanko", 4, 8, False, None),
+        ("Jalkojen ojennus", "jalat", "etureisi", "kone", 3, 15, False, None),
+        ("Jalkojen koukistus", "jalat", "takareisi", "kone", 3, 12, False, None),
+        ("Pohjenousu", "pohkeet", "pohje", "kone", 4, 15, False, None),
+        ("Lantionnosto", "jalat", "pakara", "tanko", 3, 12, False, None),
+        # Olkapäät
+        ("Pystypunnerrus", "olkapäät", "olkapää", "tanko", 5, 5, False, None),
+        ("Pystypunnerrus käsipainoilla", "olkapäät", "olkapää", "käsipainot", 4, 10, False, None),
+        ("Sivunostot", "olkapäät", "sivuolkapää", "käsipainot", 3, 15, False, None),
+        ("Etunostot", "olkapäät", "etuolkapää", "käsipainot", 3, 12, False, None),
+        ("Vipunostot taakse", "olkapäät", "takaolkapää", "käsipainot", 3, 15, False, None),
+        ("Pystysoutu", "olkapäät", "olkapää/lapa", "tanko", 3, 12, False, None),
+        ("Face pull", "olkapäät", "takaolkapää", "talja", 3, 15, False, None),
+        # Hauis
+        ("Hauiskääntö tanko", "hauis", "hauis", "tanko", 3, 10, False, None),
+        ("Hauiskääntö käsipaino", "hauis", "hauis", "käsipainot", 3, 12, False, None),
+        ("Vasarakääntö", "hauis", "hauis/kyynärvarsi", "käsipainot", 3, 12, False, None),
+        ("Taljahauis", "hauis", "hauis", "talja", 3, 15, False, None),
+        # Ojentajat
+        ("Ranskalainen punnerrus", "ojentajat", "ojentaja", "tanko", 3, 10, False, None),
+        ("Taljapunnerrus", "ojentajat", "ojentaja", "talja", 3, 12, False, None),
+        ("Kapea penkki", "ojentajat", "ojentaja", "tanko", 4, 8, False, None),
+        ("Ojentajan punnerrus köysi", "ojentajat", "ojentaja", "talja", 3, 15, False, None),
+        # Vatsa / keskivartalo
+        ("Vatsarutistus", "vatsa", "vatsalihas", "keho", 3, 20, False, None),
+        ("Lankku", "vatsa", "keskivartalo", "keho", 3, 60, False, None),
+        ("Riipunta jalannosto", "vatsa", "alavatsa", "keho", 3, 15, False, None),
+        ("Taljarutistus", "vatsa", "vatsalihas", "talja", 3, 20, False, None),
+        # Olympia
+        ("Tempaus", "olympia", "koko keho", "tanko", 5, 3, True, "olympia"),
+        ("Rinnalleveto ja työntö", "olympia", "koko keho", "tanko", 5, 2, True, "olympia"),
+        ("Kahvakuulaheilautus", "jalat", "takaketju", "kahvakuula", 3, 15, False, None),
+    ]
+    with engine.begin() as conn:
+        count = conn.execute(text("SELECT COUNT(*) FROM exercises")).scalar()
+        if count and count > 0:
+            return
+        for name, cat, mg, eq, sets, reps, main, sport in lib:
+            conn.execute(
+                text("INSERT INTO exercises (name, category, muscle_group, equipment, "
+                     "default_sets, default_reps, is_main_lift, sport, unit, created_at) "
+                     "VALUES (:n, :c, :m, :e, :s, :r, :main, :sp, 'kg', CURRENT_TIMESTAMP)"),
+                {"n": name, "c": cat, "m": mg, "e": eq, "s": sets, "r": reps,
+                 "main": 1 if main else 0, "sp": sport},
+            )
 
 
 def ensure_seed_foods():

@@ -80,6 +80,17 @@ python -m pytest backend/tests/ -q
 - **Ravintoseuranta:** oma ruokakirjasto (yleiset ruoat valmiina) makroineen
   (kcal/proteiini/hiilarit/rasva), päiväkirjaus ja energiansaannin
   intake-graafi
+- **Liikekirjasto:** valmiit liikkeet kategorioittain (rinta, selkä, jalat,
+  olkapäät, hauis, ojentajat, vatsa, pohkeet, olympia) ja välineittäin (tanko,
+  käsipainot, talja, kone, keho, kahvakuula); kukin järkevillä oletussarjoilla.
+  Kategorioittain ryhmitelty valitsin treeniin/ohjelmaan, sarjat alustetaan
+  liikkeen oletuksista.
+- **Dieettimoottori:** viikkokeskiarvoon perustuva painotrendi, adaptiivinen
+  TDEE (toteutuneesta syönnistä + painomuutoksesta), kcal- ja makrotavoitteet
+  kehon painosta ja tavoitteesta, 4 valmista dieettimallia (cut/ylläpito/lean
+  bulk), suositus kalorien säädöstä, bulkin vyötärö/pituus-raja-arvio, voiman
+  säilymisen seuranta dieetillä ja kehon alueiden kehitys (uuden lihaksen
+  indikaattori vyötäröön nähden)
 
 ### Tämänhetkisen 1RM:n sääntö (kahden ohjelman "kiista")
 
@@ -98,7 +109,10 @@ Profile ──< Program ──< ProgramDay ──< ProgramExercise >── Exerc
    │      (status: planned/completed/skipped;  WorkoutExercise: done, missed_reps)
    ├──< BodyEntry        (paino, rasva-%, uni, HRV, syke, kcal)
    ├──< Measurement      (ympärysmitat per kohta)
-   └──< FoodLog ──> Food (ruokakirjasto, makrot per 100 g)
+   ├──< FoodLog ──> Food (ruokakirjasto, makrot per 100 g)
+   └──< DietPhase        (cut/maintain/bulk, tavoitetahti kg/vk)
+
+Exercise: + category, equipment, default_sets/reps (valmis liikekirjasto)
 ```
 
 ## Suunniteltu jatko (visio)

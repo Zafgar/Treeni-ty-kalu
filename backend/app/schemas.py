@@ -11,6 +11,9 @@ class ExerciseBase(BaseModel):
     muscle_group: str | None = None
     is_main_lift: bool = False
     sport: str | None = None
+    equipment: str | None = None
+    default_sets: int = 3
+    default_reps: int = 10
     unit: str = "kg"
     notes: str | None = None
 
@@ -25,6 +28,9 @@ class ExerciseUpdate(BaseModel):
     muscle_group: str | None = None
     is_main_lift: bool | None = None
     sport: str | None = None
+    equipment: str | None = None
+    default_sets: int | None = None
+    default_reps: int | None = None
     unit: str | None = None
     notes: str | None = None
 

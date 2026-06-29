@@ -63,6 +63,12 @@ class Exercise(Base):
     is_main_lift: Mapped[bool] = mapped_column(Boolean, default=False)
     # Mihin lajitotaliin liike kuuluu, esim. "voimanosto" tai "olympia"
     sport: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    # Väline: tanko, käsipainot, talja, kahvakuula, keho, kone, muu
+    equipment: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    # Yleisesti sopivat oletussarjat/-toistot (esim. moniniveliset 5x5,
+    # eristävät 3x12) joilla liike alustetaan ohjelmaan/treeniin.
+    default_sets: Mapped[int] = mapped_column(Integer, default=3)
+    default_reps: Mapped[int] = mapped_column(Integer, default=10)
     unit: Mapped[str] = mapped_column(String(10), default="kg")
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -277,3 +283,26 @@ class FoodLog(Base):
     grams: Mapped[float] = mapped_column(Float, default=100.0)
 
     food: Mapped["Food"] = relationship()
+
+
+class DietPhase(Base):
+    """Aktiivinen dieettivaihe profiilille (cut / maintain / bulk).
+
+    Tavoitetahti (kg/viikko) ja malli ohjaavat kcal- ja makrotavoitteita.
+    Kehitystä seurataan viikkokeskiarvolla, jolloin korjaukset osuvat oikeaan
+    suuntaan (ei päivän heilahduksiin).
+    """
+
+    __tablename__ = "diet_phases"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    profile_id: Mapped[int] = mapped_column(ForeignKey("profiles.id", ondelete="CASCADE"), index=True)
+    goal: Mapped[str] = mapped_column(String(12), default="maintain")  # cut | maintain | bulk
+    model: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    # Tavoitemuutos kg/viikko (cut negatiivinen, bulk positiivinen)
+    target_rate: Mapped[float] = mapped_column(Float, default=0.0)
+    start_date: Mapped[date] = mapped_column(Date, default=date.today)
+    start_weight: Mapped[float | None] = mapped_column(Float, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
