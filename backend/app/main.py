@@ -11,11 +11,18 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from .database import Base, engine, ensure_columns, ensure_default_profile
+from .database import (
+    Base,
+    engine,
+    ensure_columns,
+    ensure_default_profile,
+    ensure_seed_foods,
+)
 from .routers import (
     body,
     engine_api,
     exercises,
+    nutrition,
     profiles,
     programs,
     stats,
@@ -24,10 +31,11 @@ from .routers import (
 )
 
 # Luo tietokantataulut jos niitä ei vielä ole, lisää puuttuvat sarakkeet ja
-# varmista oletusprofiili (jolloin sovellus toimii heti).
+# varmista oletusprofiili + yleiset ruoat (jolloin sovellus toimii heti).
 Base.metadata.create_all(bind=engine)
 ensure_columns()
 ensure_default_profile()
+ensure_seed_foods()
 
 app = FastAPI(
     title="Treeni-ty-kalu API",
@@ -50,6 +58,7 @@ app.include_router(engine_api.router)
 app.include_router(stats.router)
 app.include_router(templates.router)
 app.include_router(body.router)
+app.include_router(nutrition.router)
 
 
 @app.get("/api/health")

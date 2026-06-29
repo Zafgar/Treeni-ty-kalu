@@ -149,6 +149,11 @@ td input.notes { width: 100%; }
   color: var(--muted);
 }
 .tag.main { background: rgba(79,140,255,0.15); color: var(--accent); border-color: var(--accent); }
+.tag.status-done { background: rgba(52,211,153,0.15); color: var(--accent-2); border-color: var(--accent-2); }
+.tag.status-planned { background: rgba(245,158,11,0.15); color: #f59e0b; border-color: #f59e0b; }
+.tag.status-skip { background: rgba(154,163,178,0.12); color: var(--muted); }
+
+.exercise-block.ex-done { border-left: 3px solid var(--accent-2); padding-left: 12px; }
 
 .btn-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
 

@@ -149,6 +149,8 @@ class WorkoutSession(Base):
     )
     name: Mapped[str | None] = mapped_column(String(120), nullable=True)
     bodyweight: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # "planned" (suunniteltu), "completed" (suoritettu) tai "skipped" (skipattu)
+    status: Mapped[str] = mapped_column(String(12), default="completed")
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
@@ -168,6 +170,12 @@ class WorkoutExercise(Base):
     )
     exercise_id: Mapped[int] = mapped_column(ForeignKey("exercises.id"))
     order_index: Mapped[int] = mapped_column(Integer, default=0)
+    # Liike kuitattu valmiiksi (kaikki sarjat tehty)
+    done: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Pikakirjaus: montako toistoa jäi yhteensä vajaaksi (esim. "4 vajaa")
+    # ilman että tarvitsee kirjata sarjoja erikseen (5,5,4,2). Vähennetään
+    # volyymistä, jotta samalla painolla tehty sarjojen suoritus näkyy graafilla.
+    missed_reps: Mapped[int] = mapped_column(Integer, default=0)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     session: Mapped["WorkoutSession"] = relationship(back_populates="exercises")
@@ -235,3 +243,37 @@ class Measurement(Base):
     entry_date: Mapped[date] = mapped_column(Date, default=date.today, index=True)
     site: Mapped[str] = mapped_column(String(60), index=True)
     value_cm: Mapped[float] = mapped_column(Float)
+
+
+class Food(Base):
+    """Ruoka-aine (yhteinen kirjasto). Makrot ja energia 100 grammaa kohden.
+
+    Esim. maitorahka, banaani. Käyttäjä voi lisätä omia helposti.
+    """
+
+    __tablename__ = "foods"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    # Arvot per 100 g
+    kcal: Mapped[float] = mapped_column(Float, default=0.0)
+    protein_g: Mapped[float] = mapped_column(Float, default=0.0)
+    carbs_g: Mapped[float] = mapped_column(Float, default=0.0)
+    fat_g: Mapped[float] = mapped_column(Float, default=0.0)
+    # Tyypillinen annoskoko grammoina (esim. banaani ~120 g) nopeaa kirjausta varten
+    default_grams: Mapped[float | None] = mapped_column(Float, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class FoodLog(Base):
+    """Yhden ruoka-aineen kirjaus tietylle päivälle ja profiilille."""
+
+    __tablename__ = "food_logs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    profile_id: Mapped[int] = mapped_column(ForeignKey("profiles.id", ondelete="CASCADE"), index=True)
+    entry_date: Mapped[date] = mapped_column(Date, default=date.today, index=True)
+    food_id: Mapped[int] = mapped_column(ForeignKey("foods.id"))
+    grams: Mapped[float] = mapped_column(Float, default=100.0)
+
+    food: Mapped["Food"] = relationship()

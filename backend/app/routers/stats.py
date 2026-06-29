@@ -41,6 +41,8 @@ def _exercise_session_points(
     )
     if profile_id is not None:
         q = q.filter(models.WorkoutSession.profile_id == profile_id)
+    # Skipattuja treenejä ei lasketa kehitykseen.
+    q = q.filter(models.WorkoutSession.status != "skipped")
     rows = q.order_by(models.WorkoutSession.session_date).all()
     # Yhdistä saman päivän treenit (jos sama liike useassa treenissä per päivä)
     by_date: dict[date, dict] = {}
@@ -48,6 +50,11 @@ def _exercise_session_points(
         sets = _sets_payload(we)
         best = engine.best_1rm_from_sets(sets)
         volume = sum(s["weight"] * s["reps"] for s in sets if s["completed"])
+        # Vähennä pikakirjattu vajaus volyymistä työpainolla, jotta samalla
+        # painolla tehty sarjojen suoritus näkyy oikein kehityskäyrällä.
+        if we.missed_reps:
+            top_w = max((s["weight"] for s in sets if s["completed"]), default=0.0)
+            volume = max(0.0, volume - we.missed_reps * top_w)
         d = session.session_date
         entry = by_date.setdefault(
             d,
@@ -213,6 +220,120 @@ def total(
         "per_lift": per_lift,
         "timeline": timeline,
     }
+
+
+@router.get("/exercises/{exercise_id}/last")
+def exercise_last(
+    exercise_id: int, profile_id: int | None = Query(None), db: Session = Depends(get_db)
+):
+    """Liikearkisto: viimeksi käytetty paino ja ehdotetut raudat eri toistoille.
+
+    Käytetään kun liike lisätään treeniin -> esitäyttö edellisellä painolla.
+    1RM-arviota ei korosteta (ei kiinnosta joka liikkeessä), vaan sopivat
+    painot eri sarjamäärille.
+    """
+    points = _exercise_session_points(db, exercise_id, profile_id)
+    valid = [p for p in points if p["best_set"]]
+    if not valid:
+        return {"exercise_id": exercise_id, "last": None, "suggestions": {}}
+    last = max(valid, key=lambda p: p["date"])
+    bs = last["best_set"]
+    one_rm = engine.estimate_1rm(bs["weight"], bs["reps"], bs.get("rir"))
+    suggestions = {
+        str(r): engine.round_to_increment(engine.weight_for_reps(one_rm, r, bs.get("rir")))
+        for r in (1, 3, 5, 8, 10, 12)
+    }
+    return {
+        "exercise_id": exercise_id,
+        "last": {
+            "date": last["date"].isoformat(),
+            "weight": bs["weight"], "reps": bs["reps"], "rir": bs.get("rir"),
+        },
+        "suggestions": suggestions,
+    }
+
+
+@router.get("/exercises/{exercise_id}/suggest")
+def exercise_suggest(
+    exercise_id: int,
+    target_reps: int = Query(5),
+    target_rir: float | None = Query(None),
+    increase: bool = Query(False),
+    profile_id: int | None = Query(None),
+    db: Session = Depends(get_db),
+):
+    """Ehdota seuraavan kerran paino tehdyn perusteella.
+
+    Jos increase = true (käyttäjä aikoo korottaa), lisätään pieni nousu kun
+    edellinen suoritus meni täysillä; muuten ehdotetaan toistomäärää vastaava
+    paino. Käyttäjä voi hyväksyä tai määrittää itse.
+    """
+    points = _exercise_session_points(db, exercise_id, profile_id)
+    valid = [p for p in points if p["best_set"]]
+    if not valid:
+        return {"suggested_weight": None, "note": "Ei aiempaa dataa tälle liikkeelle."}
+    last = max(valid, key=lambda p: p["date"])
+    bs = last["best_set"]
+    one_rm = engine.estimate_1rm(bs["weight"], bs["reps"], bs.get("rir"))
+    rir = target_rir if target_rir is not None else bs.get("rir")
+    base = engine.weight_for_reps(one_rm, target_reps, rir)
+    if increase:
+        base *= 1.025  # ~2.5 % nosto kun aikoo korottaa
+    suggested = engine.round_to_increment(base)
+    return {
+        "suggested_weight": suggested,
+        "from": {"weight": bs["weight"], "reps": bs["reps"], "date": last["date"].isoformat()},
+        "note": (
+            f"Edellinen paras: {bs['weight']} kg × {bs['reps']}. "
+            f"Ehdotus {target_reps} toistolle" + (" (korotettu)" if increase else "") + f": {suggested} kg."
+        ),
+    }
+
+
+@router.get("/load-timeline")
+def load_timeline(profile_id: int | None = Query(None), db: Session = Depends(get_db)):
+    """Kokonaisrauta: per treenipäivä siirretty kokonais-kg, toistot ja sarjat,
+    yhdistettynä painoon ja kaloreihin samalle aikajanalle vertailua varten."""
+    wq = db.query(models.WorkoutSession).filter(models.WorkoutSession.status != "skipped")
+    if profile_id is not None:
+        wq = wq.filter(models.WorkoutSession.profile_id == profile_id)
+    sessions = wq.order_by(models.WorkoutSession.session_date).all()
+
+    by_date: dict[date, dict] = {}
+    for s in sessions:
+        agg = by_date.setdefault(s.session_date, {"total_kg": 0.0, "reps": 0, "sets": 0})
+        for we in s.exercises:
+            top_w = max((st.weight for st in we.sets if st.completed), default=0.0)
+            for st in we.sets:
+                if st.completed:
+                    agg["total_kg"] += st.weight * st.reps
+                    agg["reps"] += st.reps
+                    agg["sets"] += 1
+            if we.missed_reps:
+                agg["total_kg"] = max(0.0, agg["total_kg"] - we.missed_reps * top_w)
+                agg["reps"] = max(0, agg["reps"] - we.missed_reps)
+
+    # Paino ja kalorit samalle aikajanalle
+    body = {b.entry_date: b for b in db.query(models.BodyEntry).filter(
+        models.BodyEntry.profile_id == profile_id).all()} if profile_id else {}
+    kcal_by_date: dict[date, float] = {}
+    if profile_id is not None:
+        for fl in db.query(models.FoodLog).filter(models.FoodLog.profile_id == profile_id).all():
+            kcal_by_date[fl.entry_date] = kcal_by_date.get(fl.entry_date, 0.0) + fl.food.kcal * fl.grams / 100.0
+
+    timeline = []
+    for d in sorted(by_date):
+        agg = by_date[d]
+        b = body.get(d)
+        timeline.append({
+            "date": d.isoformat(),
+            "total_kg": round(agg["total_kg"], 1),
+            "reps": agg["reps"],
+            "sets": agg["sets"],
+            "bodyweight": b.bodyweight if b else None,
+            "kcal": round(kcal_by_date.get(d), 0) if d in kcal_by_date else None,
+        })
+    return timeline
 
 
 @router.get("/sports")

@@ -34,12 +34,15 @@ def create_workout(payload: schemas.WorkoutSessionCreate, db: Session = Depends(
         program_day_id=payload.program_day_id,
         name=payload.name,
         bodyweight=payload.bodyweight,
+        status=payload.status,
         notes=payload.notes,
     )
     for we_in in payload.exercises:
         we = models.WorkoutExercise(
             exercise_id=we_in.exercise_id,
             order_index=we_in.order_index,
+            done=we_in.done,
+            missed_reps=we_in.missed_reps,
             notes=we_in.notes,
         )
         for s_in in we_in.sets:
@@ -66,6 +69,7 @@ def create_from_program_day(day_id: int, db: Session = Depends(get_db)):
         profile_id=day.program.profile_id if day.program else None,
         program_day_id=day_id,
         name=day.label,
+        status="planned",
     )
     for idx, pe in enumerate(day.exercises):
         we = models.WorkoutExercise(exercise_id=pe.exercise_id, order_index=idx, notes=pe.notes)
@@ -136,6 +140,57 @@ def delete_workout(workout_id: int, db: Session = Depends(get_db)):
     db.commit()
 
 
+@router.post("/{workout_id}/complete", response_model=schemas.WorkoutSessionOut)
+def complete_workout(workout_id: int, db: Session = Depends(get_db)):
+    """Kuittaa treeni suoritetuksi: merkitsee kaikki liikkeet ja sarjat tehdyiksi."""
+    session = db.get(models.WorkoutSession, workout_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Treeniä ei löytynyt.")
+    session.status = "completed"
+    for we in session.exercises:
+        we.done = True
+        for s in we.sets:
+            s.completed = True
+    db.commit()
+    db.refresh(session)
+    return session
+
+
+@router.post("/{workout_id}/skip", response_model=schemas.WorkoutSessionOut)
+def skip_workout(workout_id: int, db: Session = Depends(get_db)):
+    """Skippaa treeni: merkitään väliin jätetyksi (ei lasketa kehitykseen)."""
+    session = db.get(models.WorkoutSession, workout_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Treeniä ei löytynyt.")
+    session.status = "skipped"
+    db.commit()
+    db.refresh(session)
+    return session
+
+
+@router.patch("/exercises/{workout_exercise_id}", response_model=schemas.WorkoutExerciseOut)
+def update_workout_exercise(
+    workout_exercise_id: int, payload: schemas.WorkoutExerciseBase, db: Session = Depends(get_db)
+):
+    """Päivitä liikkeen tila: OK-kuittaus, vajaus (missed_reps), huomiot.
+
+    Kun done = true, merkitään myös kaikki sarjat tehdyiksi (pikakuittaus).
+    """
+    we = db.get(models.WorkoutExercise, workout_exercise_id)
+    if not we:
+        raise HTTPException(status_code=404, detail="Liikettä ei löytynyt.")
+    data = payload.model_dump(exclude_unset=True)
+    data.pop("exercise_id", None)  # liikettä ei vaihdeta tällä
+    for key, value in data.items():
+        setattr(we, key, value)
+    if data.get("done"):
+        for s in we.sets:
+            s.completed = True
+    db.commit()
+    db.refresh(we)
+    return we
+
+
 # ---------- Liikkeet treenikerralla ----------
 @router.post(
     "/{workout_id}/exercises",
@@ -152,6 +207,8 @@ def add_exercise(
         session_id=workout_id,
         exercise_id=payload.exercise_id,
         order_index=payload.order_index,
+        done=payload.done,
+        missed_reps=payload.missed_reps,
         notes=payload.notes,
     )
     for s_in in payload.sets:

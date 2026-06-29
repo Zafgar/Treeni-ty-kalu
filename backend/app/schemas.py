@@ -128,6 +128,8 @@ class SetLogOut(SetLogBase):
 class WorkoutExerciseBase(BaseModel):
     exercise_id: int
     order_index: int = 0
+    done: bool = False
+    missed_reps: int = 0
     notes: str | None = None
 
 
@@ -149,6 +151,7 @@ class WorkoutSessionBase(BaseModel):
     program_day_id: int | None = None
     name: str | None = None
     bodyweight: float | None = None
+    status: str = "completed"
     notes: str | None = None
 
 
@@ -160,6 +163,7 @@ class WorkoutSessionUpdate(BaseModel):
     session_date: date | None = None
     name: str | None = None
     bodyweight: float | None = None
+    status: str | None = None
     notes: str | None = None
 
 
@@ -258,3 +262,37 @@ class MeasurementOut(MeasurementBase):
     model_config = ConfigDict(from_attributes=True)
     id: int
     profile_id: int
+
+
+# ---------- Food ----------
+class FoodBase(BaseModel):
+    name: str
+    kcal: float = 0.0
+    protein_g: float = 0.0
+    carbs_g: float = 0.0
+    fat_g: float = 0.0
+    default_grams: float | None = None
+
+
+class FoodCreate(FoodBase):
+    pass
+
+
+class FoodOut(FoodBase):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+
+
+class FoodLogCreate(BaseModel):
+    entry_date: date | None = None
+    food_id: int
+    grams: float = 100.0
+
+
+class FoodLogOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    profile_id: int
+    entry_date: date
+    grams: float
+    food: FoodOut

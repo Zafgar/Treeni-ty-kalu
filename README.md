@@ -68,6 +68,18 @@ python -m pytest backend/tests/ -q
   BMI, FFMI), hyvinvointidata (uni, HRV, leposyke, kalorit) ja joustavat
   ympärysmitat (hauis, pohje, rintakehä, hartia, reisi, vyötärö, kyynärvarsi…)
   aikasarjagraafeineen
+- **Treenin suoritus:** kuittaa treeni valmiiksi tai skip (skipattua ei lasketa
+  kehitykseen); per-liike "OK"-kuittaus; pikavajaus ("4 toistoa vajaaksi")
+  ilman sarjojen erittelyä — vähennetään volyymistä, jolloin samalla painolla
+  tehty sarjasuoritus näkyy kehityskäyrällä
+- **Liikearkisto:** muistaa viimeksi käytetyt painot, esitäyttää liikkeen
+  edellisellä painolla ja ehdottaa rautoja eri toistomäärille; "ehdota seuraava
+  paino" (hyväksy tai määritä itse)
+- **Kokonaisrauta:** siirretty kokonais-kg, toistot ja sarjat per treeni
+  aikajanagraafilla — vertailtavissa painoon ja kaloreihin
+- **Ravintoseuranta:** oma ruokakirjasto (yleiset ruoat valmiina) makroineen
+  (kcal/proteiini/hiilarit/rasva), päiväkirjaus ja energiansaannin
+  intake-graafi
 
 ### Tämänhetkisen 1RM:n sääntö (kahden ohjelman "kiista")
 
@@ -83,8 +95,10 @@ vanha ohjelma "kiistele" uuden kanssa. Kaikkien aikojen ennätys säilyy eriksee
 Profile ──< Program ──< ProgramDay ──< ProgramExercise >── Exercise
    │
    ├──< WorkoutSession ──< WorkoutExercise ──< SetLog
+   │      (status: planned/completed/skipped;  WorkoutExercise: done, missed_reps)
    ├──< BodyEntry        (paino, rasva-%, uni, HRV, syke, kcal)
-   └──< Measurement      (ympärysmitat per kohta)
+   ├──< Measurement      (ympärysmitat per kohta)
+   └──< FoodLog ──> Food (ruokakirjasto, makrot per 100 g)
 ```
 
 ## Suunniteltu jatko (visio)
@@ -93,5 +107,7 @@ Rakenne on suunniteltu laajennettavaksi seuraaviin ilman ydinmallien rikkomista:
 
 - Kehitysennuste todelliseen kehoreagointiin perustuen
 - Palautumis-välilehti (nopea painojen kasvu sarjoissa, total-kg)
-- Muuttujien väliset korrelaatiot (esim. uni/kalorit vs. suoritus ja kehitys)
+- Muuttujien väliset korrelaatiot (esim. uni/kalorit/proteiini vs. suoritus
+  ja kehitys) yhdistettyinä samaan kuvaajaan
+- Ohjelman seuraavien treenien siirto/aikataulutus skipatessa
 - PWA puhelimelle
