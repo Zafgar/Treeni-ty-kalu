@@ -103,6 +103,12 @@ class ProgramExercise(Base):
     rest_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Tavoiteltu varasto (reps in reserve) -> käytetään painonlaskennassa
     target_rir: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Vapaa toistomalli per sarja, esim. "12,10,8" tai "5,5,5,5,5" (pyramidit).
+    # Jos annettu, ohittaa target_sets/target_reps treeniä generoitaessa.
+    rep_scheme: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    # Prosenttimalli 1RM:stä per sarja, esim. "60,70,80,80". Käytetään
+    # voimajaksoissa: lähtöpaino lasketaan tämänhetkisestä arvioidusta 1RM:stä.
+    percent_scheme: Mapped[str | None] = mapped_column(String(120), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     day: Mapped["ProgramDay"] = relationship(back_populates="exercises")

@@ -133,6 +133,13 @@ td input.notes { width: 100%; }
 }
 .result-box .big { font-size: 1.6rem; font-weight: 700; color: var(--accent-2); }
 
+canvas { max-width: 100%; height: auto; background: var(--surface-2); border-radius: 8px; margin-top: 10px; }
+
+#overview-cards .card { text-align: center; }
+#overview-cards .big { font-size: 1.8rem; color: var(--accent); }
+
+input[id$="-search"] { width: 100%; margin-bottom: 8px; }
+
 .exercise-block { border-top: 1px solid var(--border); padding-top: 12px; margin-top: 12px; }
 .day-block { border-left: 3px solid var(--accent); padding-left: 12px; margin: 12px 0; }
 .day-block.rest { border-left-color: var(--muted); opacity: 0.85; }

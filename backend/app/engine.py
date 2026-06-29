@@ -113,6 +113,63 @@ def convert_scheme(
     )
 
 
+def best_1rm_from_sets(sets: list[dict]) -> dict | None:
+    """Palauta paras arvioitu 1RM joukosta sarjoja.
+
+    sets: [{"weight": .., "reps": .., "rir": .. , "completed": bool}, ...]
+    Vain suoritetut (completed) ja toistoja sisältävät sarjat huomioidaan.
+    """
+    best = None
+    for s in sets:
+        if not s.get("completed", True):
+            continue
+        reps = int(s.get("reps", 0))
+        weight = float(s.get("weight", 0))
+        if reps <= 0 or weight <= 0:
+            continue
+        e = estimate_1rm(weight, reps, s.get("rir"))
+        if best is None or e > best["estimated_1rm"]:
+            best = {
+                "estimated_1rm": round(e, 1),
+                "weight": weight,
+                "reps": reps,
+                "rir": s.get("rir"),
+            }
+    return best
+
+
+def parse_scheme(text_value: str | None) -> list[float]:
+    """Jäsennä sarjamalli listaksi.
+
+    Tukee muotoja:
+      "12,10,8"   -> [12, 10, 8]   (per sarja)
+      "5x5"       -> [5, 5, 5, 5, 5]
+      "4x8,10,12" -> [8, 10, 12, ...]  (ensimmäinen luku jätetään huomiotta,
+                     jos sen jälkeen tulee pilkkulista; muuten 4x8 -> 8,8,8,8)
+    """
+    if not text_value:
+        return []
+    text_value = text_value.strip().lower().replace(" ", "")
+    # Muoto "NxM" ilman pilkkuja -> N sarjaa M toistoa
+    if "x" in text_value and "," not in text_value:
+        try:
+            n, m = text_value.split("x")
+            return [float(m)] * int(n)
+        except ValueError:
+            return []
+    # Muoto "Nx8,10,12" -> pilkkulista ratkaisee (N vain vihje)
+    if "x" in text_value:
+        text_value = text_value.split("x", 1)[1]
+    out = []
+    for part in text_value.split(","):
+        if part:
+            try:
+                out.append(float(part))
+            except ValueError:
+                continue
+    return out
+
+
 @dataclass
 class TotalEstimate:
     """Lajitotalin arvio (esim. voimanosto: kyykky + penkki + mave)."""

@@ -10,7 +10,9 @@
   <header>
     <h1>🏋️ Treeni-ty-kalu</h1>
     <nav id="tabs">
-      <button data-tab="workouts" class="active">Treenit</button>
+      <button data-tab="overview" class="active">Yleisnäkymä</button>
+      <button data-tab="progress">Kehitys</button>
+      <button data-tab="workouts">Treenit</button>
       <button data-tab="programs">Ohjelmat</button>
       <button data-tab="exercises">Liikkeet</button>
       <button data-tab="calc">Painolaskuri</button>
@@ -18,6 +20,48 @@
   </header>
 
   <main>
+    <!-- YLEISNÄKYMÄ -->
+    <section id="tab-overview" class="tab active">
+      <h2>Yleisnäkymä</h2>
+      <div id="overview-cards" class="grid"></div>
+      <div class="card">
+        <h3>Tämänhetkiset ennätykset (pääliikkeet)</h3>
+        <div id="overview-records"></div>
+      </div>
+      <div class="card">
+        <h3>Viimeisimmät treenit</h3>
+        <div id="overview-recent"></div>
+      </div>
+    </section>
+
+    <!-- KEHITYS -->
+    <section id="tab-progress" class="tab">
+      <h2>Kehityksen seuranta</h2>
+      <div class="card">
+        <h3>Liikkeiden kehitysgraafi</h3>
+        <p class="muted">Hae ja valitse liikkeet joita haluat verrata samassa kuvaajassa
+          (arvioitu 1RM ajan yli). Tämänhetkinen taso päivittyy automaattisesti parhaan
+          tuoreen tuloksen mukaan, vaikka vaihtaisit ohjelmaa.</p>
+        <input id="progress-search" placeholder="Hae liikettä…" />
+        <div id="progress-chips" class="btn-row"></div>
+        <canvas id="progress-chart" width="840" height="360"></canvas>
+        <div id="progress-legend" class="btn-row"></div>
+      </div>
+      <div class="card">
+        <h3>Lajitotal</h3>
+        <div class="btn-row">
+          <select id="sport-select"></select>
+        </div>
+        <div id="total-summary"></div>
+        <canvas id="total-chart" width="840" height="300"></canvas>
+      </div>
+      <div class="card">
+        <h3>Kaikki ennätykset</h3>
+        <input id="records-search" placeholder="Hae liikettä…" />
+        <div id="records-table"></div>
+      </div>
+    </section>
+
     <!-- TREENIT -->
     <section id="tab-workouts" class="tab active">
       <div class="row-between">
@@ -32,8 +76,12 @@
     <section id="tab-programs" class="tab">
       <div class="row-between">
         <h2>Treeniohjelmat</h2>
-        <button id="new-program-btn" class="primary">+ Uusi ohjelma</button>
+        <div class="btn-row">
+          <button id="template-btn">Käytä valmista pohjaa</button>
+          <button id="new-program-btn" class="primary">+ Uusi ohjelma</button>
+        </div>
       </div>
+      <div id="template-panel" class="hidden card"></div>
       <div id="program-editor" class="hidden card"></div>
       <div id="program-list" class="list"></div>
     </section>

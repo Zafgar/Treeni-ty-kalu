@@ -9,8 +9,9 @@ from datetime import date
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from .. import models, schemas
+from .. import engine, models, schemas
 from ..database import get_db
+from .stats import _exercise_session_points, _records_for_exercise
 
 router = APIRouter(prefix="/api/workouts", tags=["workouts"])
 
@@ -65,12 +66,31 @@ def create_from_program_day(day_id: int, db: Session = Depends(get_db)):
     )
     for idx, pe in enumerate(day.exercises):
         we = models.WorkoutExercise(exercise_id=pe.exercise_id, order_index=idx, notes=pe.notes)
-        for s in range(pe.target_sets):
+
+        # Toistomalli: rep_scheme ("12,10,8" / "5x5") tai target_sets x target_reps
+        reps_per_set = engine.parse_scheme(pe.rep_scheme)
+        if not reps_per_set:
+            reps_per_set = [float(pe.target_reps)] * pe.target_sets
+
+        # Prosenttimalli: lähtöpaino tämänhetkisestä arvioidusta 1RM:stä
+        percents = engine.parse_scheme(pe.percent_scheme)
+        current_1rm = None
+        if percents:
+            points = _exercise_session_points(db, pe.exercise_id)
+            rec = _records_for_exercise(points, 56)
+            current_1rm = rec["current_1rm"] if rec else None
+
+        for s in range(len(reps_per_set)):
+            if percents and current_1rm:
+                pct = percents[s] if s < len(percents) else percents[-1]
+                weight = engine.round_to_increment(current_1rm * pct / 100.0)
+            else:
+                weight = pe.target_weight or 0.0
             we.sets.append(
                 models.SetLog(
                     set_index=s,
-                    reps=pe.target_reps,
-                    weight=pe.target_weight or 0.0,
+                    reps=int(reps_per_set[s]),
+                    weight=weight,
                     rir=pe.target_rir,
                     completed=False,
                 )

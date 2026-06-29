@@ -11,11 +11,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from .database import Base, engine
-from .routers import engine_api, exercises, programs, workouts
+from .database import Base, engine, ensure_columns
+from .routers import engine_api, exercises, programs, stats, templates, workouts
 
-# Luo tietokantataulut jos niitä ei vielä ole.
+# Luo tietokantataulut jos niitä ei vielä ole, ja lisää puuttuvat sarakkeet.
 Base.metadata.create_all(bind=engine)
+ensure_columns()
 
 app = FastAPI(
     title="Treeni-ty-kalu API",
@@ -34,6 +35,8 @@ app.include_router(exercises.router)
 app.include_router(programs.router)
 app.include_router(workouts.router)
 app.include_router(engine_api.router)
+app.include_router(stats.router)
+app.include_router(templates.router)
 
 
 @app.get("/api/health")

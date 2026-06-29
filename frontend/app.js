@@ -22,12 +22,16 @@ const api = {
 let exercisesCache = [];
 
 // ---------- Välilehdet ----------
+const TAB_LOADERS = {}; // täytetään myöhemmin: { tabName: async () => {...} }
+
 document.querySelectorAll("nav#tabs button").forEach((btn) => {
   btn.addEventListener("click", () => {
     document.querySelectorAll("nav#tabs button").forEach((b) => b.classList.remove("active"));
     document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
     btn.classList.add("active");
     document.getElementById("tab-" + btn.dataset.tab).classList.add("active");
+    const loader = TAB_LOADERS[btn.dataset.tab];
+    if (loader) loader();
   });
 });
 
@@ -183,9 +187,13 @@ document.getElementById("new-program-btn").addEventListener("click", () => {
           const reps = el("input", { type: "number", value: pe.target_reps, oninput: (e) => (pe.target_reps = +e.target.value) });
           const wt = el("input", { type: "number", step: "0.5", value: pe.target_weight ?? "", oninput: (e) => (pe.target_weight = e.target.value ? +e.target.value : null) });
           const rest = el("input", { type: "number", value: pe.rest_seconds ?? "", oninput: (e) => (pe.rest_seconds = e.target.value ? +e.target.value : null) });
+          const scheme = el("input", { value: pe.rep_scheme ?? "", placeholder: "12,10,8", oninput: (e) => (pe.rep_scheme = e.target.value || null) });
+          const pct = el("input", { value: pe.percent_scheme ?? "", placeholder: "75,80,80", oninput: (e) => (pe.percent_scheme = e.target.value || null) });
           block.append(el("div", { class: "btn-row" }, sel,
             el("label", {}, "sarjat", sets), el("label", {}, "toistot", reps),
             el("label", {}, "kg", wt), el("label", {}, "palautus s", rest),
+            el("label", {}, "malli (toistot/sarja)", scheme),
+            el("label", {}, "% 1RM", pct),
             el("button", { class: "small danger", onclick: () => { day.exercises.splice(ei, 1); renderDays(); } }, "x")));
         });
         block.append(el("button", { class: "small", onclick: () => {
@@ -358,9 +366,239 @@ document.getElementById("calc-btn").addEventListener("click", async () => {
   } catch (e) { alert("Virhe: " + e.message); }
 });
 
+// =================== CANVAS-GRAAFI (ei riippuvuuksia) ===================
+const CHART_COLORS = ["#4f8cff", "#34d399", "#f59e0b", "#ef4444", "#a78bfa", "#ec4899", "#22d3ee"];
+
+function drawLineChart(canvas, series, opts = {}) {
+  const ctx = canvas.getContext("2d");
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+  const pad = { l: 50, r: 16, t: 16, b: 36 };
+  const plotW = W - pad.l - pad.r, plotH = H - pad.t - pad.b;
+
+  const allPts = series.flatMap((s) => s.points);
+  if (!allPts.length) {
+    ctx.fillStyle = "#9aa3b2"; ctx.font = "14px system-ui";
+    ctx.fillText("Ei dataa vielä — kirjaa treenejä nähdäksesi kehityksen.", pad.l, H / 2);
+    return;
+  }
+  const xs = allPts.map((p) => p.x), ys = allPts.map((p) => p.y);
+  let minX = Math.min(...xs), maxX = Math.max(...xs);
+  let minY = Math.min(...ys), maxY = Math.max(...ys);
+  if (minX === maxX) maxX = minX + 1;
+  // Hieman ilmaa ylä/alarajaan
+  const yPad = (maxY - minY) * 0.1 || 5;
+  minY = Math.max(0, minY - yPad); maxY = maxY + yPad;
+
+  const xPix = (x) => pad.l + ((x - minX) / (maxX - minX)) * plotW;
+  const yPix = (y) => pad.t + plotH - ((y - minY) / (maxY - minY)) * plotH;
+
+  // Ruudukko + y-akselin arvot
+  ctx.strokeStyle = "#2e333f"; ctx.fillStyle = "#9aa3b2"; ctx.font = "11px system-ui";
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    const y = pad.t + (plotH / 4) * i;
+    const val = maxY - ((maxY - minY) / 4) * i;
+    ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(W - pad.r, y); ctx.stroke();
+    ctx.fillText(Math.round(val) + (opts.unit || ""), 6, y + 3);
+  }
+  // X-akselin päivämäärät (alku ja loppu)
+  const fmt = (ms) => new Date(ms).toLocaleDateString("fi-FI", { day: "numeric", month: "numeric", year: "2-digit" });
+  ctx.fillText(fmt(minX), pad.l, H - 12);
+  ctx.textAlign = "right"; ctx.fillText(fmt(maxX), W - pad.r, H - 12); ctx.textAlign = "left";
+
+  series.forEach((s, idx) => {
+    const color = s.color || CHART_COLORS[idx % CHART_COLORS.length];
+    const pts = [...s.points].sort((a, b) => a.x - b.x);
+    ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = 2;
+    ctx.beginPath();
+    pts.forEach((p, i) => { const X = xPix(p.x), Y = yPix(p.y); i ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y); });
+    ctx.stroke();
+    pts.forEach((p) => { ctx.beginPath(); ctx.arc(xPix(p.x), yPix(p.y), 3, 0, Math.PI * 2); ctx.fill(); });
+  });
+}
+
+// =================== YLEISNÄKYMÄ ===================
+async function loadOverview() {
+  const o = await api.get("/api/stats/overview");
+  const cards = document.getElementById("overview-cards");
+  cards.innerHTML = "";
+  const card = (label, val) => el("div", { class: "card" },
+    el("div", { class: "muted" }, label), el("div", { class: "big" }, String(val)));
+  cards.append(card("Treenejä", o.total_workouts), card("Liikkeitä", o.total_exercises),
+    card("Ohjelmia", o.total_programs));
+
+  const recs = await api.get("/api/stats/records?main_only=true");
+  const rdiv = document.getElementById("overview-records");
+  rdiv.innerHTML = "";
+  if (!recs.length) rdiv.append(el("p", { class: "muted" }, "Ei vielä dataa pääliikkeistä."));
+  else rdiv.append(recordsTable(recs));
+
+  const recent = document.getElementById("overview-recent");
+  recent.innerHTML = "";
+  if (!o.recent_workouts.length) recent.append(el("p", { class: "muted" }, "Ei treenejä."));
+  for (const w of o.recent_workouts) {
+    recent.append(el("div", { class: "muted" }, `${w.date} — ${w.name || "Treeni"} (${w.exercises} liikettä)`));
+  }
+}
+
+function recordsTable(recs) {
+  const t = el("table", {});
+  t.append(el("tr", {}, el("th", {}, "Liike"), el("th", {}, "Nyt 1RM"),
+    el("th", {}, "Paras sarja"), el("th", {}, "Ennätys"), el("th", {}, "Treenattu")));
+  recs.forEach((r) => {
+    const bs = r.current_best_set;
+    t.append(el("tr", {},
+      el("td", {}, r.exercise_name + (r.is_main_lift ? " ⭐" : "")),
+      el("td", {}, `${r.current_1rm} kg`),
+      el("td", {}, bs ? `${bs.weight}×${bs.reps}${bs.rir != null ? ` (RIR ${bs.rir})` : ""}` : "—"),
+      el("td", {}, `${r.best_ever_1rm} kg`),
+      el("td", {}, r.last_trained || "—")));
+  });
+  return t;
+}
+
+// =================== KEHITYS (graafit) ===================
+let selectedProgress = new Set();
+
+async function loadProgress() {
+  renderProgressChips();
+  await loadSports();
+  await loadRecordsTable();
+}
+
+function renderProgressChips() {
+  const search = document.getElementById("progress-search").value.toLowerCase();
+  const chips = document.getElementById("progress-chips");
+  chips.innerHTML = "";
+  exercisesCache
+    .filter((ex) => ex.name.toLowerCase().includes(search))
+    .slice(0, 30)
+    .forEach((ex) => {
+      const active = selectedProgress.has(ex.id);
+      chips.append(el("button", { class: "small" + (active ? " primary" : ""), onclick: () => {
+        active ? selectedProgress.delete(ex.id) : selectedProgress.add(ex.id);
+        renderProgressChips(); drawProgressChart();
+      } }, ex.name));
+    });
+}
+
+async function drawProgressChart() {
+  const series = [];
+  const legend = document.getElementById("progress-legend");
+  legend.innerHTML = "";
+  let idx = 0;
+  for (const id of selectedProgress) {
+    const h = await api.get(`/api/stats/exercises/${id}/history`);
+    const color = CHART_COLORS[idx % CHART_COLORS.length];
+    series.push({
+      points: h.points.map((p) => ({ x: new Date(p.date).getTime(), y: p.estimated_1rm })),
+      color,
+    });
+    legend.append(el("span", { class: "tag", style: `color:${color};border-color:${color}` }, h.exercise_name));
+    idx++;
+  }
+  drawLineChart(document.getElementById("progress-chart"), series, { unit: "kg" });
+}
+
+document.getElementById("progress-search").addEventListener("input", renderProgressChips);
+
+// ---- Lajitotal ----
+async function loadSports() {
+  const sports = await api.get("/api/stats/sports");
+  const sel = document.getElementById("sport-select");
+  const prev = sel.value;
+  sel.innerHTML = "";
+  if (!sports.length) {
+    sel.append(el("option", { value: "" }, "(ei lajeja — merkitse pääliikkeille laji)"));
+    document.getElementById("total-summary").innerHTML = "";
+    drawLineChart(document.getElementById("total-chart"), []);
+    return;
+  }
+  sports.forEach((s) => sel.append(el("option", { value: s }, s)));
+  if (sports.includes(prev)) sel.value = prev;
+  await drawTotal();
+}
+
+document.getElementById("sport-select").addEventListener("change", drawTotal);
+
+async function drawTotal() {
+  const sport = document.getElementById("sport-select").value;
+  if (!sport) return;
+  const t = await api.get(`/api/stats/total?sport=${encodeURIComponent(sport)}`);
+  const sum = document.getElementById("total-summary");
+  sum.innerHTML = "";
+  sum.append(el("div", { class: "result-box" },
+    el("div", {}, `${sport} — tämänhetkinen total`),
+    el("div", { class: "big" }, `${t.total_mid} kg`),
+    el("div", { class: "muted" }, `Haarukka ${t.total_low}–${t.total_high} kg`),
+    el("div", { class: "muted" }, t.per_lift.map((l) => `${l.exercise_name}: ${l.current_1rm}kg`).join(" · "))));
+  drawLineChart(document.getElementById("total-chart"),
+    [{ points: t.timeline.map((p) => ({ x: new Date(p.date).getTime(), y: p.total })) }], { unit: "kg" });
+}
+
+// ---- Ennätystaulukko ----
+async function loadRecordsTable() {
+  const recs = await api.get("/api/stats/records");
+  window._allRecords = recs;
+  renderRecordsTable();
+}
+function renderRecordsTable() {
+  const search = (document.getElementById("records-search").value || "").toLowerCase();
+  const div = document.getElementById("records-table");
+  div.innerHTML = "";
+  const recs = (window._allRecords || []).filter((r) => r.exercise_name.toLowerCase().includes(search));
+  if (!recs.length) div.append(el("p", { class: "muted" }, "Ei dataa."));
+  else div.append(recordsTable(recs));
+}
+document.getElementById("records-search").addEventListener("input", renderRecordsTable);
+
+// =================== VALMIIT POHJAT ===================
+document.getElementById("template-btn").addEventListener("click", async () => {
+  if (!exercisesCache.length) return alert("Lisää ensin liikkeitä.");
+  const panel = document.getElementById("template-panel");
+  panel.classList.toggle("hidden");
+  if (panel.classList.contains("hidden")) return;
+  panel.innerHTML = "";
+  const templates = await api.get("/api/templates");
+  const tSel = el("select", {});
+  templates.forEach((t) => tSel.append(el("option", { value: t.id }, t.name)));
+  const guidance = el("div", { class: "muted" });
+  const updateGuidance = () => {
+    const t = templates.find((x) => x.id === tSel.value);
+    guidance.textContent = t ? `${t.rep_scheme} @ ${t.percent_scheme}% — ${t.guidance}` : "";
+  };
+  tSel.addEventListener("change", updateGuidance);
+  // Pääliikkeiden valinta (checkboxit)
+  const liftBoxes = exercisesCache.map((ex) => {
+    const cb = el("input", { type: "checkbox", value: ex.id });
+    if (ex.is_main_lift) cb.checked = true;
+    return { ex, cb };
+  });
+  const liftList = el("div", { class: "btn-row" });
+  liftBoxes.forEach(({ ex, cb }) => liftList.append(el("label", { class: "tag" }, cb, " " + ex.name)));
+  panel.append(
+    el("label", {}, "Pohja", tSel), guidance,
+    el("div", { class: "muted" }, "Valitse pääliikkeet joille jakso rakennetaan:"), liftList,
+    el("div", { class: "btn-row" },
+      el("button", { class: "success", onclick: async () => {
+        const ids = liftBoxes.filter((b) => b.cb.checked).map((b) => +b.cb.value);
+        if (!ids.length) return alert("Valitse vähintään yksi liike.");
+        await api.post("/api/templates/build", { template_id: tSel.value, exercise_ids: ids });
+        panel.classList.add("hidden"); loadPrograms();
+      } }, "Luo ohjelma pohjasta"),
+      el("button", { onclick: () => panel.classList.add("hidden") }, "Peruuta")));
+  updateGuidance();
+});
+
+// ---------- Välilehtien laiskat lataukset ----------
+TAB_LOADERS.overview = loadOverview;
+TAB_LOADERS.progress = loadProgress;
+
 // ---------- Käynnistys ----------
 (async function init() {
   await loadExercises();
   await loadPrograms();
   await loadWorkouts();
+  await loadOverview();
 })();

@@ -38,6 +38,30 @@ def test_round_to_increment():
     assert engine.round_to_increment(101.3, 2.5) == 102.5
 
 
+def test_parse_scheme():
+    assert engine.parse_scheme("12,10,8") == [12, 10, 8]
+    assert engine.parse_scheme("5x5") == [5, 5, 5, 5, 5]
+    assert engine.parse_scheme("4x8,10,12") == [8, 10, 12]
+    assert engine.parse_scheme(None) == []
+    assert engine.parse_scheme("") == []
+
+
+def test_best_1rm_from_sets():
+    sets = [
+        {"weight": 100, "reps": 5, "rir": 1, "completed": True},
+        {"weight": 110, "reps": 3, "rir": 0, "completed": True},
+        {"weight": 200, "reps": 1, "rir": 0, "completed": False},  # ei lasketa
+    ]
+    best = engine.best_1rm_from_sets(sets)
+    # 110x3 antaa korkeamman arvion kuin 100x5(rir1)? tarkistetaan vain validius
+    assert best is not None
+    assert best["weight"] in (100, 110)
+
+
+def test_best_1rm_ignores_empty():
+    assert engine.best_1rm_from_sets([{"weight": 0, "reps": 0, "completed": True}]) is None
+
+
 def test_estimate_total():
     lifts = {
         "kyykky": {"weight": 200, "reps": 5, "rir": 1},

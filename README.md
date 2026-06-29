@@ -52,6 +52,23 @@ python -m pytest backend/tests/ -q
   päivästä esitäytetyillä tavoitteilla
 - **Painolaskuri:** kun vaihdat sarjaohjelmaa (esim. 4×5 → 4×8), laskuri arvioi
   uuden painon joka vastaa samaa rasitusta (varasto huomioiden)
+- **Sarjamallit:** joustavat per-sarja-toistot (pyramidit kuten 12,10,8 tai
+  5x5) ja prosenttimallit (% 1RM:stä); useita ohjelmia voi pitää rinnakkain
+- **Valmiit pohjat:** voimajaksot (5×5, prosenttipohjainen maksimivoima,
+  pyramidi-hypertrofia) ohjeineen; lähtöpaino lasketaan automaattisesti
+  tämänhetkisestä arvioidusta 1RM:stä
+- **Kehityksen seuranta:** arvioidun 1RM:n kehityskäyrä per liike (useita
+  liikkeitä samassa kuvaajassa), ennätystaulukko ja yleisnäkymä haulla
+- **Lajitotalit:** esim. voimanoston total ala-/yläraja-arvioineen ja
+  kehityskäyrä ajan yli
+
+### Tämänhetkisen 1RM:n sääntö (kahden ohjelman "kiista")
+
+Kun useaa ohjelmaa ajetaan peräkkäin, jokin liike voi parantua uudessa
+ohjelmassa. Järjestelmä laskee arvioidun 1RM:n suoraan toteutuneista sarjoista
+ja valitsee tämänhetkiseksi tasoksi **parhaan tuloksen tuoreelta aikaikkunalta**
+(oletus 56 vrk liikkeen viimeisimmästä treenistä) — recency voittaa, eikä
+vanha ohjelma "kiistele" uuden kanssa. Kaikkien aikojen ennätys säilyy erikseen.
 
 ## Tietomalli
 
@@ -65,14 +82,11 @@ WorkoutSession ──< WorkoutExercise ──< SetLog
 
 Rakenne on suunniteltu laajennettavaksi seuraaviin ilman ydinmallien rikkomista:
 
-- Valmiit ohjelmapohjat perusparametreista (esim. voimajakso pääliikkeille)
 - Kehon mitat (haukkari, pohje, rintakehä, hartia, reisi, vyötärö, kyynärvarsi…),
   paino ja rasva-% → arvio kehon koostumuksesta
 - Uni, HRV, syke, kalorit ym. päivittäiset muuttujat (vapaaehtoisia)
-- Kehitysgraafit eri liikkeille samassa kuvaajassa + ennuste todelliseen
-  kehoreagointiin perustuen
+- Kehitysennuste todelliseen kehoreagointiin perustuen
 - Palautumis-välilehti (nopea painojen kasvu sarjoissa, total-kg)
-- Lajitotalit (voimanosto, olympianostot) ala-/yläraja-arvioineen ja
-  monivuotinen kehityskäyrä
+- Olympianostojen totalit ja monivuotinen kehityskäyrä
 - Muuttujien väliset korrelaatiot (esim. uni/kalorit vs. suoritus)
 - PWA puhelimelle

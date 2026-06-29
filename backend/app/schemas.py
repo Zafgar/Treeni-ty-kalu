@@ -44,6 +44,8 @@ class ProgramExerciseBase(BaseModel):
     target_weight: float | None = None
     rest_seconds: int | None = None
     target_rir: float | None = None
+    rep_scheme: str | None = None
+    percent_scheme: str | None = None
     notes: str | None = None
 
 
