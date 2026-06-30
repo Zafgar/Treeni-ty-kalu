@@ -754,7 +754,14 @@ async function loadSports() {
     return;
   }
   sports.forEach((s) => sel.append(el("option", { value: s }, s)));
-  if (sports.includes(prev)) sel.value = prev;
+  // Oletukseksi laji jossa on dataa (ei tyhjää totalia ensin)
+  let preferred = prev;
+  if (!sports.includes(preferred)) {
+    const recs = await api.get(pq("/api/stats/records?main_only=true"));
+    const sportsWithData = new Set(recs.map((r) => r.sport).filter(Boolean));
+    preferred = sports.find((s) => sportsWithData.has(s)) || sports[0];
+  }
+  sel.value = preferred;
   await drawTotal();
 }
 
