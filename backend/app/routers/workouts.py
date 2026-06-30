@@ -58,6 +58,31 @@ def create_workout(payload: schemas.WorkoutSessionCreate, db: Session = Depends(
     return session
 
 
+def last_working_weight(db: Session, exercise_id: int, profile_id: int | None) -> float | None:
+    """Viimeksi kyseisellä liikkeellä käytetty työpaino (raskain suoritettu
+    sarja tuoreimmasta treenistä). Näin kun liike tulee ohjelmassa uudelleen,
+    paino esitäytetään aiemmin käytetyllä — tulokset arkistoituvat ja palaavat
+    käyttöön automaattisesti."""
+    q = (
+        db.query(models.SetLog, models.WorkoutSession.session_date)
+        .join(models.WorkoutExercise, models.SetLog.workout_exercise_id == models.WorkoutExercise.id)
+        .join(models.WorkoutSession, models.WorkoutExercise.session_id == models.WorkoutSession.id)
+        .filter(models.WorkoutExercise.exercise_id == exercise_id,
+                models.SetLog.completed.is_(True),
+                models.SetLog.weight > 0,
+                models.WorkoutSession.status != "skipped")
+    )
+    if profile_id is not None:
+        q = q.filter(models.WorkoutSession.profile_id == profile_id)
+    rows = q.order_by(models.WorkoutSession.session_date.desc()).all()
+    if not rows:
+        return None
+    # Tuorein treenipäivä -> sen raskain työpaino
+    newest = rows[0][1]
+    weights = [s.weight for s, d in rows if d == newest]
+    return max(weights) if weights else None
+
+
 def build_planned_session(day: models.ProgramDay, db: Session) -> models.WorkoutSession:
     """Rakenna suunniteltu treeni ohjelman päivän tavoitearvoista (esitäytetyt
     sarjat). Ei lisää tietokantaan — kutsuja vastaa add/commit-vaiheesta."""
@@ -84,12 +109,19 @@ def build_planned_session(day: models.ProgramDay, db: Session) -> models.Workout
             rec = _records_for_exercise(points, 56)
             current_1rm = rec["current_1rm"] if rec else None
 
+        # Painon lähde: 1) prosenttimalli, 2) ohjelmaan asetettu tavoitepaino,
+        # 3) viimeksi tällä liikkeellä käytetty paino (arkistosta).
+        prof_id = day.program.profile_id if day.program else None
+        recalled = None
+        if not (percents and current_1rm) and not pe.target_weight:
+            recalled = last_working_weight(db, pe.exercise_id, prof_id)
+
         for s in range(len(reps_per_set)):
             if percents and current_1rm:
                 pct = percents[s] if s < len(percents) else percents[-1]
                 weight = engine.round_to_increment(current_1rm * pct / 100.0)
             else:
-                weight = pe.target_weight or 0.0
+                weight = pe.target_weight or recalled or 0.0
             we.sets.append(
                 models.SetLog(
                     set_index=s,
@@ -109,49 +141,13 @@ def build_planned_session(day: models.ProgramDay, db: Session) -> models.Workout
     status_code=201,
 )
 def create_from_program_day(day_id: int, db: Session = Depends(get_db)):
-    """Luo treenipohja ohjelman päivän tavoitearvoista (esitäytetyt sarjat)."""
+    """Luo treenipohja ohjelman päivän tavoitearvoista (esitäytetyt sarjat).
+    Käyttää samaa logiikkaa kuin ohjelman aktivointi: prosenttimalli, asetettu
+    tavoitepaino tai viimeksi käytetty paino."""
     day = db.get(models.ProgramDay, day_id)
     if not day:
         raise HTTPException(status_code=404, detail="Päivää ei löytynyt.")
-    session = models.WorkoutSession(
-        session_date=date.today(),
-        profile_id=day.program.profile_id if day.program else None,
-        program_day_id=day_id,
-        name=day.label,
-        status="planned",
-    )
-    for idx, pe in enumerate(day.exercises):
-        we = models.WorkoutExercise(exercise_id=pe.exercise_id, order_index=idx, notes=pe.notes)
-
-        # Toistomalli: rep_scheme ("12,10,8" / "5x5") tai target_sets x target_reps
-        reps_per_set = engine.parse_scheme(pe.rep_scheme)
-        if not reps_per_set:
-            reps_per_set = [float(pe.target_reps)] * pe.target_sets
-
-        # Prosenttimalli: lähtöpaino tämänhetkisestä arvioidusta 1RM:stä
-        percents = engine.parse_scheme(pe.percent_scheme)
-        current_1rm = None
-        if percents:
-            points = _exercise_session_points(db, pe.exercise_id)
-            rec = _records_for_exercise(points, 56)
-            current_1rm = rec["current_1rm"] if rec else None
-
-        for s in range(len(reps_per_set)):
-            if percents and current_1rm:
-                pct = percents[s] if s < len(percents) else percents[-1]
-                weight = engine.round_to_increment(current_1rm * pct / 100.0)
-            else:
-                weight = pe.target_weight or 0.0
-            we.sets.append(
-                models.SetLog(
-                    set_index=s,
-                    reps=int(reps_per_set[s]),
-                    weight=weight,
-                    rir=pe.target_rir,
-                    completed=False,
-                )
-            )
-        session.exercises.append(we)
+    session = build_planned_session(day, db)
     db.add(session)
     db.commit()
     db.refresh(session)

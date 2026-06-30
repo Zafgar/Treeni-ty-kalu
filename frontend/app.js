@@ -924,6 +924,17 @@ async function loadLevels() {
     });
     box.append(seg);
 
+    // Tasojen nimet matalimmasta suurimpaan palkin alle (nykyinen korostettu)
+    const SHORT = ["Aloitt.", "Harrast.", "Keski", "Edist.", "Kokenut", "Piiri", "SM", "MM"];
+    const labels = el("div", { class: "seg-labels" });
+    data.all_levels.forEach((name, i) => {
+      labels.append(el("span", {
+        class: "seg-label" + (i === l.level_index ? " current" : "") + (i <= l.level_index ? " on" : ""),
+        title: name,
+      }, SHORT[i] || name));
+    });
+    box.append(labels);
+
     // Nykytaso + sen merkitys + seuraavan tason raja kiloina
     box.append(el("div", { class: "muted", style: "margin-top:6px" }, l.level_meaning || ""));
     box.append(el("div", { class: "muted" },
