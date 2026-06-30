@@ -1071,6 +1071,7 @@ async function loadProfilesTab() {
           isCurrent ? "" : el("button", { class: "small primary", onclick: async () => {
             currentProfileId = p.id; renderProfileSwitch(); await refreshActiveTab(); loadProfilesTab();
           } }, "Valitse"),
+          el("button", { class: "small", onclick: () => openProfileForm(p) }, "Muokkaa"),
           el("button", { class: "small danger", onclick: async () => {
             if (confirm(`Poista profiili "${p.name}" ja kaikki sen data?`)) {
               try { await api.del(`/api/profiles/${p.id}`); await loadProfiles(); loadProfilesTab(); }
@@ -1088,35 +1089,46 @@ async function loadProfilesTab() {
   }
 }
 
-document.getElementById("new-profile-btn").addEventListener("click", () => {
+// Yhteinen lomake profiilin luontiin (existing = null) ja muokkaukseen.
+function openProfileForm(existing) {
   const form = document.getElementById("profile-form");
   form.classList.remove("hidden");
   form.innerHTML = "";
-  const name = el("input", { placeholder: "Nimi" });
+  form.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  const name = el("input", { placeholder: "Nimi", value: existing ? existing.name : "" });
   const sex = el("select", {}, el("option", { value: "" }, "—"),
     el("option", { value: "mies" }, "mies"), el("option", { value: "nainen" }, "nainen"),
     el("option", { value: "muu" }, "muu"));
-  const bd = el("input", { type: "date" });
-  const height = el("input", { type: "number", step: "0.5", placeholder: "cm" });
-  const color = el("input", { type: "color", value: "#4f8cff" });
+  if (existing && existing.sex) sex.value = existing.sex;
+  const bd = el("input", { type: "date", value: existing && existing.birthdate ? existing.birthdate : "" });
+  const height = el("input", { type: "number", step: "0.5", placeholder: "cm", value: existing && existing.height_cm ? existing.height_cm : "" });
+  const color = el("input", { type: "color", value: existing && existing.color ? existing.color : "#4f8cff" });
   form.append(
+    el("h3", { style: "margin-top:0" }, existing ? `Muokkaa profiilia: ${existing.name}` : "Uusi profiili"),
     el("div", { class: "grid" },
       el("label", {}, "Nimi", name), el("label", {}, "Sukupuoli", sex),
-      el("label", {}, "Syntymäaika", bd), el("label", {}, "Pituus", height),
+      el("label", {}, "Syntymäaika (ikä lasketaan)", bd), el("label", {}, "Pituus", height),
       el("label", {}, "Väri", color)),
     el("div", { class: "btn-row" },
       el("button", { class: "success", onclick: async () => {
         if (!name.value.trim()) return alert("Anna nimi.");
-        const p = await api.post("/api/profiles", {
+        const payload = {
           name: name.value.trim(), sex: sex.value || null, birthdate: bd.value || null,
           height_cm: height.value ? +height.value : null, color: color.value,
-        });
+        };
+        if (existing) {
+          await api.patch(`/api/profiles/${existing.id}`, payload);
+        } else {
+          const p = await api.post("/api/profiles", payload);
+          currentProfileId = p.id;
+        }
         form.classList.add("hidden");
-        currentProfileId = p.id;
-        await loadProfiles(); loadProfilesTab(); await refreshActiveTab();
+        await loadProfiles(); renderProfileSwitch(); loadProfilesTab(); await refreshActiveTab();
       } }, "Tallenna"),
       el("button", { onclick: () => form.classList.add("hidden") }, "Peruuta")));
-});
+}
+
+document.getElementById("new-profile-btn").addEventListener("click", () => openProfileForm(null));
 
 // =================== KEHO ===================
 async function renderBodyScore() {
