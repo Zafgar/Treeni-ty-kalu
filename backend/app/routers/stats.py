@@ -483,6 +483,75 @@ def correlation(
     }
 
 
+@router.get("/volume-analysis")
+def volume_analysis(profile_id: int = Query(...), db: Session = Depends(get_db)):
+    """Viikkovolyymi lihasryhmittäin + ehdotukset (kasvata/vähennä/OK).
+
+    Laskee suoritetut työsarjat kategorioittain tällä ja edellisellä viikolla,
+    vertaa hypertrofiasuositukseen ja antaa ehdotuksen. Käyttäjä voi kuitata
+    tilanteen OK:ksi, jolloin ehdotukset merkitään kuitatuiksi.
+    """
+    sessions = (
+        db.query(models.WorkoutSession)
+        .filter(models.WorkoutSession.profile_id == profile_id,
+                models.WorkoutSession.status != "skipped")
+        .all()
+    )
+    if not sessions:
+        return {"message": "Kirjaa treenejä, niin näet viikkovolyymin.", "categories": []}
+
+    ref_date = max(s.session_date for s in sessions)
+    this_start = ref_date - timedelta(days=6)
+    prev_start = ref_date - timedelta(days=13)
+
+    this_week: dict[str, int] = {}
+    prev_week: dict[str, int] = {}
+    for s in sessions:
+        if s.session_date < prev_start:
+            continue
+        bucket = this_week if s.session_date >= this_start else prev_week
+        for we in s.exercises:
+            cat = (we.exercise.category or "muu") if we.exercise else "muu"
+            sets = sum(1 for st in we.sets if st.completed and st.reps > 0)
+            if sets:
+                bucket[cat] = bucket.get(cat, 0) + sets
+
+    cats = sorted(set(this_week) | set(prev_week))
+    categories = []
+    for c in cats:
+        sw, sp = this_week.get(c, 0), prev_week.get(c, 0)
+        categories.append({"category": c, "sets_week": sw, "sets_prev": sp, **engine.volume_verdict(sw, sp)})
+    # Järjestä huomiota vaativat ensin (low/high), sitten ok
+    order = {"low": 0, "high": 1, "none": 2, "ok": 3}
+    categories.sort(key=lambda x: order.get(x["status"], 9))
+
+    iso = ref_date.isocalendar()
+    week_key = f"{iso[0]}-{iso[1]:02d}"
+    acked = db.query(models.VolumeAck).filter(
+        models.VolumeAck.profile_id == profile_id, models.VolumeAck.week_key == week_key
+    ).first() is not None
+
+    return {
+        "week_key": week_key,
+        "ref_date": ref_date.isoformat(),
+        "acknowledged": acked,
+        "total_sets_week": sum(this_week.values()),
+        "categories": categories,
+    }
+
+
+@router.post("/volume-ack")
+def volume_ack(profile_id: int = Query(...), week_key: str = Query(...), db: Session = Depends(get_db)):
+    """Kuittaa viikon volyymi OK:ksi (ei muutoksia tarvita)."""
+    existing = db.query(models.VolumeAck).filter(
+        models.VolumeAck.profile_id == profile_id, models.VolumeAck.week_key == week_key
+    ).first()
+    if not existing:
+        db.add(models.VolumeAck(profile_id=profile_id, week_key=week_key))
+        db.commit()
+    return {"acknowledged": True, "week_key": week_key}
+
+
 @router.get("/sports")
 def sports(db: Session = Depends(get_db)):
     """Lajit joille on määritelty pääliikkeitä (totaleja varten)."""

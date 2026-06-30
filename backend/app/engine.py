@@ -310,6 +310,26 @@ def forecast_progress(
     return out
 
 
+def volume_verdict(sets_week: int, sets_prev: int) -> dict:
+    """Arvioi lihasryhmän viikkovolyymi ja anna ehdotus.
+
+    Yleinen hypertrofiasuositus on ~10–20 laadukasta työsarjaa lihasryhmää
+    kohden viikossa. Tämän alle voi kasvattaa, reilusti yli voi keventää.
+    """
+    if sets_week == 0:
+        return {"status": "none", "suggestion": "Ei treenattu tällä viikolla — lisää vähintään muutama sarja."}
+    if sets_week < 8:
+        return {"status": "low",
+                "suggestion": f"Matala volyymi ({sets_week} sarjaa). Harkitse 2–4 sarjan lisäystä kasvun tueksi."}
+    if sets_week > 22:
+        return {"status": "high",
+                "suggestion": f"Korkea volyymi ({sets_week} sarjaa). Voit keventää jos palautuminen tai voima kärsii."}
+    note = ""
+    if sets_prev and sets_week <= sets_prev - 5:
+        note = f" Volyymi laski edellisestä viikosta ({sets_prev} → {sets_week})."
+    return {"status": "ok", "suggestion": f"Hyvällä tasolla ({sets_week} sarjaa).{note}"}
+
+
 def pearson(xs: list[float], ys: list[float]) -> float | None:
     """Pearsonin korrelaatiokerroin kahden sarjan välillä."""
     n = len(xs)

@@ -224,6 +224,15 @@ def test_physique_level():
     assert engine.physique_level(None) is None
 
 
+def test_volume_verdict():
+    assert engine.volume_verdict(3, 0)["status"] == "low"
+    assert engine.volume_verdict(14, 12)["status"] == "ok"
+    assert engine.volume_verdict(26, 24)["status"] == "high"
+    assert engine.volume_verdict(0, 0)["status"] == "none"
+    # lasku edellisestä viikosta huomioidaan ok-tilassa
+    assert "laski" in engine.volume_verdict(10, 18)["suggestion"].lower()
+
+
 def test_pearson():
     assert engine.pearson([1, 2, 3, 4], [2, 4, 6, 8]) == 1.0
     assert engine.pearson([1, 2, 3, 4], [8, 6, 4, 2]) == -1.0

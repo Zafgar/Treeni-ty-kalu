@@ -73,7 +73,19 @@ main { padding: 16px; max-width: 900px; margin: 0 auto; }
 
 .row-between { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 
-h2 { font-size: 1.1rem; }
+h2 {
+  font-size: 1.15rem;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+h2::before {
+  content: "";
+  width: 4px;
+  height: 1.1em;
+  background: linear-gradient(var(--accent), var(--accent-2));
+  border-radius: 3px;
+}
 
 button {
   font-family: inherit;

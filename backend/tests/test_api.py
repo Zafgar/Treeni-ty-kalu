@@ -188,6 +188,28 @@ def test_lowcarb_diet_model(client):
     assert status["targets"]["carbs_g"] < std_status["targets"]["carbs_g"]
 
 
+def test_volume_analysis_and_ack(client):
+    from datetime import date, timedelta
+    ref = date(2026, 6, 28)
+    chest = client.post("/api/exercises", json={"name": "Penkki", "category": "rinta"}).json()
+    legs = client.post("/api/exercises", json={"name": "Kyykky", "category": "jalat"}).json()
+    # rinta: 3 sarjaa tällä viikolla (matala), jalat: monta
+    client.post("/api/workouts", json={"profile_id": 1, "session_date": ref.isoformat(),
+        "exercises": [
+            {"exercise_id": chest["id"], "sets": [{"set_index": i, "reps": 5, "weight": 100, "completed": True} for i in range(3)]},
+            {"exercise_id": legs["id"], "sets": [{"set_index": i, "reps": 5, "weight": 140, "completed": True} for i in range(12)]},
+        ]})
+    va = client.get("/api/stats/volume-analysis?profile_id=1").json()
+    cats = {c["category"]: c for c in va["categories"]}
+    assert cats["rinta"]["sets_week"] == 3 and cats["rinta"]["status"] == "low"
+    assert cats["jalat"]["sets_week"] == 12 and cats["jalat"]["status"] == "ok"
+    assert va["acknowledged"] is False
+    # kuittaus
+    client.post(f"/api/stats/volume-ack?profile_id=1&week_key={va['week_key']}")
+    va2 = client.get("/api/stats/volume-analysis?profile_id=1").json()
+    assert va2["acknowledged"] is True
+
+
 def test_load_timeline(client):
     ex = client.post("/api/exercises", json={"name": "Kyykky"}).json()
     client.post("/api/workouts", json={

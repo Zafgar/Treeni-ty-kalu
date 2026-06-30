@@ -22,6 +22,24 @@ const api = {
 let exercisesCache = [];
 let currentProfileId = null;
 let profilesCache = [];
+const expandedExercises = new Set(); // tehdyt liikkeet jotka pidetään auki muokkausta varten
+
+// Arvioitu 1RM (Epley, varasto huomioiden) — sama kaava kuin backendissä.
+function estimate1rm(weight, reps, rir) {
+  const eff = reps + (rir != null ? rir : 0);
+  if (weight <= 0 || reps <= 0) return 0;
+  if (eff <= 1) return weight;
+  return Math.round(weight * (1 + eff / 30) * 10) / 10;
+}
+function bestSetOf(we) {
+  let best = null;
+  we.sets.forEach((s) => {
+    if (!s.completed || s.reps <= 0 || s.weight <= 0) return;
+    const e = estimate1rm(s.weight, s.reps, s.rir);
+    if (!best || e > best.e) best = { e, weight: s.weight, reps: s.reps };
+  });
+  return best;
+}
 
 // Lisää profile_id-parametri polkuun (skooppaa datan aktiiviseen profiiliin).
 function pq(path) {
@@ -374,6 +392,13 @@ async function openWorkoutEditor(id) {
     el("label", {}, "Poltetut kcal", kcal), el("label", {}, "Fiilis", feeling),
     el("label", {}, "Fiilis-huomio", feelingNote), el("label", {}, "Huomiot", notes)));
 
+  // Edistymislaskuri (montako liikettä tehty)
+  const doneCount = w.exercises.filter((we) => we.done).length;
+  if (w.exercises.length) {
+    editor.append(el("div", { class: "muted", style: "margin:6px 0 2px" },
+      `Edistyminen: ${doneCount}/${w.exercises.length} liikettä tehty`));
+  }
+
   for (const we of w.exercises) editor.append(renderWorkoutExercise(id, we));
 
   // Liikkeen lisäys (kategorioittain ryhmitelty valinta)
@@ -397,6 +422,20 @@ async function openWorkoutEditor(id) {
 }
 
 function renderWorkoutExercise(workoutId, we) {
+  const best = bestSetOf(we);
+  const oneRm = best ? `${best.e} kg (paras ${best.weight}×${best.reps})` : "—";
+
+  // Tehdyt liikkeet näytetään tiiviisti (mobiilifokus) ellei avattu muokkaukseen.
+  if (we.done && !expandedExercises.has(we.id)) {
+    return el("div", { class: "exercise-block ex-done" },
+      el("div", { class: "row-between" },
+        el("div", { class: "btn-row", style: "align-items:center" },
+          el("strong", {}, we.exercise.name),
+          el("span", { class: "tag status-done" }, "✓ tehty"),
+          el("span", { class: "muted" }, `1RM ~${oneRm}`)),
+        el("button", { class: "small", onclick: () => { expandedExercises.add(we.id); openWorkoutEditor(workoutId); } }, "Muokkaa")));
+  }
+
   const block = el("div", { class: "exercise-block" + (we.done ? " ex-done" : "") });
   block.append(el("div", { class: "row-between" },
     el("div", { class: "btn-row", style: "align-items:center" },
@@ -404,7 +443,9 @@ function renderWorkoutExercise(workoutId, we) {
       we.done ? el("span", { class: "tag status-done" }, "OK") : ""),
     el("div", { class: "btn-row" },
       el("button", { class: "small success", onclick: async () => {
-        await api.patch(`/api/workouts/exercises/${we.id}`, { exercise_id: we.exercise_id, done: !we.done });
+        const markDone = !we.done;
+        await api.patch(`/api/workouts/exercises/${we.id}`, { exercise_id: we.exercise_id, done: markDone });
+        if (markDone) expandedExercises.delete(we.id);  // valmis -> pienennä
         openWorkoutEditor(workoutId);
       } }, we.done ? "Peru OK" : "✓ OK"),
       el("button", { class: "small danger", onclick: async () => {
@@ -440,6 +481,9 @@ function renderWorkoutExercise(workoutId, we) {
       } }, "x"))));
   });
   block.append(table);
+
+  // Arvioitu 1RM tästä treenistä (paras suoritettu sarja)
+  block.append(el("div", { class: "muted", style: "margin-top:6px" }, `Arvioitu 1RM: ${oneRm}`));
 
   // Vajaus-pikakenttä: montako toistoa jäi yhteensä vajaaksi (ei tarvitse
   // kirjata 5,5,4,2 — riittää "4 vajaa"). Vähennetään kehitysvolyymistä.
@@ -623,10 +667,42 @@ let selectedProgress = new Set();
 async function loadProgress() {
   renderProgressChips();
   renderBackfill();
+  await loadVolume();
   await loadLevels();
   await loadSports();
   await loadLoadTimeline();
   await loadRecordsTable();
+}
+
+async function loadVolume() {
+  const div = document.getElementById("volume-content");
+  div.innerHTML = "";
+  const data = await api.get(pq("/api/stats/volume-analysis"));
+  if (!data.categories || !data.categories.length) {
+    div.append(el("p", { class: "muted" }, data.message || "Ei dataa.")); return;
+  }
+  const statusTag = { low: ["Kasvata", "status-planned"], high: ["Kevennä", "status-skip"],
+    ok: ["OK", "status-done"], none: ["—", "status-skip"] };
+  const tbl = el("table", {});
+  tbl.append(el("tr", {}, el("th", {}, "Lihasryhmä"), el("th", {}, "Sarjat (vk)"),
+    el("th", {}, "Edell. vk"), el("th", {}, "Tila"), el("th", {}, "Ehdotus")));
+  data.categories.forEach((c) => {
+    const si = statusTag[c.status] || ["", ""];
+    tbl.append(el("tr", {},
+      el("td", { style: "text-transform:capitalize" }, c.category),
+      el("td", {}, String(c.sets_week)), el("td", { class: "muted" }, String(c.sets_prev)),
+      el("td", {}, el("span", { class: "tag " + si[1] }, si[0])),
+      el("td", { class: "muted" }, data.acknowledged && c.status !== "ok" ? "(kuitattu)" : c.suggestion)));
+  });
+  div.append(el("div", { class: "muted", style: "margin-bottom:6px" }, `Yhteensä ${data.total_sets_week} työsarjaa tällä viikolla.`));
+  div.append(tbl);
+  if (data.acknowledged) {
+    div.append(el("div", { class: "muted", style: "margin-top:8px" }, "✓ Kuittasit tämän viikon — ei muutostarvetta."));
+  } else {
+    div.append(el("button", { class: "small success", style: "margin-top:10px", onclick: async () => {
+      await api.post(pq(`/api/stats/volume-ack?week_key=${data.week_key}`)); loadVolume();
+    } }, "Kuittaa: tilanne OK, ei muutoksia"));
+  }
 }
 
 async function loadLevels() {

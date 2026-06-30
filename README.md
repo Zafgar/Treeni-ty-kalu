@@ -149,6 +149,12 @@ python -m pytest backend/tests/ -q
 - **Fiilismerkintä:** merkitse treeniin hyvä olo tai ongelma (+ vapaa huomio,
   esim. kipu); merkityt nousevat yleisnäkymään huomaamaan jos jokin vaikuttaa
   jatkoon
+- **Viikkovolyymi & ehdotukset:** suoritetut työsarjat lihasryhmittäin
+  viikossa verrattuna suositukseen (~10–20 sarjaa) → ehdotus kasvata/kevennä/OK;
+  käyttäjä voi kuitata "tilanne OK, ei muutoksia"
+- **Sujuva treenin suoritus (mobiilifokus):** tehdyt liikkeet tiivistyvät
+  ("✓ tehty" + arvioitu 1RM), edistymislaskuri (X/Y tehty), vajaus ja
+  painoehdotus yhdellä painalluksella; arvioitu 1RM näkyy jokaiselle liikkeelle
 - **Realistinen ennuste:** pääliikkeiden kehitys ennustetaan menneen tahdin
   ja naturaalinostajan luonnollisen kehityskaaren mukaan (vähenevä tuotto
   kohti realistista kattoa); apuliikkeitä ei ennusteta

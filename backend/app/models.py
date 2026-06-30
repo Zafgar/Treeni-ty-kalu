@@ -328,6 +328,17 @@ class MealItem(Base):
     food: Mapped["Food"] = relationship()
 
 
+class VolumeAck(Base):
+    """Käyttäjän kuittaus että viikon volyymi on OK eikä muutoksia tarvita."""
+
+    __tablename__ = "volume_acks"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    profile_id: Mapped[int] = mapped_column(ForeignKey("profiles.id", ondelete="CASCADE"), index=True)
+    week_key: Mapped[str] = mapped_column(String(12), index=True)  # esim. "2026-26"
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class DietPhase(Base):
     """Aktiivinen dieettivaihe profiilille (cut / maintain / bulk).
 
