@@ -250,6 +250,56 @@ def physique_level(ffmi: float | None, sex: str | None = None) -> dict | None:
     }
 
 
+def estimate_workout_kcal(bodyweight: float, duration_min: float, tonnage: float = 0.0) -> int | None:
+    """Arvioi treenin kulutus jos älykellodataa ei ole annettu.
+
+    Voimaharjoittelu ~5 MET: kcal/min ≈ paino * 0.0875. Lisäksi pieni lisä
+    siirretyn kokonaisraudan mukaan. Suuntaa antava, ei tarkka.
+    """
+    if not bodyweight or not duration_min or duration_min <= 0:
+        return None
+    base = bodyweight * 0.0875 * duration_min
+    extra = tonnage * 0.0008  # ~0.8 kcal per tonni
+    return int(round(base + extra))
+
+
+def proportion_score(measurements: dict, height_cm: float | None, sex: str | None = None) -> dict | None:
+    """Kehon suhdepisteet (0–100) ympärysmitoista ja pituudesta.
+
+    Hyödyntää klassisia esteettisiä suhteita:
+      - vyötärö/pituus (matala parempi, ihanne ~0.45)
+      - hartia/vyötärö (V-malli, ihanne ~1.6)
+      - rintakehä/vyötärö (ihanne ~1.4)
+    Laskee vain saatavilla olevista mitoista — mitä enemmän mittoja, sen parempi.
+    """
+    waist = measurements.get("vyötärö")
+    shoulder = measurements.get("hartia")
+    chest = measurements.get("rintakehä")
+    parts = []
+    breakdown = {}
+
+    if waist and height_cm:
+        whtr = waist / height_cm
+        s = 100 if whtr <= 0.45 else (40 if whtr >= 0.55 else round(100 - (whtr - 0.45) * 600))
+        s = max(15, min(100, s))
+        parts.append(s)
+        breakdown["vyötärö/pituus"] = {"ratio": round(whtr, 3), "score": s}
+    if shoulder and waist:
+        r = shoulder / waist
+        s = max(20, min(100, round(100 - abs(r - 1.6) * 120)))
+        parts.append(s)
+        breakdown["hartia/vyötärö"] = {"ratio": round(r, 2), "score": s}
+    if chest and waist:
+        r = chest / waist
+        s = max(20, min(100, round(100 - abs(r - 1.4) * 120)))
+        parts.append(s)
+        breakdown["rintakehä/vyötärö"] = {"ratio": round(r, 2), "score": s}
+
+    if not parts:
+        return None
+    return {"score": round(sum(parts) / len(parts)), "breakdown": breakdown, "metrics_used": len(parts)}
+
+
 def _linear_rate(points: list[tuple]) -> float:
     """Lineaarisen sovituksen kulmakerroin (y-yksikköä / päivä). points: [(ordinal_day, value)]."""
     n = len(points)
@@ -265,14 +315,24 @@ def _linear_rate(points: list[tuple]) -> float:
     return sum((xs[i] - mx) * (ys[i] - my) for i in range(n)) / denom
 
 
+def forecast_confidence(n_points: int, span_days: int) -> float:
+    """Ennusteen luottamus 0–1 datan määrästä ja kestosta. Mitä enemmän
+    treenikertoja ja pidempi seurantajakso, sitä kapeampi haarukka."""
+    by_count = min(1.0, n_points / 12.0)
+    by_span = min(1.0, span_days / 84.0)
+    return round(0.5 * by_count + 0.5 * by_span, 2)
+
+
 def forecast_progress(
-    history: list[tuple], horizon_weeks: int = 26, ceiling: float | None = None
+    history: list[tuple], horizon_weeks: int = 26, ceiling: float | None = None,
+    bodyweight_trend_per_week: float = 0.0, confidence: float = 1.0,
 ) -> list[dict]:
-    """Ennusta kehitys realistisesti vähenevällä tuotolla.
+    """Ennusta kehitys realistisesti vähenevällä tuotolla (data + malli).
 
     history: [(date, value)] (esim. arvioitu 1RM). Lähihistoriasta lasketaan
-    viikkotahti, jota vaimennetaan kun arvo lähestyy kattoa (fysiologinen raja).
-    Palauttaa viikoittaiset pisteet keski-, ala- ja yläennusteineen.
+    viikkotahti (DATA), jota vaimennetaan kun arvo lähestyy fysiologista kattoa
+    (MALLI/tutkimus). Painon lasku hidastaa tahtia ja laskee kattoa (max
+    potentiaali skaalautuu painon mukaan). Pienempi data -> leveämpi haarukka.
     """
     valid = [(d, v) for d, v in history if v and v > 0]
     if len(valid) < 2:
@@ -290,6 +350,15 @@ def forecast_progress(
     if ceiling is None or ceiling <= current:
         ceiling = current * 1.5  # ilman standardia oletetaan 50 % varaa
 
+    # Painon lasku (dieetti) hidastaa kehitystä ja laskee max potentiaalia
+    if bodyweight_trend_per_week < 0:
+        rate_per_week *= max(0.4, 1.0 + bodyweight_trend_per_week * 0.3)
+        ceiling *= max(0.85, 1.0 + bodyweight_trend_per_week * 0.05)
+        ceiling = max(ceiling, current)
+
+    # Datan niukkuus levittää haarukkaa (vähemmän dataa = epävarmempi)
+    spread_mult = 1.6 - 0.6 * max(0.0, min(1.0, confidence))
+
     from datetime import timedelta
 
     out = []
@@ -299,8 +368,8 @@ def forecast_progress(
         damp = max(0.1, 1 - (value / ceiling))
         value = min(ceiling, value + rate_per_week * damp)
         gain = value - current
-        # Epävarmuus kasvaa ajan myötä
-        spread = max(0.5, 0.35 * gain) + 0.015 * current * (w ** 0.5)
+        # Epävarmuus kasvaa ajan myötä ja datan niukkuuden mukaan
+        spread = (max(0.5, 0.35 * gain) + 0.015 * current * (w ** 0.5)) * spread_mult
         out.append({
             "date": (valid[-1][0] + timedelta(weeks=w)).isoformat(),
             "mid": round(value, 1),

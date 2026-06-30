@@ -155,9 +155,17 @@ python -m pytest backend/tests/ -q
 - **Sujuva treenin suoritus (mobiilifokus):** tehdyt liikkeet tiivistyvät
   ("✓ tehty" + arvioitu 1RM), edistymislaskuri (X/Y tehty), vajaus ja
   painoehdotus yhdellä painalluksella; arvioitu 1RM näkyy jokaiselle liikkeelle
-- **Realistinen ennuste:** pääliikkeiden kehitys ennustetaan menneen tahdin
-  ja naturaalinostajan luonnollisen kehityskaaren mukaan (vähenevä tuotto
-  kohti realistista kattoa); apuliikkeitä ei ennusteta
+- **Realistinen ennuste (data + malli):** pääliikkeiden kehitys ennustetaan
+  toteutuneesta tahdista ja naturaalinostajan luonnollisesta kehityskaaresta
+  (vähenevä tuotto kohti realistista kattoa). Painon lasku hidastaa ennustetta
+  ja laskee maksimipotentiaalia; ennusteen **luottamus** kasvaa datan määrän
+  myötä (vähemmän dataa → leveämpi haarukka). Myös **lajitotalin ura** (mihin
+  esim. voimanoston total on menossa ~6 kk) ennustetaan haarukkana
+- **Kehon pisteet:** suhdepisteet ympärysmitoista (vyötärö/pituus,
+  hartia/vyötärö, rintakehä/vyötärö), fysiikkataso (FFMI) ja voimataso
+  yhdistettynä yhteispisteiksi — kuva sekä ulkonäön että voiman tasosta
+- **kcal-itsearvio:** jos treenin kulutusta ei syötetä (älykello), järjestelmä
+  arvioi sen kehon painosta ja kestosta
 - **Voimatasot:** 8 porrasta (aloittelija → SM/EM/MM-luokka) kehon painoon ja
   sukupuoleen suhteutettuna, edistymispalkki ja seuraavan tason kynnys
 - **Fysiikkataso:** 8 porrasta (aloittelija → IFBB Pro) FFMI:n perusteella

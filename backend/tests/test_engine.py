@@ -233,6 +233,51 @@ def test_volume_verdict():
     assert "laski" in engine.volume_verdict(10, 18)["suggestion"].lower()
 
 
+def test_forecast_confidence():
+    assert engine.forecast_confidence(12, 84) >= 0.9   # paljon dataa, pitkä jakso
+    assert engine.forecast_confidence(2, 7) < 0.3       # vähän dataa
+    assert 0 <= engine.forecast_confidence(6, 40) <= 1
+
+
+def test_forecast_bodyweight_effect():
+    from datetime import date, timedelta
+    base = date(2026, 1, 1)
+    hist = [(base + timedelta(days=7 * i), 100 + i * 2) for i in range(6)]
+    normal = engine.forecast_progress(hist, 12, ceiling=160)
+    cutting = engine.forecast_progress(hist, 12, ceiling=160, bodyweight_trend_per_week=-1.0)
+    # Painon lasku hidastaa ennustettua kehitystä
+    assert cutting[-1]["mid"] <= normal[-1]["mid"]
+
+
+def test_forecast_confidence_widens_band():
+    from datetime import date, timedelta
+    base = date(2026, 1, 1)
+    hist = [(base + timedelta(days=7 * i), 100 + i * 2) for i in range(6)]
+    sure = engine.forecast_progress(hist, 12, ceiling=160, confidence=1.0)
+    unsure = engine.forecast_progress(hist, 12, ceiling=160, confidence=0.2)
+    width_sure = sure[5]["high"] - sure[5]["low"]
+    width_unsure = unsure[5]["high"] - unsure[5]["low"]
+    assert width_unsure > width_sure  # vähemmän dataa -> leveämpi haarukka
+
+
+def test_estimate_workout_kcal():
+    k = engine.estimate_workout_kcal(85, 60)
+    assert k and 350 < k < 600   # ~85*0.0875*60 ≈ 446
+    assert engine.estimate_workout_kcal(0, 60) is None
+    assert engine.estimate_workout_kcal(85, 0) is None
+
+
+def test_proportion_score():
+    # Hyvät suhteet -> korkea pistemäärä
+    good = engine.proportion_score({"vyötärö": 80, "hartia": 128, "rintakehä": 112}, 180)
+    assert good["score"] > 70
+    # Iso vyötärö -> matalampi
+    bad = engine.proportion_score({"vyötärö": 110, "hartia": 120, "rintakehä": 120}, 180)
+    assert bad["score"] < good["score"]
+    # Ei mittoja -> None
+    assert engine.proportion_score({}, 180) is None
+
+
 def test_pearson():
     assert engine.pearson([1, 2, 3, 4], [2, 4, 6, 8]) == 1.0
     assert engine.pearson([1, 2, 3, 4], [8, 6, 4, 2]) == -1.0

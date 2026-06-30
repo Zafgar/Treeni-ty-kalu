@@ -102,6 +102,22 @@ def _latest_bodyweight(db: Session, profile_id: int | None) -> float | None:
     return b.bodyweight if b else None
 
 
+def _bodyweight_trend(db: Session, profile_id: int | None) -> float | None:
+    """Painon muutos kg/viikko (viikkokeskiarvoista) ennusteen säätöä varten."""
+    if profile_id is None:
+        return None
+    entries = (
+        db.query(models.BodyEntry)
+        .filter(models.BodyEntry.profile_id == profile_id, models.BodyEntry.bodyweight.isnot(None))
+        .order_by(models.BodyEntry.entry_date)
+        .all()
+    )
+    points = [(e.entry_date, e.bodyweight) for e in entries]
+    if len(points) < 2:
+        return None
+    return engine.weight_trend(points, max(d for d, _ in points))
+
+
 @router.get("/exercises/{exercise_id}/history")
 def exercise_history(
     exercise_id: int,
@@ -119,21 +135,38 @@ def exercise_history(
     # Ennuste vain pääliikkeille (tunnistettu kyykky/penkki/mave/pystypunnerrus
     # tai is_main_lift) — apuliikkeiden ennuste ei ole hyödyllinen.
     forecast_points = []
+    forecast_meta = None
     lift_key = engine.classify_lift(ex.name) if ex else None
     is_main = bool(lift_key) or (ex.is_main_lift if ex else False)
-    if forecast and is_main and len([p for p in points if p["estimated_1rm"] > 0]) >= 2:
+    valid_pts = [p for p in points if p["estimated_1rm"] > 0]
+    if forecast and is_main and len(valid_pts) >= 2:
         # Katto naturaalinostajan realistisesta huipusta (jos paino tunnetaan)
         ceiling = None
         bw = _latest_bodyweight(db, profile_id)
         if lift_key and bw:
             profile = db.get(models.Profile, profile_id) if profile_id else None
             ceiling = engine.natural_ceiling(lift_key, bw, profile.sex if profile else None)
-        history = [(p["date"], p["estimated_1rm"]) for p in points if p["estimated_1rm"] > 0]
-        forecast_points = engine.forecast_progress(history, horizon_weeks, ceiling)
+        # Luottamus datan määrästä ja painotrendi dieetin vaikutusta varten
+        span_days = (valid_pts[-1]["date"] - valid_pts[0]["date"]).days
+        conf = engine.forecast_confidence(len(valid_pts), span_days)
+        bw_trend = _bodyweight_trend(db, profile_id) or 0.0
+        history = [(p["date"], p["estimated_1rm"]) for p in valid_pts]
+        forecast_points = engine.forecast_progress(
+            history, horizon_weeks, ceiling, bodyweight_trend_per_week=bw_trend, confidence=conf)
+        conf_label = "korkea" if conf >= 0.7 else "kohtalainen" if conf >= 0.4 else "matala"
+        forecast_meta = {
+            "confidence": conf, "confidence_label": conf_label,
+            "bodyweight_trend": bw_trend, "sessions": len(valid_pts),
+            "note": ("Ennuste perustuu toteutuneeseen tahtiin ja naturaalinostajan "
+                     "realistiseen kattoon. " +
+                     ("Painon lasku hidastaa arvioitua kehitystä. " if bw_trend < -0.1 else "") +
+                     f"Luottamus: {conf_label} ({len(valid_pts)} treenikertaa). Lisää dataa tarkentaa."),
+        }
 
     return {
         "exercise_id": exercise_id,
         "exercise_name": ex.name if ex else None,
+        "forecast_meta": forecast_meta,
         "points": [
             {
                 "date": p["date"].isoformat(),
@@ -243,6 +276,41 @@ def total(
         if last_known:
             timeline.append({"date": d.isoformat(), "total": round(sum(last_known.values()), 1)})
 
+    # Total-uran ennuste: ennusta jokainen pääliike ja summaa viikoittain.
+    bw = _latest_bodyweight(db, profile_id)
+    bw_trend = _bodyweight_trend(db, profile_id) or 0.0
+    profile = db.get(models.Profile, profile_id) if profile_id else None
+    sex = profile.sex if profile else None
+    horizon = 26
+    fc_mid = [0.0] * horizon
+    fc_low = [0.0] * horizon
+    fc_high = [0.0] * horizon
+    fc_dates = None
+    have_fc = False
+    for ex in lifts:
+        pts = [p for p in lift_timeseries.get(ex.name, []) if p["estimated_1rm"] > 0]
+        if len(pts) < 2:
+            continue
+        lk = engine.classify_lift(ex.name)
+        ceiling = engine.natural_ceiling(lk, bw, sex) if (lk and bw) else None
+        span = (pts[-1]["date"] - pts[0]["date"]).days
+        conf = engine.forecast_confidence(len(pts), span)
+        fc = engine.forecast_progress([(p["date"], p["estimated_1rm"]) for p in pts],
+                                      horizon, ceiling, bodyweight_trend_per_week=bw_trend, confidence=conf)
+        if not fc:
+            continue
+        have_fc = True
+        if fc_dates is None:
+            fc_dates = [m["date"] for m in fc]
+        for i, m in enumerate(fc):
+            fc_mid[i] += m["mid"]; fc_low[i] += m["low"]; fc_high[i] += m["high"]
+
+    total_forecast = []
+    if have_fc and fc_dates:
+        total_forecast = [{"date": fc_dates[i], "mid": round(fc_mid[i], 1),
+                           "low": round(fc_low[i], 1), "high": round(fc_high[i], 1)}
+                          for i in range(len(fc_dates))]
+
     return {
         "sport": sport,
         "total_low": round(total_low, 1),
@@ -250,6 +318,7 @@ def total(
         "total_high": round(total_high, 1),
         "per_lift": per_lift,
         "timeline": timeline,
+        "forecast": total_forecast,
     }
 
 
@@ -330,12 +399,20 @@ def load_timeline(profile_id: int | None = Query(None), db: Session = Depends(ge
         wq = wq.filter(models.WorkoutSession.profile_id == profile_id)
     sessions = wq.order_by(models.WorkoutSession.session_date).all()
 
+    _load_bw = _latest_bodyweight(db, profile_id)  # kcal-arviota varten
     by_date: dict[date, dict] = {}
     for s in sessions:
         agg = by_date.setdefault(s.session_date,
-                                 {"total_kg": 0.0, "reps": 0, "sets": 0, "kcal_burned": 0.0, "duration_min": 0})
+                                 {"total_kg": 0.0, "reps": 0, "sets": 0, "kcal_burned": 0.0,
+                                  "duration_min": 0, "kcal_estimated": False})
         if s.kcal_burned:
             agg["kcal_burned"] += s.kcal_burned
+        elif s.duration_min:
+            # Ei älykellodataa -> arvioi kulutus painosta ja kestosta
+            est = engine.estimate_workout_kcal(_load_bw, s.duration_min)
+            if est:
+                agg["kcal_burned"] += est
+                agg["kcal_estimated"] = True
         if s.duration_min:
             agg["duration_min"] += s.duration_min
         for we in s.exercises:
@@ -394,6 +471,62 @@ def levels(profile_id: int | None = Query(None), db: Session = Depends(get_db)):
             result.append({"exercise_name": ex.name, "current_1rm": rec["current_1rm"],
                            "bodyweight": bw, **lvl})
     return {"bodyweight": bw, "all_levels": engine.STRENGTH_LEVELS, "lifts": result}
+
+
+@router.get("/body-score")
+def body_score(profile_id: int = Query(...), db: Session = Depends(get_db)):
+    """Kehon yhteispisteet: suhdepisteet (mitat) + fysiikkataso (FFMI) +
+    voimataso. Antaa kuvan sekä ulkonäön että voiman tasosta.
+
+    Molemmat tekijät tarvitaan: dataan perustuva (omat mitat/nostot) ja
+    malliin perustuva (esteettiset suhteet, voimastandardit). Mitä enemmän
+    dataa, sitä luotettavampi tulos.
+    """
+    profile = db.get(models.Profile, profile_id)
+    height = profile.height_cm if profile else None
+    sex = profile.sex if profile else None
+
+    # Viimeisin mitta per kohta
+    latest_meas: dict[str, float] = {}
+    for m in (db.query(models.Measurement)
+              .filter(models.Measurement.profile_id == profile_id)
+              .order_by(models.Measurement.entry_date).all()):
+        latest_meas[m.site] = m.value_cm
+    proportion = engine.proportion_score(latest_meas, height, sex)
+
+    # Fysiikkataso (FFMI) viimeisimmästä painosta + rasva-%:sta
+    physique = None
+    bw_e = (db.query(models.BodyEntry).filter(models.BodyEntry.profile_id == profile_id,
+            models.BodyEntry.bodyweight.isnot(None)).order_by(models.BodyEntry.entry_date.desc()).first())
+    bf_e = (db.query(models.BodyEntry).filter(models.BodyEntry.profile_id == profile_id,
+            models.BodyEntry.body_fat_pct.isnot(None)).order_by(models.BodyEntry.entry_date.desc()).first())
+    if bw_e and bf_e:
+        comp = engine.body_composition(bw_e.bodyweight, bf_e.body_fat_pct, height)
+        physique = engine.physique_level(comp.get("ffmi"), sex)
+
+    # Voimataso: pääliikkeiden keskimääräinen taso (0–7) -> 0–100
+    lv = levels(profile_id, db)
+    strength_idxs = [l["level_index"] for l in lv["lifts"] if l.get("level_index", -1) >= 0]
+    strength_score = round(sum(strength_idxs) / len(strength_idxs) / 7 * 100) if strength_idxs else None
+
+    # Yhteispisteet saatavilla olevista osista
+    parts = []
+    if proportion:
+        parts.append(proportion["score"])
+    if physique:
+        parts.append(min(100, round(physique["level_index"] / 7 * 100)))
+    if strength_score is not None:
+        parts.append(strength_score)
+    overall = round(sum(parts) / len(parts)) if parts else None
+
+    return {
+        "proportion": proportion,
+        "physique": physique,
+        "strength_score": strength_score,
+        "strength_level_avg": (round(sum(strength_idxs) / len(strength_idxs), 1) if strength_idxs else None),
+        "overall_score": overall,
+        "note": "Pisteet ovat suuntaa antavia. Mitä enemmän mittoja ja nostoja kirjaat, sitä tarkemmat.",
+    }
 
 
 # Metriikat joita voi korreloida (nimi -> kuvaus)

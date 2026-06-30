@@ -809,6 +809,10 @@ async function drawProgressChart() {
       const band = h.forecast.map((p) => ({ x: new Date(p.date).getTime(), low: p.low, high: p.high }));
       series.push({ points: [anchor, ...fc], band, color, dashed: true });
       legend.append(el("span", { class: "muted" }, " — katkoviiva = ennuste, alue = haarukka"));
+      if (h.forecast_meta) {
+        document.getElementById("progress-legend").append(
+          el("div", { class: "muted", style: "margin-top:6px;width:100%" }, h.forecast_meta.note));
+      }
     }
     idx++;
   }
@@ -849,13 +853,24 @@ async function drawTotal() {
   const t = await api.get(pq(`/api/stats/total?sport=${encodeURIComponent(sport)}`));
   const sum = document.getElementById("total-summary");
   sum.innerHTML = "";
+  const fcEnd = t.forecast && t.forecast.length ? t.forecast[t.forecast.length - 1] : null;
   sum.append(el("div", { class: "result-box" },
     el("div", {}, `${sport} — tämänhetkinen total`),
     el("div", { class: "big" }, `${t.total_mid} kg`),
     el("div", { class: "muted" }, `Haarukka ${t.total_low}–${t.total_high} kg`),
-    el("div", { class: "muted" }, t.per_lift.map((l) => `${l.exercise_name}: ${l.current_1rm}kg`).join(" · "))));
-  drawLineChart(document.getElementById("total-chart"),
-    [{ points: t.timeline.map((p) => ({ x: new Date(p.date).getTime(), y: p.total })) }], { unit: "kg" });
+    el("div", { class: "muted" }, t.per_lift.map((l) => `${l.exercise_name}: ${l.current_1rm}kg`).join(" · ")),
+    fcEnd ? el("div", { class: "muted", style: "margin-top:6px" },
+      `Ennuste ~6 kk: ${fcEnd.low}–${fcEnd.high} kg (mihin tällä tahdilla ollaan menossa)`) : ""));
+
+  const series = [{ points: t.timeline.map((p) => ({ x: new Date(p.date).getTime(), y: p.total })) }];
+  if (t.forecast && t.forecast.length && t.timeline.length) {
+    const last = t.timeline[t.timeline.length - 1];
+    const anchor = { x: new Date(last.date).getTime(), y: last.total };
+    const fc = t.forecast.map((p) => ({ x: new Date(p.date).getTime(), y: p.mid }));
+    const band = t.forecast.map((p) => ({ x: new Date(p.date).getTime(), low: p.low, high: p.high }));
+    series.push({ points: [anchor, ...fc], band, dashed: true, color: CHART_COLORS[1] });
+  }
+  drawLineChart(document.getElementById("total-chart"), series, { unit: "kg" });
 }
 
 // ---- Ennätystaulukko ----
@@ -1018,10 +1033,36 @@ document.getElementById("new-profile-btn").addEventListener("click", () => {
 });
 
 // =================== KEHO ===================
+async function renderBodyScore() {
+  const div = document.getElementById("body-score");
+  div.innerHTML = "";
+  const bs = await api.get(pq("/api/stats/body-score"));
+  if (bs.overall_score == null) {
+    div.append(el("p", { class: "muted" }, "Kirjaa kehon mittoja, paino + rasva-% ja pääliikkeitä nähdäksesi pisteet.")); return;
+  }
+  const scoreBox = (label, val, sub) => el("div", { class: "result-box" },
+    el("div", { class: "muted" }, label), el("div", { class: "big" }, val == null ? "—" : `${val}`),
+    sub ? el("div", { class: "muted" }, sub) : "");
+  div.append(el("div", { class: "grid" },
+    scoreBox("Yhteispisteet", bs.overall_score, "ulkonäkö + voima"),
+    scoreBox("Suhdepisteet", bs.proportion ? bs.proportion.score : null, "mittojen suhteet"),
+    scoreBox("Fysiikkataso", bs.physique ? bs.physique.level : null, bs.physique ? `FFMI ${bs.physique.ffmi}` : ""),
+    scoreBox("Voimataso", bs.strength_score, bs.strength_level_avg != null ? `taso ka. ${bs.strength_level_avg}/7` : "")));
+  if (bs.proportion && bs.proportion.breakdown) {
+    const tbl = el("table", {});
+    tbl.append(el("tr", {}, el("th", {}, "Suhde"), el("th", {}, "Arvo"), el("th", {}, "Pisteet")));
+    Object.entries(bs.proportion.breakdown).forEach(([k, v]) =>
+      tbl.append(el("tr", {}, el("td", {}, k), el("td", {}, String(v.ratio)), el("td", {}, `${v.score}/100`))));
+    div.append(tbl);
+  }
+  div.append(el("div", { class: "muted", style: "margin-top:6px" }, bs.note));
+}
+
 async function loadBody() {
   document.getElementById("b-date").value = new Date().toISOString().slice(0, 10);
   document.getElementById("m-date").value = new Date().toISOString().slice(0, 10);
   const s = await api.get(pq("/api/body/summary"));
+  renderBodyScore();
 
   // Koostumus
   const comp = document.getElementById("composition");
