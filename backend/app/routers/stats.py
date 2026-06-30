@@ -116,17 +116,18 @@ def exercise_history(
     points = _exercise_session_points(db, exercise_id, profile_id)
     records = _records_for_exercise(points, window_days)
 
+    # Ennuste vain pääliikkeille (tunnistettu kyykky/penkki/mave/pystypunnerrus
+    # tai is_main_lift) — apuliikkeiden ennuste ei ole hyödyllinen.
     forecast_points = []
-    if forecast and len([p for p in points if p["estimated_1rm"] > 0]) >= 2:
-        # Katto fysiologisesta voimastandardista jos liike ja paino tunnetaan
+    lift_key = engine.classify_lift(ex.name) if ex else None
+    is_main = bool(lift_key) or (ex.is_main_lift if ex else False)
+    if forecast and is_main and len([p for p in points if p["estimated_1rm"] > 0]) >= 2:
+        # Katto naturaalinostajan realistisesta huipusta (jos paino tunnetaan)
         ceiling = None
         bw = _latest_bodyweight(db, profile_id)
-        lift_key = engine.classify_lift(ex.name) if ex else None
         if lift_key and bw:
             profile = db.get(models.Profile, profile_id) if profile_id else None
-            lvl = engine.strength_level(lift_key, records["current_1rm"], bw,
-                                        profile.sex if profile else None)
-            ceiling = lvl["ceiling_kg"] if lvl else None
+            ceiling = engine.natural_ceiling(lift_key, bw, profile.sex if profile else None)
         history = [(p["date"], p["estimated_1rm"]) for p in points if p["estimated_1rm"] > 0]
         forecast_points = engine.forecast_progress(history, horizon_weeks, ceiling)
 
@@ -512,12 +513,20 @@ def overview(profile_id: int | None = Query(None), db: Session = Depends(get_db)
     )
     recent = [
         {"id": s.id, "date": s.session_date.isoformat(), "name": s.name,
-         "exercises": len(s.exercises)}
+         "exercises": len(s.exercises), "feeling": s.feeling}
         for s in recent_sessions
+    ]
+    # Merkityt fiilikset (positiiviset/negatiiviset) — auttaa huomaamaan ongelmat
+    flagged_q = wq.filter(models.WorkoutSession.feeling.in_(["positive", "negative"]))
+    flagged = [
+        {"id": s.id, "date": s.session_date.isoformat(), "name": s.name,
+         "feeling": s.feeling, "feeling_note": s.feeling_note}
+        for s in flagged_q.order_by(models.WorkoutSession.session_date.desc()).limit(8).all()
     ]
     return {
         "total_workouts": total_workouts,
         "total_exercises": total_exercises,
         "total_programs": total_programs,
         "recent_workouts": recent,
+        "flagged_feelings": flagged,
     }

@@ -159,6 +159,8 @@ class WorkoutSessionBase(BaseModel):
     bodyweight: float | None = None
     duration_min: int | None = None
     kcal_burned: float | None = None
+    feeling: str | None = None
+    feeling_note: str | None = None
     status: str = "completed"
     notes: str | None = None
 
@@ -173,6 +175,8 @@ class WorkoutSessionUpdate(BaseModel):
     bodyweight: float | None = None
     duration_min: int | None = None
     kcal_burned: float | None = None
+    feeling: str | None = None
+    feeling_note: str | None = None
     status: str | None = None
     notes: str | None = None
 

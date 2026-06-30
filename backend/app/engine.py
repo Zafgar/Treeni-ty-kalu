@@ -161,6 +161,20 @@ STRENGTH_STANDARDS = {
 }
 
 
+# Naturaalinostajan realistinen huippu (1RM / kehon paino) pääliikkeissä.
+# Käytetään ennusteen kattona, jotta kehityskaari noudattaa luonnollista
+# nostajaa (lähestyy asymptoottisesti, ei lupaa eliittikertoimia).
+NATURAL_CEILINGS = {"squat": 2.4, "bench": 1.8, "deadlift": 2.8, "ohp": 1.15}
+
+
+def natural_ceiling(lift_key: str, bodyweight: float, sex: str | None = None) -> float | None:
+    """Naturaalinostajan realistinen 1RM-katto liikkeelle (kg)."""
+    if lift_key not in NATURAL_CEILINGS or not bodyweight or bodyweight <= 0:
+        return None
+    factor = FEMALE_FACTOR if (sex or "").lower().startswith("nain") else 1.0
+    return round(NATURAL_CEILINGS[lift_key] * factor * bodyweight, 1)
+
+
 def classify_lift(name: str) -> str | None:
     """Tunnista liike voimastandardiksi nimen perusteella."""
     n = (name or "").lower()

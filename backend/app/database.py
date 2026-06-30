@@ -50,6 +50,8 @@ def ensure_columns():
         ("body_entries", "sleep_score", "FLOAT"),
         ("workout_sessions", "duration_min", "INTEGER"),
         ("workout_sessions", "kcal_burned", "FLOAT"),
+        ("workout_sessions", "feeling", "VARCHAR(12)"),
+        ("workout_sessions", "feeling_note", "TEXT"),
     ]
     inspector = inspect(engine)
     existing_tables = set(inspector.get_table_names())

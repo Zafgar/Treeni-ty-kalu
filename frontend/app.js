@@ -295,11 +295,13 @@ async function loadWorkouts() {
       completed: ["Suoritettu", "status-done"],
       skipped: ["Skipattu", "status-skip"],
     }[w.status] || ["", ""];
+    const feelEmoji = { positive: "😀", neutral: "😐", negative: "😟" }[w.feeling] || "";
     const item = el("div", { class: "item" },
       el("div", { class: "row-between" },
         el("div", { class: "btn-row", style: "align-items:center" },
           el("strong", {}, `${w.session_date} — ${w.name || "Treeni"}`),
-          el("span", { class: "tag " + statusInfo[1] }, statusInfo[0])),
+          el("span", { class: "tag " + statusInfo[1] }, statusInfo[0]),
+          feelEmoji ? el("span", { title: w.feeling_note || "" }, feelEmoji) : ""),
         el("div", { class: "btn-row" },
           el("button", { class: "small", onclick: () => openWorkoutEditor(w.id) }, "Avaa"),
           el("button", { class: "small danger", onclick: async () => {
@@ -330,6 +332,12 @@ async function openWorkoutEditor(id) {
   const bw = el("input", { type: "number", step: "0.1", value: w.bodyweight ?? "", placeholder: "kg" });
   const dur = el("input", { type: "number", value: w.duration_min ?? "", placeholder: "min" });
   const kcal = el("input", { type: "number", value: w.kcal_burned ?? "", placeholder: "kcal" });
+  const feeling = el("select", {}, el("option", { value: "" }, "—"),
+    el("option", { value: "positive" }, "😀 Hyvä olo"),
+    el("option", { value: "neutral" }, "😐 Neutraali"),
+    el("option", { value: "negative" }, "😟 Ongelma"));
+  feeling.value = w.feeling || "";
+  const feelingNote = el("input", { value: w.feeling_note || "", placeholder: "esim. kipu olkapäässä, hyvä veto" });
   const notes = el("input", { value: w.notes || "", placeholder: "Huomiot" });
 
   async function saveMeta() {
@@ -338,11 +346,13 @@ async function openWorkoutEditor(id) {
       bodyweight: bw.value ? +bw.value : null,
       duration_min: dur.value ? +dur.value : null,
       kcal_burned: kcal.value ? +kcal.value : null,
+      feeling: feeling.value || null,
+      feeling_note: feelingNote.value || null,
       notes: notes.value,
     });
     loadWorkouts();
   }
-  [nameInput, dateInput, bw, dur, kcal, notes].forEach((i) => i.addEventListener("change", saveMeta));
+  [nameInput, dateInput, bw, dur, kcal, feeling, feelingNote, notes].forEach((i) => i.addEventListener("change", saveMeta));
 
   const statusLabel = { planned: "Suunniteltu", completed: "Suoritettu", skipped: "Skipattu" }[w.status] || w.status;
   editor.append(el("div", { class: "row-between" },
@@ -361,7 +371,8 @@ async function openWorkoutEditor(id) {
   editor.append(el("div", { class: "grid" },
     el("label", {}, "Nimi", nameInput), el("label", {}, "Päivä", dateInput),
     el("label", {}, "Kehon paino", bw), el("label", {}, "Kesto (min)", dur),
-    el("label", {}, "Poltetut kcal", kcal), el("label", {}, "Huomiot", notes)));
+    el("label", {}, "Poltetut kcal", kcal), el("label", {}, "Fiilis", feeling),
+    el("label", {}, "Fiilis-huomio", feelingNote), el("label", {}, "Huomiot", notes)));
 
   for (const we of w.exercises) editor.append(renderWorkoutExercise(id, we));
 
@@ -573,7 +584,20 @@ async function loadOverview() {
   recent.innerHTML = "";
   if (!o.recent_workouts.length) recent.append(el("p", { class: "muted" }, "Ei treenejä."));
   for (const w of o.recent_workouts) {
-    recent.append(el("div", { class: "muted" }, `${w.date} — ${w.name || "Treeni"} (${w.exercises} liikettä)`));
+    const emoji = { positive: " 😀", neutral: " 😐", negative: " 😟" }[w.feeling] || "";
+    recent.append(el("div", { class: "muted" }, `${w.date} — ${w.name || "Treeni"} (${w.exercises} liikettä)${emoji}`));
+  }
+
+  // Merkityt fiilikset
+  const flagged = o.flagged_feelings || [];
+  document.getElementById("flagged-card").style.display = flagged.length ? "" : "none";
+  const fdiv = document.getElementById("overview-flagged");
+  fdiv.innerHTML = "";
+  for (const f of flagged) {
+    const emoji = f.feeling === "positive" ? "😀" : "😟";
+    fdiv.append(el("div", { class: "item" },
+      el("div", {}, `${emoji} ${f.date} — ${f.name || "Treeni"}`),
+      f.feeling_note ? el("div", { class: "muted" }, f.feeling_note) : ""));
   }
 }
 

@@ -151,6 +151,39 @@ def test_load_timeline(client):
     assert tl[0]["kcal_burned"] == 450
 
 
+def test_feeling_marker(client):
+    ex = client.post("/api/exercises", json={"name": "Kyykky"}).json()
+    w = client.post("/api/workouts", json={
+        "profile_id": 1, "feeling": "negative", "feeling_note": "kipu olkapäässä",
+        "exercises": [{"exercise_id": ex["id"], "sets": [
+            {"set_index": 0, "reps": 5, "weight": 100, "completed": True}]}],
+    }).json()
+    assert w["feeling"] == "negative"
+    ov = client.get("/api/stats/overview?profile_id=1").json()
+    assert len(ov["flagged_feelings"]) == 1
+    assert ov["flagged_feelings"][0]["feeling_note"] == "kipu olkapäässä"
+
+
+def test_forecast_only_for_main_lifts(client):
+    from datetime import date, timedelta
+    # Apuliike -> ei ennustetta
+    acc = client.post("/api/exercises", json={"name": "Hauiskääntö"}).json()
+    main = client.post("/api/exercises", json={"name": "Takakyykky", "is_main_lift": True}).json()
+    client.post("/api/body/entries?profile_id=1", json={"bodyweight": 100})
+    base = date(2026, 1, 1)
+    for i in range(4):
+        d = (base + timedelta(weeks=i)).isoformat()
+        for ex, wt in [(acc, 30 + i), (main, 140 + i * 5)]:
+            client.post("/api/workouts", json={
+                "profile_id": 1, "session_date": d,
+                "exercises": [{"exercise_id": ex["id"], "sets": [
+                    {"set_index": 0, "reps": 5, "weight": wt, "completed": True}]}]})
+    acc_h = client.get(f"/api/stats/exercises/{acc['id']}/history?profile_id=1").json()
+    main_h = client.get(f"/api/stats/exercises/{main['id']}/history?profile_id=1").json()
+    assert acc_h["forecast"] == []        # apuliike ei saa ennustetta
+    assert len(main_h["forecast"]) > 0    # pääliike saa
+
+
 def test_physique_in_body_summary(client):
     # Aseta pituus profiilille, kirjaa paino + rasva-% -> fysiikkataso
     # (profiili 1 luodaan fixturessa ilman pituutta -> päivitetään)

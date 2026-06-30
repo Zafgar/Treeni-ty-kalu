@@ -36,6 +36,8 @@ def create_workout(payload: schemas.WorkoutSessionCreate, db: Session = Depends(
         bodyweight=payload.bodyweight,
         duration_min=payload.duration_min,
         kcal_burned=payload.kcal_burned,
+        feeling=payload.feeling,
+        feeling_note=payload.feeling_note,
         status=payload.status,
         notes=payload.notes,
     )

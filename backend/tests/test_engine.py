@@ -163,6 +163,15 @@ def test_strength_level():
     assert f["level_index"] > engine.strength_level("squat", 140, 100, "mies")["level_index"]
 
 
+def test_natural_ceiling():
+    # Kyykky 2.4x kehon paino naturaalikatto
+    assert engine.natural_ceiling("squat", 100, "mies") == 240.0
+    # naisilla matalampi
+    assert engine.natural_ceiling("squat", 100, "nainen") < 240.0
+    # tuntematon liike
+    assert engine.natural_ceiling("curl", 100) is None
+
+
 def test_forecast_progress():
     from datetime import date, timedelta
     base = date(2026, 1, 1)

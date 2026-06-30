@@ -158,6 +158,10 @@ class WorkoutSession(Base):
     # Treenin kesto minuuteissa ja poltetut kalorit (esim. älykellosta)
     duration_min: Mapped[int | None] = mapped_column(Integer, nullable=True)
     kcal_burned: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Fiilis: "positive" / "neutral" / "negative" + vapaa huomio. Auttaa
+    # huomaamaan jos treenissä oli ongelma joka voi vaikuttaa jatkoon.
+    feeling: Mapped[str | None] = mapped_column(String(12), nullable=True)
+    feeling_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     # "planned" (suunniteltu), "completed" (suoritettu) tai "skipped" (skipattu)
     status: Mapped[str] = mapped_column(String(12), default="completed")
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)

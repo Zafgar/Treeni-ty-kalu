@@ -88,6 +88,12 @@ python -m pytest backend/tests/ -q
 - **Treenin kesto ja poltetut kalorit:** kirjaa treenin kesto (min) ja kcal
   (esim. älykellosta); mukana kuormitusaikajanassa ja korrelaatioissa
   treenin ja syömisen suhteen arviointiin
+- **Fiilismerkintä:** merkitse treeniin hyvä olo tai ongelma (+ vapaa huomio,
+  esim. kipu); merkityt nousevat yleisnäkymään huomaamaan jos jokin vaikuttaa
+  jatkoon
+- **Realistinen ennuste:** pääliikkeiden kehitys ennustetaan menneen tahdin
+  ja naturaalinostajan luonnollisen kehityskaaren mukaan (vähenevä tuotto
+  kohti realistista kattoa); apuliikkeitä ei ennusteta
 - **Voimatasot:** 8 porrasta (aloittelija → SM/EM/MM-luokka) kehon painoon ja
   sukupuoleen suhteutettuna, edistymispalkki ja seuraavan tason kynnys
 - **Fysiikkataso:** 8 porrasta (aloittelija → IFBB Pro) FFMI:n perusteella
@@ -118,6 +124,25 @@ ohjelmassa. Järjestelmä laskee arvioidun 1RM:n suoraan toteutuneista sarjoista
 ja valitsee tämänhetkiseksi tasoksi **parhaan tuloksen tuoreelta aikaikkunalta**
 (oletus 56 vrk liikkeen viimeisimmästä treenistä) — recency voittaa, eikä
 vanha ohjelma "kiistele" uuden kanssa. Kaikkien aikojen ennätys säilyy erikseen.
+
+## Mihin ja miten data tallentuu
+
+Kaikki data tallennetaan **paikalliseen SQLite-tietokantaan**: tiedosto
+`data/treeni.db` projektin juuressa. Kun lisäät tai muutat jotain
+käyttöliittymässä, selain lähettää pyynnön FastAPI-backendille, joka kirjoittaa
+muutoksen tietokantaan **välittömästi** (jokainen lisäys/muokkaus/poisto
+tallentuu heti — ei erillistä "tallenna"-vaihetta koko sovellukselle).
+
+- **Sijainti:** `data/treeni.db` (SQLite-tiedosto). Tämä on koko datasi.
+- **Varmuuskopio:** kopioi `data/treeni.db` talteen — siinä on kaikki.
+- **Siirrettävyys:** vie tiedosto toiselle koneelle ja sovellus jatkaa siitä.
+- **Yksityisyys:** data pysyy omalla koneellasi, ei pilvessä (ellet itse vie).
+- **Historiatiedot:** voit kirjata vanhoja painoja, mittoja ja tuloksia
+  taaksepäin antamalla menneen päivämäärän — kaikissa lomakkeissa on
+  päivämääräkenttä. Näin saat kehityskäyrän ja ennusteen alkamaan oikein
+  vaikka aloittaisit sovelluksen käytön vasta nyt.
+
+> Tietokanta on `.gitignore`ssa, joten omat treenitietosi eivät päädy versionhallintaan.
 
 ## Tietomalli
 
