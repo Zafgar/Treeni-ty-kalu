@@ -362,17 +362,20 @@ def adaptive_tdee(avg_intake_kcal: float, weight_change_kg: float, days: int) ->
     return round(avg_intake_kcal - (weight_change_kg * KCAL_PER_KG / days), 0)
 
 
-def macro_targets(bodyweight: float, goal: str, tdee: float, target_rate: float) -> dict:
+def macro_targets(bodyweight: float, goal: str, tdee: float, target_rate: float,
+                  low_carb: bool = False) -> dict:
     """Laske kcal- ja makrotavoitteet kehon painosta, tavoitteesta ja tahdista.
 
     target_rate kg/viikko -> päivittäinen energiavaje/ylijäämä = rate*7700/7.
     Proteiini painotetaan korkeaksi etenkin dieetillä lihasten säilyttämiseksi.
+    low_carb: nostaa rasvaa ja pudottaa hiilihydraatit minimiin.
     """
     daily_delta = target_rate * KCAL_PER_KG / 7.0
     kcal = max(1200.0, tdee + daily_delta)
     protein_per_kg = {"cut": 2.2, "maintain": 1.8, "bulk": 2.0}.get(goal, 1.8)
     protein_g = round(bodyweight * protein_per_kg)
-    fat_g = round(bodyweight * 0.8)
+    # Low carb: rasva korkeammaksi, loput hiilareina (jää matalaksi)
+    fat_g = round(bodyweight * (1.3 if low_carb else 0.8))
     carbs_g = round(max(0.0, (kcal - protein_g * 4 - fat_g * 9) / 4))
     return {
         "kcal": round(kcal),

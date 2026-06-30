@@ -270,6 +270,10 @@ class Food(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    # Kategoria: esim. "hedelmät", "liha", "pasta & riisi", "juomat", "herkut"
+    category: Mapped[str | None] = mapped_column(String(60), index=True, nullable=True)
+    # Suosikki nopeaa valintaa varten
+    is_favorite: Mapped[bool] = mapped_column(Boolean, default=False)
     # Arvot per 100 g
     kcal: Mapped[float] = mapped_column(Float, default=0.0)
     protein_g: Mapped[float] = mapped_column(Float, default=0.0)
@@ -291,6 +295,36 @@ class FoodLog(Base):
     food_id: Mapped[int] = mapped_column(ForeignKey("foods.id"))
     grams: Mapped[float] = mapped_column(Float, default=100.0)
 
+    food: Mapped["Food"] = relationship()
+
+
+class Meal(Base):
+    """Oma ravintokokonaisuus (resepti), esim. smoothie: maito + marjat + whey.
+
+    Voi pikakirjata yhdellä napilla päivän kirjauksiin tai muokata lennossa.
+    """
+
+    __tablename__ = "meals"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    profile_id: Mapped[int] = mapped_column(ForeignKey("profiles.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    items: Mapped[list["MealItem"]] = relationship(
+        back_populates="meal", cascade="all, delete-orphan"
+    )
+
+
+class MealItem(Base):
+    __tablename__ = "meal_items"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    meal_id: Mapped[int] = mapped_column(ForeignKey("meals.id", ondelete="CASCADE"))
+    food_id: Mapped[int] = mapped_column(ForeignKey("foods.id"))
+    grams: Mapped[float] = mapped_column(Float, default=100.0)
+
+    meal: Mapped["Meal"] = relationship(back_populates="items")
     food: Mapped["Food"] = relationship()
 
 

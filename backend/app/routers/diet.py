@@ -27,6 +27,13 @@ DIET_MODELS = [
      "target_rate": 0.0, "info": "Pidä paino vakaana ja keskity suorituskykyyn."},
     {"id": "lean_bulk", "name": "Lean bulk", "goal": "bulk",
      "target_rate": 0.20, "info": "~0.2 kg/vk. Hidas massan nosto minimoiden rasvan kertymisen."},
+    {"id": "cut_16_8", "name": "16:8 paasto (cut)", "goal": "cut", "target_rate": -0.5,
+     "info": "Syöt 8 tunnin ikkunassa (esim. 12–20), paastoat 16 h. Sama kaloritavoite, "
+             "harvempi mutta isompi ateria. Helpottaa kalorivajeen pitämistä monelle."},
+    {"id": "cut_lowcarb", "name": "Low carb cut", "goal": "cut", "target_rate": -0.5,
+     "low_carb": True,
+     "info": "Vähähiilihydraattinen pudotus: hiilarit minimiin, rasva korkeammaksi, "
+             "proteiini korkea. Hyvä jos hiilarit lisäävät napostelua."},
 ]
 
 
@@ -214,7 +221,9 @@ def diet_status(profile_id: int = Query(...), db: Session = Depends(get_db)):
     if not tdee:
         tdee = round(week_avg * 33)  # karkea arvio kun syöntidataa ei vielä ole
 
-    targets = engine.macro_targets(week_avg, goal, tdee, target_rate)
+    low_carb = bool(next((m for m in DIET_MODELS
+                          if phase and m["name"] == phase.model and m.get("low_carb")), None))
+    targets = engine.macro_targets(week_avg, goal, tdee, target_rate, low_carb=low_carb)
     recommendation = engine.diet_recommendation(goal, target_rate, trend, avg_intake, targets)
 
     # Vyötärö (viimeisin) bulk-rajaa varten

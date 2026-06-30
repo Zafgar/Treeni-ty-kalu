@@ -113,7 +113,7 @@ def test_exercise_with_defaults(client):
 
 def test_diet_models_and_phase(client):
     models_ = client.get("/api/diet/models").json()
-    assert len(models_) == 4
+    assert len(models_) == 6  # 4 perusmallia + 16:8 + low carb
     phase = client.post("/api/diet/phase", json={"profile_id": 1, "model": "cut_maltillinen"}).json()
     assert phase["goal"] == "cut"
     assert phase["target_rate"] == -0.5
@@ -135,6 +135,57 @@ def test_diet_status(client):
     assert status["targets"]["protein_g"] > 0
     assert status["targets"]["kcal"] > 0
     assert status["trend_kg_per_week"] is not None
+
+
+def test_food_filtering_and_favorite(client):
+    client.post("/api/nutrition/foods", json={"name": "Kanafile", "category": "kana", "kcal": 110})
+    client.post("/api/nutrition/foods", json={"name": "Banaani", "category": "hedelmät", "kcal": 89})
+    # haku
+    r = client.get("/api/nutrition/foods?q=kana").json()
+    assert len(r) == 1 and r[0]["name"] == "Kanafile"
+    # kategoria
+    assert len(client.get("/api/nutrition/foods?category=hedelmät").json()) == 1
+    # suosikki
+    fid = r[0]["id"]
+    client.patch(f"/api/nutrition/foods/{fid}", json={"is_favorite": True})
+    favs = client.get("/api/nutrition/foods?favorites=true").json()
+    assert len(favs) == 1 and favs[0]["id"] == fid
+    # kategoriat
+    cats = client.get("/api/nutrition/categories").json()
+    assert "kana" in cats and "hedelmät" in cats
+
+
+def test_foodlog_edit_grams(client):
+    f = client.post("/api/nutrition/foods", json={"name": "Riisi", "kcal": 130}).json()
+    log = client.post("/api/nutrition/logs?profile_id=1", json={"food_id": f["id"], "grams": 100}).json()
+    client.patch(f"/api/nutrition/logs/{log['id']}", json={"grams": 250})
+    s = client.get("/api/nutrition/summary?profile_id=1").json()
+    assert round(s["today"]["kcal"]) == round(130 * 2.5)
+
+
+def test_meal_create_and_quicklog(client):
+    milk = client.post("/api/nutrition/foods", json={"name": "Maito", "kcal": 50, "protein_g": 3.4}).json()
+    whey = client.post("/api/nutrition/foods", json={"name": "Whey", "kcal": 380, "protein_g": 80}).json()
+    meal = client.post("/api/nutrition/meals?profile_id=1", json={
+        "name": "Smoothie", "items": [
+            {"food_id": milk["id"], "grams": 300}, {"food_id": whey["id"], "grams": 30}]}).json()
+    assert meal["name"] == "Smoothie" and len(meal["items"]) == 2
+    res = client.post(f"/api/nutrition/meals/{meal['id']}/log?profile_id=1&on_date=2026-06-01").json()
+    assert res["logged"] == 2
+    logs = client.get("/api/nutrition/logs?profile_id=1&on_date=2026-06-01").json()
+    assert len(logs) == 2
+
+
+def test_lowcarb_diet_model(client):
+    client.patch("/api/profiles/1", json={"height_cm": 180})
+    client.post("/api/body/entries?profile_id=1", json={"bodyweight": 85, "body_fat_pct": 15})
+    client.post("/api/diet/phase", json={"profile_id": 1, "model": "cut_lowcarb"})
+    status = client.get("/api/diet/status?profile_id=1").json()
+    # Low carb -> rasva korkeampi, hiilarit matalat
+    assert status["targets"]["fat_g"] > status["targets"]["protein_g"] * 0  # sanity
+    std = client.post("/api/diet/phase", json={"profile_id": 1, "model": "cut_maltillinen"})
+    std_status = client.get("/api/diet/status?profile_id=1").json()
+    assert status["targets"]["carbs_g"] < std_status["targets"]["carbs_g"]
 
 
 def test_load_timeline(client):

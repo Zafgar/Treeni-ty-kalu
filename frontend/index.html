@@ -211,25 +211,52 @@
 
     <!-- RUOKA -->
     <section id="tab-nutrition" class="tab">
-      <h2>Ravintoseuranta</h2>
+      <div class="row-between">
+        <h2>Ravintoseuranta</h2>
+        <label style="flex-direction:row;align-items:center;gap:6px">Päivä
+          <input id="n-date" type="date" /></label>
+      </div>
+
       <div class="card">
-        <h3>Tänään syöty</h3>
+        <h3>Päivän yhteenveto</h3>
         <div id="nutrition-today"></div>
-        <div class="btn-row" style="margin-top:10px">
-          <select id="food-select"></select>
-          <input id="food-grams" type="number" placeholder="grammaa" style="width:110px" />
-          <button id="food-log-btn" class="primary">Kirjaa</button>
+      </div>
+
+      <div class="card">
+        <h3>Lisää ruokaa</h3>
+        <div class="btn-row">
+          <input id="food-search" placeholder="Hae (esim. kana, pasta, olut)…" style="flex:1;min-width:160px" />
+          <select id="food-cat"><option value="">Kaikki kategoriat</option></select>
+          <label style="flex-direction:row;align-items:center;gap:4px"><input id="food-fav-only" type="checkbox" /> vain suosikit</label>
         </div>
+        <div id="food-results" class="list" style="max-height:340px;overflow:auto"></div>
+      </div>
+
+      <div class="card">
+        <h3>Päivän kirjaukset</h3>
         <div id="today-log" class="list"></div>
       </div>
+
       <div class="card">
-        <h3>Energiansaanti (kcal) ajan yli</h3>
+        <h3>Omat ateriat (esim. smoothie)</h3>
+        <p class="muted">Tallenna toistuva kokonaisuus ja pikakirjaa se yhdellä napilla.</p>
+        <div id="meals-list" class="list"></div>
+        <button id="new-meal-btn" class="primary" style="margin-top:10px">+ Uusi ateria</button>
+        <div id="meal-editor" class="hidden"></div>
+      </div>
+
+      <div class="card">
+        <h3>Makrojen kehitys ajan yli</h3>
+        <div class="btn-row" id="macro-legend"></div>
         <canvas id="intake-chart" width="840" height="280"></canvas>
       </div>
+
       <div class="card">
         <h3>Lisää oma ruoka-aine (arvot per 100 g)</h3>
         <div class="grid">
           <label>Nimi<input id="nf-name" placeholder="esim. Maitorahka" /></label>
+          <label>Kategoria<input id="nf-cat" list="nf-cats" placeholder="esim. liha" />
+            <datalist id="nf-cats"></datalist></label>
           <label>kcal<input id="nf-kcal" type="number" /></label>
           <label>Proteiini g<input id="nf-prot" type="number" step="0.1" /></label>
           <label>Hiilarit g<input id="nf-carb" type="number" step="0.1" /></label>

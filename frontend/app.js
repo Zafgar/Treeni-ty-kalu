@@ -1019,49 +1019,170 @@ document.getElementById("m-save").addEventListener("click", async () => {
 });
 
 // =================== RUOKA ===================
-let foodsCache = [];
-
-async function loadNutrition() {
-  foodsCache = await api.get("/api/nutrition/foods");
-  const sel = document.getElementById("food-select");
-  sel.innerHTML = "";
-  foodsCache.forEach((f) => sel.append(el("option", { value: f.id }, `${f.name} (${f.kcal} kcal/100g)`)));
-
-  const s = await api.get(pq("/api/nutrition/summary"));
-  const t = s.today;
-  document.getElementById("nutrition-today").innerHTML = "";
-  document.getElementById("nutrition-today").append(el("div", { class: "result-box" },
-    el("div", { class: "big" }, `${Math.round(t.kcal)} kcal`),
-    el("div", { class: "muted" }, `Proteiini ${t.protein_g} g · hiilarit ${t.carbs_g} g · rasva ${t.fat_g} g`)));
-
-  // Päivän kirjaukset
-  const logs = await api.get(pq("/api/nutrition/logs") + "&on_date=" + new Date().toISOString().slice(0, 10));
-  const log = document.getElementById("today-log");
-  log.innerHTML = "";
-  logs.forEach((l) => {
-    log.append(el("div", { class: "item" },
-      el("div", { class: "row-between" },
-        el("span", {}, `${l.food.name} — ${l.grams} g (${Math.round(l.food.kcal * l.grams / 100)} kcal)`),
-        el("button", { class: "small danger", onclick: async () => {
-          await api.del(`/api/nutrition/logs/${l.id}`); loadNutrition();
-        } }, "x"))));
-  });
-
-  drawLineChart(document.getElementById("intake-chart"),
-    [{ points: s.timeline.map((p) => ({ x: new Date(p.date).getTime(), y: p.kcal })) }], { unit: "" });
+let foodCats = [];
+function nDate() {
+  const inp = document.getElementById("n-date");
+  if (!inp.value) inp.value = new Date().toISOString().slice(0, 10);
+  return inp.value;
 }
 
-document.getElementById("food-select").addEventListener("change", (e) => {
-  const f = foodsCache.find((x) => x.id === +e.target.value);
-  if (f && f.default_grams) document.getElementById("food-grams").value = f.default_grams;
-});
+async function loadNutrition() {
+  nDate();
+  // Kategoriat valitsimeen
+  if (!foodCats.length) {
+    foodCats = await api.get("/api/nutrition/categories");
+    const sel = document.getElementById("food-cat");
+    foodCats.forEach((c) => sel.append(el("option", { value: c }, c)));
+    const dl = document.getElementById("nf-cats");
+    foodCats.forEach((c) => dl.append(el("option", {}, c)));
+  }
+  await renderFoodResults();
+  await renderDayLog();
+  await renderMeals();
+}
 
-document.getElementById("food-log-btn").addEventListener("click", async () => {
-  const fid = +document.getElementById("food-select").value;
-  const grams = +document.getElementById("food-grams").value || (foodsCache.find((f) => f.id === fid)?.default_grams) || 100;
-  await api.post(pq("/api/nutrition/logs"), { food_id: fid, grams });
-  document.getElementById("food-grams").value = "";
-  loadNutrition();
+async function renderFoodResults() {
+  const q = document.getElementById("food-search").value.trim();
+  const cat = document.getElementById("food-cat").value;
+  const fav = document.getElementById("food-fav-only").checked;
+  let path = "/api/nutrition/foods?";
+  if (q) path += "q=" + encodeURIComponent(q) + "&";
+  if (cat) path += "category=" + encodeURIComponent(cat) + "&";
+  if (fav) path += "favorites=true";
+  const foods = await api.get(path);
+  const box = document.getElementById("food-results");
+  box.innerHTML = "";
+  if (!foods.length) { box.append(el("p", { class: "muted" }, "Ei osumia.")); return; }
+  foods.slice(0, 60).forEach((f) => {
+    const grams = el("input", { type: "number", value: f.default_grams ?? 100, style: "width:75px" });
+    const star = el("button", { class: "small", title: "Suosikki", onclick: async () => {
+      await api.patch(`/api/nutrition/foods/${f.id}`, { is_favorite: !f.is_favorite }); renderFoodResults();
+    } }, f.is_favorite ? "★" : "☆");
+    box.append(el("div", { class: "item" },
+      el("div", { class: "row-between" },
+        el("div", {}, el("strong", {}, f.name),
+          el("span", { class: "muted" }, ` · ${f.kcal} kcal · P${f.protein_g} H${f.carbs_g} R${f.fat_g} /100g`)),
+        el("div", { class: "btn-row", style: "align-items:center" }, star, grams, el("span", { class: "muted" }, "g"),
+          el("button", { class: "small primary", onclick: async () => {
+            await api.post(pq("/api/nutrition/logs") + "&on_date=" + nDate(),
+              { food_id: f.id, grams: +grams.value || f.default_grams || 100 });
+            renderDayLog();
+          } }, "Kirjaa")))));
+  });
+}
+
+async function renderDayLog() {
+  const s = await api.get(pq("/api/nutrition/summary") + "&on_date=" + nDate());
+  const t = s.today;
+  // Yhteenveto + liikaa/liian vähän -arvio dieettitavoitteeseen nähden
+  const today = document.getElementById("nutrition-today");
+  today.innerHTML = "";
+  const box = el("div", { class: "result-box" },
+    el("div", { class: "big" }, `${Math.round(t.kcal)} kcal`),
+    el("div", { class: "muted" }, `Proteiini ${Math.round(t.protein_g)} g · hiilarit ${Math.round(t.carbs_g)} g · rasva ${Math.round(t.fat_g)} g`));
+  try {
+    const diet = await api.get(pq("/api/diet/status"));
+    if (diet.targets && t.kcal > 0) {
+      const tgt = diet.targets.kcal, diff = Math.round(t.kcal - tgt);
+      let msg;
+      if (diff < -300) msg = `Syöty ${Math.abs(diff)} kcal alle tavoitteen (${tgt}) — syöt liian vähän.`;
+      else if (diff > 300) msg = `Syöty ${diff} kcal yli tavoitteen (${tgt}) — syöt liikaa.`;
+      else msg = `Tavoitteessa (${tgt} kcal ±300).`;
+      box.append(el("div", { class: "muted", style: "margin-top:6px" }, msg));
+      if (t.protein_g < diet.targets.protein_g * 0.8)
+        box.append(el("div", { class: "muted" }, `Proteiinia jää tavoitteesta (${diet.targets.protein_g} g) — lisää proteiinia.`));
+    }
+  } catch (e) {}
+  today.append(box);
+
+  const logs = await api.get(pq("/api/nutrition/logs") + "&on_date=" + nDate());
+  const log = document.getElementById("today-log");
+  log.innerHTML = "";
+  if (!logs.length) log.append(el("p", { class: "muted" }, "Ei kirjauksia tälle päivälle."));
+  logs.forEach((l) => {
+    const g = el("input", { type: "number", value: l.grams, style: "width:75px" });
+    g.addEventListener("change", async () => { await api.patch(`/api/nutrition/logs/${l.id}`, { grams: +g.value }); renderDayLog(); });
+    log.append(el("div", { class: "item" },
+      el("div", { class: "row-between" },
+        el("span", {}, l.food.name),
+        el("div", { class: "btn-row", style: "align-items:center" }, g, el("span", { class: "muted" }, "g"),
+          el("span", { class: "muted" }, `${Math.round(l.food.kcal * l.grams / 100)} kcal`),
+          el("button", { class: "small danger", onclick: async () => { await api.del(`/api/nutrition/logs/${l.id}`); renderDayLog(); } }, "x")))));
+  });
+
+  // Makrograafi (kcal + P/C/F ajan yli)
+  const tl = s.timeline;
+  const legend = document.getElementById("macro-legend");
+  legend.innerHTML = "";
+  const macroSeries = [
+    ["kcal", "kcal", CHART_COLORS[0]], ["protein_g", "Proteiini", CHART_COLORS[1]],
+    ["carbs_g", "Hiilarit", CHART_COLORS[2]], ["fat_g", "Rasva", CHART_COLORS[3]],
+  ];
+  const series = macroSeries.map(([key, label, color]) => {
+    legend.append(el("span", { class: "tag", style: `color:${color};border-color:${color}` }, label));
+    return { color, points: tl.map((p) => ({ x: new Date(p.date).getTime(), y: p[key] })) };
+  });
+  // Normalisoi 0–100 jotta eri mittakaavat näkyvät samassa
+  drawLineChart(document.getElementById("intake-chart"),
+    series.map((s) => ({ ...s, points: normalize01to100(s.points) })), {});
+}
+
+document.getElementById("n-date").addEventListener("change", renderDayLog);
+document.getElementById("food-search").addEventListener("input", renderFoodResults);
+document.getElementById("food-cat").addEventListener("change", renderFoodResults);
+document.getElementById("food-fav-only").addEventListener("change", renderFoodResults);
+
+// ---- Omat ateriat ----
+async function renderMeals() {
+  const meals = await api.get(pq("/api/nutrition/meals"));
+  const list = document.getElementById("meals-list");
+  list.innerHTML = "";
+  if (!meals.length) list.append(el("p", { class: "muted" }, "Ei tallennettuja aterioita vielä."));
+  meals.forEach((m) => {
+    const kcal = m.items.reduce((a, it) => a + it.food.kcal * it.grams / 100, 0);
+    list.append(el("div", { class: "item" },
+      el("div", { class: "row-between" },
+        el("div", {}, el("strong", {}, m.name),
+          el("div", { class: "muted" }, m.items.map((it) => `${it.food.name} ${it.grams}g`).join(" + ") + ` · ${Math.round(kcal)} kcal`)),
+        el("div", { class: "btn-row" },
+          el("button", { class: "small primary", onclick: async () => {
+            await api.post(`/api/nutrition/meals/${m.id}/log?profile_id=${currentProfileId}&on_date=${nDate()}`);
+            renderDayLog();
+          } }, "Kirjaa"),
+          el("button", { class: "small danger", onclick: async () => { await api.del(`/api/nutrition/meals/${m.id}`); renderMeals(); } }, "Poista")))));
+  });
+}
+
+document.getElementById("new-meal-btn").addEventListener("click", async () => {
+  const editor = document.getElementById("meal-editor");
+  editor.classList.remove("hidden");
+  editor.innerHTML = "";
+  const name = el("input", { placeholder: "Aterian nimi (esim. Smoothie)" });
+  const items = []; // {food_id, grams}
+  const itemsBox = el("div", {});
+  const allFoods = await api.get("/api/nutrition/foods");
+  function renderItems() {
+    itemsBox.innerHTML = "";
+    items.forEach((it, i) => {
+      const sel = el("select", { onchange: (e) => (it.food_id = +e.target.value) });
+      allFoods.forEach((f) => sel.append(el("option", { value: f.id }, f.name)));
+      sel.value = it.food_id;
+      const g = el("input", { type: "number", value: it.grams, style: "width:75px", oninput: (e) => (it.grams = +e.target.value) });
+      itemsBox.append(el("div", { class: "btn-row" }, sel, g, el("span", { class: "muted" }, "g"),
+        el("button", { class: "small danger", onclick: () => { items.splice(i, 1); renderItems(); } }, "x")));
+    });
+  }
+  editor.append(el("div", { class: "card" },
+    el("label", {}, "Nimi", name), itemsBox,
+    el("div", { class: "btn-row", style: "margin-top:8px" },
+      el("button", { class: "small", onclick: () => { items.push({ food_id: allFoods[0].id, grams: 100 }); renderItems(); } }, "+ Ruoka"),
+      el("button", { class: "success", onclick: async () => {
+        if (!name.value.trim() || !items.length) return alert("Anna nimi ja vähintään yksi ruoka.");
+        await api.post(`/api/nutrition/meals?profile_id=${currentProfileId}`, { name: name.value.trim(), items });
+        editor.classList.add("hidden"); renderMeals();
+      } }, "Tallenna ateria"),
+      el("button", { class: "small", onclick: () => editor.classList.add("hidden") }, "Peruuta"))));
+  renderItems();
 });
 
 document.getElementById("nf-save").addEventListener("click", async () => {
@@ -1069,12 +1190,13 @@ document.getElementById("nf-save").addEventListener("click", async () => {
   if (!v("nf-name").trim()) return alert("Anna ruoalle nimi.");
   try {
     await api.post("/api/nutrition/foods", {
-      name: v("nf-name").trim(), kcal: +v("nf-kcal") || 0, protein_g: +v("nf-prot") || 0,
+      name: v("nf-name").trim(), category: v("nf-cat").trim() || null,
+      kcal: +v("nf-kcal") || 0, protein_g: +v("nf-prot") || 0,
       carbs_g: +v("nf-carb") || 0, fat_g: +v("nf-fat") || 0,
       default_grams: v("nf-grams") ? +v("nf-grams") : null,
     });
-    ["nf-name", "nf-kcal", "nf-prot", "nf-carb", "nf-fat", "nf-grams"].forEach((id) => (document.getElementById(id).value = ""));
-    loadNutrition();
+    ["nf-name", "nf-cat", "nf-kcal", "nf-prot", "nf-carb", "nf-fat", "nf-grams"].forEach((id) => (document.getElementById(id).value = ""));
+    foodCats = []; loadNutrition();
   } catch (e) { alert("Virhe: " + e.message); }
 });
 

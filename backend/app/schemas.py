@@ -282,6 +282,8 @@ class MeasurementOut(MeasurementBase):
 # ---------- Food ----------
 class FoodBase(BaseModel):
     name: str
+    category: str | None = None
+    is_favorite: bool = False
     kcal: float = 0.0
     protein_g: float = 0.0
     carbs_g: float = 0.0
@@ -291,6 +293,17 @@ class FoodBase(BaseModel):
 
 class FoodCreate(FoodBase):
     pass
+
+
+class FoodUpdate(BaseModel):
+    name: str | None = None
+    category: str | None = None
+    is_favorite: bool | None = None
+    kcal: float | None = None
+    protein_g: float | None = None
+    carbs_g: float | None = None
+    fat_g: float | None = None
+    default_grams: float | None = None
 
 
 class FoodOut(FoodBase):
@@ -304,6 +317,10 @@ class FoodLogCreate(BaseModel):
     grams: float = 100.0
 
 
+class FoodLogUpdate(BaseModel):
+    grams: float
+
+
 class FoodLogOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
@@ -311,3 +328,29 @@ class FoodLogOut(BaseModel):
     entry_date: date
     grams: float
     food: FoodOut
+
+
+# ---------- Meal (oma ravintokokonaisuus) ----------
+class MealItemIn(BaseModel):
+    food_id: int
+    grams: float = 100.0
+
+
+class MealItemOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    grams: float
+    food: FoodOut
+
+
+class MealCreate(BaseModel):
+    name: str
+    items: list[MealItemIn] = Field(default_factory=list)
+
+
+class MealOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    profile_id: int
+    name: str
+    items: list[MealItemOut] = Field(default_factory=list)

@@ -77,9 +77,15 @@ python -m pytest backend/tests/ -q
   paino" (hyväksy tai määritä itse)
 - **Kokonaisrauta:** siirretty kokonais-kg, toistot ja sarjat per treeni
   aikajanagraafilla — vertailtavissa painoon ja kaloreihin
-- **Ravintoseuranta:** oma ruokakirjasto (yleiset ruoat valmiina) makroineen
-  (kcal/proteiini/hiilarit/rasva), päiväkirjaus ja energiansaannin
-  intake-graafi
+- **Ravintoseuranta:** ~125 valmista suomalaista ruoka-ainetta **kategorioittain**
+  (hedelmät, liha, kana, kala, pasta & riisi, maitotuotteet, juomat, alkoholi,
+  herkut, kastikkeet, proteiinijauheet…) raaka/kypsä-variantteineen ja
+  annoskokoineen (esim. olut 0.33/0.5 l, viinilasi 0.2 l); **haku**, **suosikit**
+  ja omien lisäys. Kirjaa ruokia grammoina **mille tahansa päivälle**
+  (päivävalitsin), muokkaa määriä jälkikäteen; päivän makrosumma ja
+  **liikaa/liian vähän -varoitus** dieettitavoitteeseen nähden; makrojen
+  (kcal/P/H/R) kehitysgraafi. **Omat ateriat** (esim. smoothie = maito + marjat +
+  whey) tallennetaan ja pikakirjataan yhdellä napilla.
 - **Liikekirjasto:** valmiit liikkeet kategorioittain (rinta, selkä, jalat,
   olkapäät, hauis, ojentajat, vatsa, pohkeet, olympia) ja välineittäin (tanko,
   käsipainot, talja, kone, keho, kahvakuula); kukin järkevillä oletussarjoilla.
@@ -110,7 +116,8 @@ python -m pytest backend/tests/ -q
 - **Dieettimoottori:** viikkokeskiarvoon perustuva painotrendi, adaptiivinen
   TDEE (toteutuneesta syönnistä + painomuutoksesta), kcal- ja makrotavoitteet
   kehon painosta ja tavoitteesta, 4 valmista dieettimallia (cut/ylläpito/lean
-  bulk), suositus kalorien säädöstä, bulkin vyötärö/pituus-raja-arvio, voiman
+  bulk) + 16:8-paasto ja low carb -mallit, suositus kalorien säädöstä,
+  bulkin vyötärö/pituus-raja-arvio, voiman
   säilymisen seuranta dieetillä ja kehon alueiden kehitys (uuden lihaksen
   indikaattori vyötäröön nähden)
 - **Per-päivä-tavoitteet:** treeni- ja lepopäivän kalorijako (hiilarisyklitys)
@@ -163,5 +170,6 @@ Exercise: + category, equipment, default_sets/reps (valmis liikekirjasto)
 
 Rakenne on suunniteltu laajennettavaksi seuraaviin ilman ydinmallien rikkomista:
 
+- Aterioiden ajoitus kellonaikojen ja treeniaikataulun mukaan (ravinnejaksotus)
 - Ohjelman seuraavien treenien siirto/aikataulutus skipatessa
 - Älykellon/terveysdatan automaattinen tuonti (nyt manuaalinen kirjaus)

@@ -52,6 +52,8 @@ def ensure_columns():
         ("workout_sessions", "kcal_burned", "FLOAT"),
         ("workout_sessions", "feeling", "VARCHAR(12)"),
         ("workout_sessions", "feeling_note", "TEXT"),
+        ("foods", "category", "VARCHAR(60)"),
+        ("foods", "is_favorite", "BOOLEAN DEFAULT 0"),
     ]
     inspector = inspect(engine)
     existing_tables = set(inspector.get_table_names())
@@ -160,30 +162,167 @@ def ensure_seed_exercises():
             )
 
 
+# Laaja suomalainen ruokakirjasto. Arvot per 100 g (juomat per 100 ml ≈ 100 g).
+# (nimi, kategoria, kcal, prot, hiili, rasva, oletusgrammat)
+FOOD_LIBRARY = [
+    # --- Hedelmät & marjat ---
+    ("Banaani", "hedelmät & marjat", 89, 1.1, 23, 0.3, 120),
+    ("Omena", "hedelmät & marjat", 52, 0.3, 14, 0.2, 150),
+    ("Appelsiini", "hedelmät & marjat", 47, 0.9, 12, 0.1, 130),
+    ("Mansikka", "hedelmät & marjat", 33, 0.7, 8, 0.3, 100),
+    ("Mustikka", "hedelmät & marjat", 57, 0.7, 14, 0.3, 100),
+    ("Vadelma", "hedelmät & marjat", 52, 1.2, 12, 0.7, 100),
+    ("Viinirypäleet", "hedelmät & marjat", 69, 0.7, 18, 0.2, 100),
+    ("Päärynä", "hedelmät & marjat", 57, 0.4, 15, 0.1, 150),
+    ("Ananas", "hedelmät & marjat", 50, 0.5, 13, 0.1, 100),
+    ("Avokado", "hedelmät & marjat", 160, 2, 9, 15, 100),
+    # --- Vihannekset ---
+    ("Tomaatti", "vihannekset", 18, 0.9, 3.9, 0.2, 100),
+    ("Kurkku", "vihannekset", 15, 0.7, 3.6, 0.1, 100),
+    ("Porkkana", "vihannekset", 41, 0.9, 10, 0.2, 80),
+    ("Parsakaali", "vihannekset", 34, 2.8, 7, 0.4, 100),
+    ("Pinaatti", "vihannekset", 23, 2.9, 3.6, 0.4, 50),
+    ("Salaatti (jäävuori)", "vihannekset", 14, 0.9, 3, 0.1, 50),
+    ("Sipuli", "vihannekset", 40, 1.1, 9, 0.1, 50),
+    ("Paprika", "vihannekset", 31, 1, 6, 0.3, 100),
+    # --- Kana (eri valmistustavat) ---
+    ("Kanan rintafilee (raaka)", "kana", 110, 23, 0, 1.5, 150),
+    ("Kanan rintafilee (kypsä)", "kana", 165, 31, 0, 3.6, 150),
+    ("Kanan rintafilee (friteerattu)", "kana", 250, 22, 12, 13, 150),
+    ("Kanan koipi-reisi (kypsä)", "kana", 210, 26, 0, 11, 150),
+    ("Broileri nugetit", "kana", 280, 15, 17, 17, 100),
+    ("Kalkkunaleike", "kana", 105, 22, 1, 1.5, 100),
+    # --- Liha ---
+    ("Naudan jauheliha 10%", "liha", 180, 19, 0, 11, 150),
+    ("Naudan jauheliha 17%", "liha", 230, 17, 0, 18, 150),
+    ("Naudan sisäfile (kypsä)", "liha", 215, 30, 0, 10, 150),
+    ("Possun ulkofile (kypsä)", "liha", 195, 28, 0, 9, 150),
+    ("Jauheliha-sika-nauta 23%", "liha", 280, 15, 0, 24, 150),
+    ("Pekoni (paistettu)", "liha", 540, 37, 1.4, 42, 30),
+    ("Nakit", "liha", 270, 11, 4, 24, 100),
+    ("Lihapulla", "liha", 240, 14, 10, 16, 100),
+    # --- Kala ---
+    ("Lohi (kypsä)", "kala", 208, 22, 0, 13, 150),
+    ("Kirjolohi (kypsä)", "kala", 190, 21, 0, 12, 150),
+    ("Tonnikala vedessä", "kala", 100, 23, 0, 1, 100),
+    ("Seiti (kypsä)", "kala", 90, 19, 0, 1, 150),
+    ("Katkarapu", "kala", 99, 24, 0.2, 0.3, 100),
+    # --- Kananmuna ---
+    ("Kananmuna", "kananmuna", 155, 13, 1.1, 11, 60),
+    ("Kananmunan valkuainen", "kananmuna", 52, 11, 0.7, 0.2, 33),
+    # --- Pasta, riisi, peruna (raaka & kypsä) ---
+    ("Pasta (kuiva)", "pasta & riisi", 360, 12, 71, 1.5, 80),
+    ("Pasta (keitetty)", "pasta & riisi", 158, 5.8, 31, 0.9, 250),
+    ("Täysjyväpasta (kuiva)", "pasta & riisi", 350, 13, 64, 2.5, 80),
+    ("Riisi (kuiva)", "pasta & riisi", 360, 7, 79, 0.6, 75),
+    ("Riisi (keitetty)", "pasta & riisi", 130, 2.7, 28, 0.3, 200),
+    ("Basmatiriisi (keitetty)", "pasta & riisi", 121, 3, 25, 0.4, 200),
+    ("Peruna (raaka)", "pasta & riisi", 77, 2, 17, 0.1, 200),
+    ("Peruna (keitetty)", "pasta & riisi", 87, 2, 20, 0.1, 200),
+    ("Bataatti (keitetty)", "pasta & riisi", 90, 2, 21, 0.1, 200),
+    ("Ranskalaiset (uuni)", "pasta & riisi", 165, 3, 28, 5, 150),
+    ("Lohkoperunat", "pasta & riisi", 150, 2.5, 24, 5, 150),
+    # --- Maitotuotteet ---
+    ("Maitorahka (rasvaton)", "maitotuotteet", 60, 11, 4, 0.2, 200),
+    ("Maitorahka (maustettu)", "maitotuotteet", 75, 8, 9, 0.2, 200),
+    ("Marjarahka", "maitotuotteet", 80, 8, 10, 1, 200),
+    ("Kreikkalainen jogurtti", "maitotuotteet", 97, 9, 4, 5, 150),
+    ("Maustamaton jogurtti", "maitotuotteet", 60, 3.5, 5, 3, 150),
+    ("Raejuusto", "maitotuotteet", 98, 12, 3, 4.3, 150),
+    ("Skyr", "maitotuotteet", 63, 11, 4, 0.2, 150),
+    ("Voi", "maitotuotteet", 737, 0.7, 0.7, 81, 10),
+    ("Kerma 15%", "maitotuotteet", 165, 2.5, 4, 15, 50),
+    # --- Juusto ---
+    ("Edam-juusto 17%", "juusto", 270, 28, 0, 17, 30),
+    ("Mozzarella", "juusto", 250, 18, 3, 18, 50),
+    ("Fetajuusto", "juusto", 260, 14, 4, 21, 50),
+    ("Sulatejuusto", "juusto", 230, 10, 7, 18, 20),
+    # --- Leipä & viljat ---
+    ("Ruisleipä", "leipä & viljat", 220, 7, 38, 1.5, 30),
+    ("Kaurahiutaleet", "leipä & viljat", 370, 13, 58, 7, 60),
+    ("Paahtoleipä", "leipä & viljat", 265, 9, 49, 3.5, 30),
+    ("Näkkileipä", "leipä & viljat", 340, 10, 64, 2, 15),
+    ("Müsli", "leipä & viljat", 360, 9, 60, 8, 60),
+    ("Mysli-patukka", "leipä & viljat", 410, 6, 65, 14, 35),
+    # --- Pähkinät & rasvat ---
+    ("Maapähkinä", "pähkinät & rasvat", 567, 26, 16, 49, 30),
+    ("Maapähkinävoi", "pähkinät & rasvat", 600, 25, 14, 50, 30),
+    ("Manteli", "pähkinät & rasvat", 579, 21, 22, 50, 30),
+    ("Cashew", "pähkinät & rasvat", 553, 18, 30, 44, 30),
+    ("Oliiviöljy", "pähkinät & rasvat", 884, 0, 0, 100, 10),
+    ("Rypsiöljy", "pähkinät & rasvat", 884, 0, 0, 100, 10),
+    # --- Kastikkeet ---
+    ("Ketsuppi", "kastikkeet", 110, 1.2, 26, 0.1, 20),
+    ("Sinappi", "kastikkeet", 95, 5, 9, 4, 15),
+    ("Majoneesi (Hellmann's)", "kastikkeet", 680, 1, 2, 75, 20),
+    ("Kevytmajoneesi", "kastikkeet", 320, 1, 8, 31, 20),
+    ("BBQ-kastike", "kastikkeet", 170, 1, 40, 0.5, 25),
+    ("Sweet chili -kastike", "kastikkeet", 230, 0.5, 56, 0.2, 25),
+    ("Soijakastike", "kastikkeet", 60, 8, 6, 0, 15),
+    ("Pestokastike", "kastikkeet", 450, 5, 6, 45, 25),
+    # --- Juomat ---
+    ("Rasvaton maito", "juomat", 33, 3.4, 5, 0.1, 200),
+    ("Kevytmaito 1.5%", "juomat", 47, 3.3, 5, 1.5, 200),
+    ("Täysmaito 3.5%", "juomat", 63, 3.2, 4.8, 3.5, 200),
+    ("Kaurajuoma", "juomat", 45, 1, 7, 1.5, 200),
+    ("Appelsiinimehu", "juomat", 45, 0.7, 10, 0.2, 200),
+    ("Mehutiiviste (laimennettu)", "juomat", 40, 0, 10, 0, 200),
+    ("Limsa (sokeri)", "juomat", 42, 0, 11, 0, 330),
+    ("Light-limsa", "juomat", 1, 0, 0, 0, 330),
+    ("Energiajuoma", "juomat", 45, 0, 11, 0, 250),
+    ("Kahvi (musta)", "juomat", 2, 0.1, 0, 0, 200),
+    ("Urheilujuoma", "juomat", 30, 0, 7, 0, 500),
+    # --- Alkoholi (annoksina) ---
+    ("Olut (lager) 0.33 l", "alkoholi", 43, 0.5, 3.5, 0, 330),
+    ("Olut (lager) 0.5 l", "alkoholi", 43, 0.5, 3.5, 0, 500),
+    ("IPA-olut 0.33 l", "alkoholi", 55, 0.6, 5, 0, 330),
+    ("Lonkero 0.33 l", "alkoholi", 47, 0, 5, 0, 330),
+    ("Punaviini (lasi 0.2 l)", "alkoholi", 85, 0.1, 2.6, 0, 200),
+    ("Valkoviini (lasi 0.2 l)", "alkoholi", 82, 0.1, 2.6, 0, 200),
+    ("Siideri (kuiva) 0.33 l", "alkoholi", 45, 0, 3, 0, 330),
+    # --- Herkut ---
+    ("Perunalastut (sipsit)", "herkut", 535, 6, 53, 33, 50),
+    ("Nacho-lastut", "herkut", 500, 7, 60, 25, 50),
+    ("Popcorn (voi)", "herkut", 480, 8, 55, 25, 30),
+    ("Suklaa (maito)", "herkut", 535, 7, 58, 30, 30),
+    ("Tumma suklaa 70%", "herkut", 600, 8, 46, 43, 30),
+    ("Karkkipussi (sekoitus)", "herkut", 350, 4, 80, 0.5, 50),
+    ("Lakritsi", "herkut", 325, 4, 75, 0.5, 40),
+    ("Jäätelö (vanilja)", "herkut", 200, 3.5, 24, 10, 100),
+    ("Donitsi", "herkut", 420, 6, 50, 22, 60),
+    ("Keksi (suklaa)", "herkut", 480, 6, 65, 22, 25),
+    ("Korvapuusti", "herkut", 360, 7, 55, 12, 80),
+    # --- Proteiinijauheet & lisät ---
+    ("Heraproteiini (whey 80)", "proteiinijauheet", 380, 80, 6, 6, 30),
+    ("Heraisolaatti (whey 90)", "proteiinijauheet", 370, 90, 2, 1, 30),
+    ("Hydrolysoitu hera (whey 100)", "proteiinijauheet", 375, 92, 1, 1, 30),
+    ("Kaseiini", "proteiinijauheet", 360, 78, 8, 2, 30),
+    ("Kasviproteiini (herne)", "proteiinijauheet", 400, 80, 5, 7, 30),
+    ("Painonlisääjä (mass gainer)", "proteiinijauheet", 380, 20, 65, 4, 100),
+    ("Proteiinipatukka", "proteiinijauheet", 350, 33, 35, 9, 55),
+    ("Proteiinivanukas", "proteiinijauheet", 75, 10, 6, 1, 200),
+    # --- Einekset ---
+    ("Pizza (margherita)", "einekset", 250, 11, 30, 9, 300),
+    ("Hampurilainen (iso)", "einekset", 250, 13, 20, 12, 250),
+    ("Kebab-rulla", "einekset", 215, 12, 20, 10, 350),
+    ("Sushi (8 palaa)", "einekset", 140, 5, 28, 1, 200),
+    ("Lihapiirakka", "einekset", 280, 9, 32, 13, 150),
+    ("Valmis lasagne", "einekset", 135, 7, 13, 6, 350),
+]
+
+
 def ensure_seed_foods():
-    """Siemennä yleiset ruoka-aineet (makrot per 100 g) jos kirjasto on tyhjä."""
+    """Siemennä laaja suomalainen ruokakirjasto (per 100 g) jos kirjasto tyhjä."""
     from sqlalchemy import text
 
-    common = [
-        # (nimi, kcal, prot, hiili, rasva, oletusgrammat)
-        ("Maitorahka (rasvaton)", 60, 11, 4, 0.2, 200),
-        ("Banaani", 89, 1.1, 23, 0.3, 120),
-        ("Kananmuna", 155, 13, 1.1, 11, 60),
-        ("Kaurahiutaleet", 370, 13, 58, 7, 60),
-        ("Kanan rintafilee", 110, 23, 0, 1.5, 150),
-        ("Naudan jauheliha 10%", 180, 19, 0, 11, 150),
-        ("Riisi (keitetty)", 130, 2.7, 28, 0.3, 200),
-        ("Peruna (keitetty)", 87, 2, 20, 0.1, 200),
-        ("Ruisleipä", 220, 7, 38, 1.5, 30),
-        ("Oliiviöljy", 884, 0, 0, 100, 10),
-    ]
     with engine.begin() as conn:
         count = conn.execute(text("SELECT COUNT(*) FROM foods")).scalar()
         if count and count > 0:
             return
-        for name, kcal, prot, carb, fat, grams in common:
+        for name, cat, kcal, prot, carb, fat, grams in FOOD_LIBRARY:
             conn.execute(
-                text("INSERT INTO foods (name, kcal, protein_g, carbs_g, fat_g, default_grams, created_at) "
-                     "VALUES (:n, :k, :p, :c, :f, :g, CURRENT_TIMESTAMP)"),
-                {"n": name, "k": kcal, "p": prot, "c": carb, "f": fat, "g": grams},
+                text("INSERT INTO foods (name, category, is_favorite, kcal, protein_g, carbs_g, "
+                     "fat_g, default_grams, created_at) "
+                     "VALUES (:n, :cat, 0, :k, :p, :c, :f, :g, CURRENT_TIMESTAMP)"),
+                {"n": name, "cat": cat, "k": kcal, "p": prot, "c": carb, "f": fat, "g": grams},
             )

@@ -17,8 +17,27 @@ router = APIRouter(prefix="/api/nutrition", tags=["nutrition"])
 
 # ---------- Ruokakirjasto ----------
 @router.get("/foods", response_model=list[schemas.FoodOut])
-def list_foods(db: Session = Depends(get_db)):
-    return db.query(models.Food).order_by(models.Food.name).all()
+def list_foods(
+    category: str | None = Query(None),
+    q: str | None = Query(None),
+    favorites: bool = Query(False),
+    db: Session = Depends(get_db),
+):
+    """Hae ruokia kategorialla, nimihaulla ja/tai vain suosikit."""
+    query = db.query(models.Food)
+    if category:
+        query = query.filter(models.Food.category == category)
+    if q:
+        query = query.filter(models.Food.name.ilike(f"%{q}%"))
+    if favorites:
+        query = query.filter(models.Food.is_favorite.is_(True))
+    return query.order_by(models.Food.name).all()
+
+
+@router.get("/categories")
+def list_categories(db: Session = Depends(get_db)):
+    rows = db.query(models.Food.category).filter(models.Food.category.isnot(None)).distinct().all()
+    return sorted({r[0] for r in rows if r[0]})
 
 
 @router.post("/foods", response_model=schemas.FoodOut, status_code=201)
@@ -27,6 +46,19 @@ def create_food(payload: schemas.FoodCreate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=409, detail="Ruoka samalla nimellä on jo olemassa.")
     food = models.Food(**payload.model_dump())
     db.add(food)
+    db.commit()
+    db.refresh(food)
+    return food
+
+
+@router.patch("/foods/{food_id}", response_model=schemas.FoodOut)
+def update_food(food_id: int, payload: schemas.FoodUpdate, db: Session = Depends(get_db)):
+    """Muokkaa ruokaa tai vaihda suosikkitila."""
+    food = db.get(models.Food, food_id)
+    if not food:
+        raise HTTPException(status_code=404, detail="Ruokaa ei löytynyt.")
+    for key, value in payload.model_dump(exclude_unset=True).items():
+        setattr(food, key, value)
     db.commit()
     db.refresh(food)
     return food
@@ -70,6 +102,18 @@ def create_log(profile_id: int, payload: schemas.FoodLogCreate, db: Session = De
     return log
 
 
+@router.patch("/logs/{log_id}", response_model=schemas.FoodLogOut)
+def update_log(log_id: int, payload: schemas.FoodLogUpdate, db: Session = Depends(get_db)):
+    """Muokkaa kirjauksen grammamäärää jälkikäteen."""
+    log = db.get(models.FoodLog, log_id)
+    if not log:
+        raise HTTPException(status_code=404, detail="Kirjausta ei löytynyt.")
+    log.grams = payload.grams
+    db.commit()
+    db.refresh(log)
+    return log
+
+
 @router.delete("/logs/{log_id}", status_code=204)
 def delete_log(log_id: int, db: Session = Depends(get_db)):
     log = db.get(models.FoodLog, log_id)
@@ -77,6 +121,56 @@ def delete_log(log_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Kirjausta ei löytynyt.")
     db.delete(log)
     db.commit()
+
+
+# ---------- Ateriat (omat ravintokokonaisuudet) ----------
+@router.get("/meals", response_model=list[schemas.MealOut])
+def list_meals(profile_id: int = Query(...), db: Session = Depends(get_db)):
+    return (
+        db.query(models.Meal)
+        .filter(models.Meal.profile_id == profile_id)
+        .order_by(models.Meal.name)
+        .all()
+    )
+
+
+@router.post("/meals", response_model=schemas.MealOut, status_code=201)
+def create_meal(profile_id: int, payload: schemas.MealCreate, db: Session = Depends(get_db)):
+    meal = models.Meal(profile_id=profile_id, name=payload.name)
+    for it in payload.items:
+        meal.items.append(models.MealItem(food_id=it.food_id, grams=it.grams))
+    db.add(meal)
+    db.commit()
+    db.refresh(meal)
+    return meal
+
+
+@router.delete("/meals/{meal_id}", status_code=204)
+def delete_meal(meal_id: int, db: Session = Depends(get_db)):
+    meal = db.get(models.Meal, meal_id)
+    if not meal:
+        raise HTTPException(status_code=404, detail="Ateriaa ei löytynyt.")
+    db.delete(meal)
+    db.commit()
+
+
+@router.post("/meals/{meal_id}/log")
+def log_meal(
+    meal_id: int,
+    profile_id: int = Query(...),
+    on_date: date | None = Query(None),
+    db: Session = Depends(get_db),
+):
+    """Pikakirjaa koko ateria päivän kirjauksiin (laajenee ruokakohtaisiksi riveiksi)."""
+    meal = db.get(models.Meal, meal_id)
+    if not meal:
+        raise HTTPException(status_code=404, detail="Ateriaa ei löytynyt.")
+    target = on_date or date.today()
+    for it in meal.items:
+        db.add(models.FoodLog(profile_id=profile_id, entry_date=target,
+                              food_id=it.food_id, grams=it.grams))
+    db.commit()
+    return {"logged": len(meal.items), "date": target.isoformat()}
 
 
 # ---------- Yhteenveto + intake-aikasarja ----------
