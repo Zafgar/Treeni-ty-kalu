@@ -216,6 +216,73 @@ def population_average(lift_key: str, bodyweight: float, sex: str | None = None)
     return round(POPULATION_AVG[lift_key] * factor * bodyweight, 1)
 
 
+# ---------- Kilpailutaso: yhteistulos, painoluokka, paikallinen→MM ----------
+# IPF-tyyliset painoluokat (kg). Viimeinen = ylin luokka (yli edellisen).
+WEIGHT_CLASSES_M = [59, 66, 74, 83, 93, 105, 120]
+WEIGHT_CLASSES_F = [47, 52, 57, 63, 69, 76, 84]
+COMP_LEVELS = ["Paikallinen", "SM (kansallinen)", "EM (Euroopan)", "MM (maailma)"]
+
+# Yhteistulos / kehonpaino -kerroin kullakin tasolla, viitepainossa 83 kg.
+# Raskaammilla kerroin pienenee (allometrinen skaalaus) — kuten oikeasti.
+COMP_TOTAL_MULT = {
+    # Voimanosto raw: kyykky + penkki + maastaveto (yhteistulos)
+    "voimanosto": [5.5, 7.0, 8.0, 9.0],
+    # Olympianostot: tempaus + rinnalleveto & työntö
+    "olympia": [3.1, 3.9, 4.4, 4.8],
+}
+COMP_REF_BW = 83.0
+
+
+def weight_class(bodyweight: float, sex: str | None = None) -> str | None:
+    """Palauta IPF-tyylinen painoluokka (esim. '-83 kg' tai '+120 kg')."""
+    if not bodyweight or bodyweight <= 0:
+        return None
+    classes = WEIGHT_CLASSES_F if (sex or "").lower().startswith("nain") else WEIGHT_CLASSES_M
+    for c in classes:
+        if bodyweight <= c:
+            return f"-{c} kg"
+    return f"+{classes[-1]} kg"
+
+
+def competition_assessment(sport: str, total_kg: float, bodyweight: float,
+                           sex: str | None = None) -> dict | None:
+    """Arvioi yhteistuloksen kilpailutaso: painoluokka ja taso paikallisesta
+    MM-tasoon, sekä kunkin tason rajatulos kiloina tällä kehonpainolla.
+
+    Kertoimet skaalataan kehonpainon mukaan (raskaammilla pienempi total/kp).
+    """
+    mult = COMP_TOTAL_MULT.get(sport)
+    if not mult or not bodyweight or bodyweight <= 0 or total_kg <= 0:
+        return None
+    female = (sex or "").lower().startswith("nain")
+    sex_factor = FEMALE_FACTOR if female else 1.0
+    # Allometrinen korjaus: kevyemmillä korkeampi total/kp, raskaammilla matalampi
+    bw = max(50.0, min(170.0, bodyweight))
+    scale = (COMP_REF_BW / bw) ** 0.33
+    thresholds = [round(mn * sex_factor * scale * bodyweight, 1) for mn in mult]
+
+    level_idx = -1
+    for i, t in enumerate(thresholds):
+        if total_kg >= t:
+            level_idx = i
+    level = COMP_LEVELS[level_idx] if level_idx >= 0 else "Harrastaja (alle kilpatason)"
+    next_threshold = thresholds[level_idx + 1] if level_idx + 1 < len(thresholds) else None
+    next_level = COMP_LEVELS[level_idx + 1] if level_idx + 1 < len(COMP_LEVELS) else None
+    return {
+        "sport": sport,
+        "total_kg": round(total_kg, 1),
+        "bodyweight": bodyweight,
+        "weight_class": weight_class(bodyweight, sex),
+        "level": level,
+        "level_index": level_idx,
+        "levels": COMP_LEVELS,
+        "thresholds_kg": thresholds,
+        "next_level": next_level,
+        "next_threshold_kg": next_threshold,
+        "to_next_kg": round(next_threshold - total_kg, 1) if next_threshold else None,
+    }
+
+
 def value_near(series: list[tuple], target_date, tol_days: int = 18) -> float | None:
     """Palauta sarjan arvo lähimmältä päivältä target_daten ympärillä (tol sisällä)."""
     best = None

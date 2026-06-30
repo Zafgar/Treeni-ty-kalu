@@ -75,6 +75,27 @@ def test_best_1rm_assumes_reserve_for_working_sets():
     assert single["assumed_rir"] == 0.0
 
 
+def test_weight_class():
+    assert engine.weight_class(82, "mies") == "-83 kg"
+    assert engine.weight_class(83, "mies") == "-83 kg"
+    assert engine.weight_class(150, "mies") == "+120 kg"
+    assert engine.weight_class(60, "nainen") == "-63 kg"
+
+
+def test_competition_assessment():
+    # 83 kg, 690 kg raw total -> kilpatasolla, painoluokka -83 kg
+    a = engine.competition_assessment("voimanosto", 690, 83, "mies")
+    assert a["weight_class"] == "-83 kg"
+    assert a["level_index"] >= 0
+    assert a["thresholds_kg"] == sorted(a["thresholds_kg"])  # nouseva
+    # Raskaampi nostaja tarvitsee enemmän kiloja samaan tasoon (absoluuttisesti)
+    light = engine.competition_assessment("voimanosto", 690, 70, "mies")
+    heavy = engine.competition_assessment("voimanosto", 690, 120, "mies")
+    assert heavy["thresholds_kg"][-1] > light["thresholds_kg"][-1]
+    # Tuntematon laji -> None
+    assert engine.competition_assessment("kahvakuula", 100, 80, "mies") is None
+
+
 def test_baseline_tdee_scales_with_training():
     rest = engine.baseline_tdee(80, 180, 30, "mies", training_days_per_week=0)
     active = engine.baseline_tdee(80, 180, 30, "mies", training_days_per_week=6)

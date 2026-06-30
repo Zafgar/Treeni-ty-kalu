@@ -373,14 +373,19 @@ def total(
                            "low": round(fc_low[i], 1), "high": round(fc_high[i], 1)}
                           for i in range(len(fc_dates))]
 
+    # Kilpailutaso: yhteistulos vs. painoluokka ja paikallinen→MM
+    competition = engine.competition_assessment(sport, total_mid, bw, sex) if bw else None
+
     return {
         "sport": sport,
         "total_low": round(total_low, 1),
         "total_mid": round(total_mid, 1),
         "total_high": round(total_high, 1),
+        "bodyweight": bw,
         "per_lift": per_lift,
         "timeline": timeline,
         "forecast": total_forecast,
+        "competition": competition,
     }
 
 

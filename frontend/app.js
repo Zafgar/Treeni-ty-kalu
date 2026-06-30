@@ -1073,12 +1073,50 @@ async function drawTotal() {
   sum.innerHTML = "";
   const fcEnd = t.forecast && t.forecast.length ? t.forecast[t.forecast.length - 1] : null;
   sum.append(el("div", { class: "result-box" },
-    el("div", {}, `${sport} — tämänhetkinen total`),
+    el("div", {}, `${sport} — tämänhetkinen yhteistulos`),
     el("div", { class: "big" }, `${t.total_mid} kg`),
     el("div", { class: "muted" }, `Haarukka ${t.total_low}–${t.total_high} kg`),
     el("div", { class: "muted" }, t.per_lift.map((l) => `${l.exercise_name}: ${l.current_1rm}kg`).join(" · ")),
     fcEnd ? el("div", { class: "muted", style: "margin-top:6px" },
       `Ennuste ~6 kk: ${fcEnd.low}–${fcEnd.high} kg (mihin tällä tahdilla ollaan menossa)`) : ""));
+
+  // Kilpailutaso: painoluokka + paikallinen → MM (yhteistuloksen mukaan)
+  const c = t.competition;
+  if (c) {
+    const box = el("div", { class: "item", style: "margin-top:10px" },
+      el("div", { class: "row-between" },
+        el("strong", {}, `Kisataso · painoluokka ${c.weight_class}`),
+        el("span", { class: "tag main" }, c.level)));
+    // Segmentoitu palkki: Paikallinen · SM · EM · MM
+    const seg = el("div", { class: "seg-bar" });
+    c.thresholds_kg.forEach((thr, i) => {
+      seg.append(el("div", {
+        class: "seg" + (i <= c.level_index ? " on" : "") + (i === c.level_index ? " current" : ""),
+        title: `${c.levels[i]} — raja ${thr} kg`,
+      }));
+    });
+    box.append(seg);
+    const labels = el("div", { class: "seg-labels" });
+    c.levels.forEach((name, i) => {
+      labels.append(el("span", {
+        class: "seg-label" + (i === c.level_index ? " current" : "") + (i <= c.level_index ? " on" : ""),
+        title: name,
+      }, name.split(" ")[0]));
+    });
+    box.append(labels);
+    box.append(el("div", { class: "muted" }, c.next_threshold_kg
+      ? `Seuraava taso (${c.next_level}) painoluokassasi: ${c.next_threshold_kg} kg — eroa ${c.to_next_kg} kg`
+      : "Olet ylimmällä tasolla!"));
+    box.append(el("div", { class: "muted" },
+      "Rajat: " + c.levels.map((n, i) => `${n.split(" ")[0]} ${c.thresholds_kg[i]}kg`).join(" · ")));
+    box.append(el("div", { class: "muted", style: "margin-top:4px;font-size:0.8em" },
+      sport === "voimanosto"
+        ? "Voimanostossa ratkaisee yhteistulos (kyykky+penkki+mave) painoluokassasi — ei yksittäinen nosto."
+        : (sport === "olympia"
+          ? "Olympianostoissa ratkaisee yhteistulos (tempaus + rinnalleveto & työntö) painoluokassasi."
+          : "Yhteistulos painoluokassasi.")));
+    sum.append(box);
+  }
 
   const series = [{ points: t.timeline.map((p) => ({ x: new Date(p.date).getTime(), y: p.total })) }];
   if (t.forecast && t.forecast.length && t.timeline.length) {
@@ -1416,22 +1454,26 @@ function renderBodyFigure(sites, height) {
 
   function draw(dateStr) {
     area.innerHTML = "";
-    const h = height || 178; // px-skaala pituuden mukaan
-    // cm -> kuvan leveys: puolikas etuleveys ≈ (ympärys/π/2), skaalattuna pituuteen
-    const FIG_H = 360, cx = 150;
-    const pxPerCm = FIG_H / h;
-    // Oletukset jos mitta puuttuu (keskiverto, suhteessa pituuteen)
-    const def = { hartia: h * 0.62, rintakehä: h * 0.55, vyötärö: h * 0.46,
-      lantio: h * 0.52, hauis: h * 0.18, reisi: h * 0.30, pohje: h * 0.21, kaula: h * 0.21 };
-    const m = (site) => {
-      const v = valueAsOf(site, dateStr);
-      return { v: v, w: ((v != null ? v : def[site]) / Math.PI) * pxPerCm * 1.15, real: v != null };
-    };
-    const sh = m("hartia"), ch = m("rintakehä"), wa = m("vyötärö"), hip = m("lantio"),
-      arm = m("hauis"), th = m("reisi"), ca = m("pohje"), neck = m("kaula");
+    const h = height || 178;
+    // Hahmon mittakaava: keho täyttää pystysuunnan, leveys skaalataan SAMALLA
+    // px/cm-kertoimella -> suhteet ovat oikein pituuteen nähden.
+    const VB_W = 200, VB_H = 440, cx = 100;
+    const yTop = 14, bodyPx = VB_H - yTop - 10;   // pää-latvasta nilkkaan
+    const pxPerCm = bodyPx / h;
+    // Ympärys -> säde (puolileveys) = ympärys/(2π). Etukuvassa keho on hieman
+    // leveämpi kuin syvä -> kerroin 1.15. Raajoissa käytetään halkaisijaa.
+    const FRONT = 1.15;
+    const halfW = (circ) => (circ / (2 * Math.PI)) * pxPerCm * FRONT;   // puolileveys px
+    const dia = (circ) => (circ / Math.PI) * pxPerCm * FRONT;           // halkaisija px
+    // Oletukset jos mitta puuttuu (keskiverto, suhteessa pituuteen, cm)
+    const def = { hartia: h * 0.63, rintakehä: h * 0.55, vyötärö: h * 0.47,
+      lantio: h * 0.53, hauis: h * 0.19, reisi: h * 0.31, pohje: h * 0.22, kaula: h * 0.21 };
+    const mv = (site) => { const v = valueAsOf(site, dateStr); return { v, c: v != null ? v : def[site], real: v != null }; };
+    const sh = mv("hartia"), ch = mv("rintakehä"), wa = mv("vyötärö"), hip = mv("lantio"),
+      arm = mv("hauis"), th = mv("reisi"), ca = mv("pohje"), neck = mv("kaula");
 
-    const svg = svgEl("svg", { viewBox: "0 0 300 430", width: "240", height: "344",
-      style: "max-width:100%" });
+    const svg = svgEl("svg", { viewBox: `0 0 ${VB_W} ${VB_H}`, width: "230", height: "506",
+      style: "max-width:100%;height:auto" });
     const grad = "url(#bodyGrad)";
     const defs = svgEl("defs", {});
     const lg = svgEl("linearGradient", { id: "bodyGrad", x1: "0", y1: "0", x2: "0", y2: "1" });
@@ -1439,35 +1481,63 @@ function renderBodyFigure(sites, height) {
     lg.append(svgEl("stop", { offset: "1", "stop-color": "#34d399" }));
     defs.append(lg); svg.append(defs);
 
-    // Pystytasot
-    const yNeck = 60, yShoulder = 78, yChest = 120, yWaist = 190, yHip = 225, yKnee = 320, yAnkle = 405;
-    // Pää
-    svg.append(svgEl("circle", { cx, cy: 36, r: 22, fill: grad }));
-    // Kaula
-    svg.append(svgEl("rect", { x: cx - neck.w / 2, y: yNeck - 6, width: neck.w, height: 18, fill: grad, rx: 4 }));
-    // Vartalo: hartia -> rinta -> vyötärö -> lantio (polygoni, peilataan)
+    // Pystytasot (osuudet bodyPx:stä)
+    const headR = bodyPx * 0.058;
+    const yHead = yTop + headR;
+    const yNeck = yHead + headR * 0.85;
+    const yShoulder = yTop + bodyPx * 0.165;
+    const yChest = yTop + bodyPx * 0.26;
+    const yWaist = yTop + bodyPx * 0.46;
+    const yHip = yTop + bodyPx * 0.52;
+    const yKnee = yTop + bodyPx * 0.74;
+    const yCalf = yTop + bodyPx * 0.86;
+    const yAnkle = yTop + bodyPx * 0.985;
+
+    const shW = halfW(sh.c), chW = halfW(ch.c), waW = halfW(wa.c), hipW = halfW(hip.c);
+
+    // --- Jalat (taperoituvat polygonit): reisi -> polvi -> pohje -> nilkka ---
+    const legGap = Math.max(2, hipW * 0.12);            // pieni rako haaroväliin
+    const thD = dia(th.c), caD = dia(ca.c);
+    [-1, 1].forEach((d) => {
+      const legCx = cx + d * (hipW * 0.5);              // jalan keskilinja
+      const wThigh = thD * 0.92, wKnee = thD * 0.6, wCalf = caD * 0.95, wAnkle = caD * 0.55;
+      const inner = cx + d * legGap;                    // sisäreuna lähellä keskustaa
+      const pts = [
+        [legCx - wThigh / 2, yHip], [legCx + wThigh / 2, yHip],
+        [legCx + wKnee / 2, yKnee], [legCx + wCalf / 2, yCalf], [legCx + wAnkle / 2, yAnkle],
+        [legCx - wAnkle / 2, yAnkle], [legCx - wCalf / 2, yCalf], [legCx - wKnee / 2, yKnee],
+      ].map((p) => p.join(",")).join(" ");
+      svg.append(svgEl("polygon", { points: pts, fill: grad }));
+    });
+
+    // --- Vartalo: hartia -> rinta -> vyötärö -> lantio (peilattu polygoni) ---
     const torso = [
-      [cx - sh.w, yShoulder], [cx + sh.w, yShoulder],
-      [cx + ch.w, yChest], [cx + wa.w, yWaist], [cx + hip.w, yHip],
-      [cx - hip.w, yHip], [cx - wa.w, yWaist], [cx - ch.w, yChest],
+      [cx - shW, yShoulder], [cx + shW, yShoulder],
+      [cx + chW, yChest], [cx + waW, yWaist], [cx + hipW, yHip],
+      [cx - hipW, yHip], [cx - waW, yWaist], [cx - chW, yChest],
     ].map((p) => p.join(",")).join(" ");
-    svg.append(svgEl("polygon", { points: torso, fill: grad, opacity: "0.92" }));
-    // Kädet (olkavarren leveys hauiksesta)
+    svg.append(svgEl("polygon", { points: torso, fill: grad }));
+
+    // --- Kädet (taperoituvat): olkavarsi hauiksesta, riippuvat sivuilla ---
+    const armD = dia(arm.c);
+    const yWrist = yWaist + bodyPx * 0.04;
     [-1, 1].forEach((d) => {
-      const xTop = cx + d * (sh.w - 2);
-      svg.append(svgEl("path", {
-        d: `M ${xTop} ${yShoulder + 2} q ${d * (arm.w)} 40 ${d * (arm.w * 0.5)} 110`,
-        stroke: grad, "stroke-width": Math.max(8, arm.w * 1.1), "stroke-linecap": "round", fill: "none",
-      }));
+      const ax = cx + d * (shW + armD * 0.45);
+      const wTop = armD, wElbow = armD * 0.72, wWrist = armD * 0.5;
+      const yElbow = (yShoulder + yWrist) / 2;
+      const pts = [
+        [ax - wTop / 2, yShoulder], [ax + wTop / 2, yShoulder],
+        [ax + wElbow / 2, yElbow], [ax + wWrist / 2, yWrist],
+        [ax - wWrist / 2, yWrist], [ax - wElbow / 2, yElbow],
+      ].map((p) => p.join(",")).join(" ");
+      svg.append(svgEl("polygon", { points: pts, fill: grad }));
     });
-    // Jalat (reisi -> pohje)
-    [-1, 1].forEach((d) => {
-      const xHip = cx + d * (hip.w * 0.5);
-      svg.append(svgEl("line", { x1: xHip, y1: yHip, x2: xHip, y2: yKnee,
-        stroke: grad, "stroke-width": Math.max(10, th.w * 1.2), "stroke-linecap": "round" }));
-      svg.append(svgEl("line", { x1: xHip, y1: yKnee, x2: xHip, y2: yAnkle,
-        stroke: grad, "stroke-width": Math.max(8, ca.w * 1.2), "stroke-linecap": "round" }));
-    });
+
+    // --- Kaula + pää (piirretään päälle) ---
+    svg.append(svgEl("rect", { x: cx - halfW(neck.c) * 0.7, y: yHead, width: halfW(neck.c) * 1.4,
+      height: yShoulder - yHead + 4, fill: grad, rx: 4 }));
+    svg.append(svgEl("circle", { cx, cy: yHead, r: headR, fill: grad }));
+
     area.append(svg);
 
     // Mitat-listaus hahmon alle (oikeat vs. oletetut)
