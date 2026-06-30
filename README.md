@@ -16,6 +16,24 @@ kotinäytölle asennettavaksi PWA:ksi ilman erillistä natiivisovellusta.
 
 ## Käynnistys
 
+### Windows (helpoin — yksi tuplaklikkaus)
+
+1. Lataa projekti koneelle (GitHubista **Code → Download ZIP**) ja pura se.
+2. Asenna tarvittaessa **Python 3.11+** osoitteesta <https://www.python.org/downloads/>
+   — muista rastittaa **"Add Python to PATH"** asennuksessa.
+3. **Tuplaklikkaa `Kaynnista-Windows.bat`** -tiedostoa kansiossa.
+
+Se asentaa tarvittavat osat ensimmäisellä kerralla, käynnistää sovelluksen ja
+avaa selaimen automaattisesti osoitteeseen <http://localhost:8000>. Sammuta
+sulkemalla musta komentoikkuna. (Jos Windows varoittaa tuntemattomasta
+sovelluksesta, valitse *Lisätiedot → Suorita silti* — tiedosto on tavallinen
+tekstipohjainen käynnistyskomento.)
+
+> Puhelinkäyttöä varten samassa wifissä: muuta `.bat`-tiedostossa `--host 127.0.0.1`
+> muotoon `--host 0.0.0.0`, ja avaa puhelimella `http://<koneen-ip>:8000`.
+
+### Mac / Linux
+
 ```bash
 ./run.sh
 ```

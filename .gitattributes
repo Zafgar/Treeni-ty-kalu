@@ -1,0 +1,5 @@
+# Windows-eratiedostot: sailyta CRLF-rivinvaihdot myos ZIP-latauksessa
+*.bat -text
+
+# Shell-skriptit LF
+*.sh text eol=lf
