@@ -200,16 +200,16 @@ _PL_BENCH_VOL = {"label": "Penkki (volyymi)", "items": [
     _M("penkkipunnerrus", 5, "8,8,8,8,8", "68,68,68,68,68"),
     _A("vinopenkki", 3, 10), _A("taljaristikko", 3, 12), _A("sivunostot", 3, 15)]}
 
-# Olympia
+# Olympia (oikeat olympianostojen apuliikkeet)
 _OL_SNATCH = {"label": "Tempauspäivä", "items": [
     _M("tempaus", 6, "3,3,2,2,1,1", "70,75,80,82,85,85"),
-    _A("etukyykky", 4, 4), _A("maastaveto", 3, 4), _A("pystypunnerrus", 3, 6)]}
+    _A("tempauskyykky", 4, 4), _A("tempausveto", 4, 3), _A("etukyykky", 3, 4)]}
 _OL_CJ = {"label": "Rinnalleveto & työntö", "items": [
     _M("rinnalleveto ja työntö", 6, "2,2,1,1,1,1", "70,75,80,82,85,85"),
-    _A("etukyykky", 4, 3), _A("tankosoutu", 3, 6), _A("pystypunnerrus", 3, 6)]}
+    _A("rinnallevedon veto", 4, 3), _A("etukyykky", 4, 3), _A("työntö telineestä", 3, 2)]}
 _OL_SQUAT = {"label": "Kyykky & vedot", "items": [
     _M("takakyykky", 5, "4,4,3,3,2", "75,80,82,85,87"),
-    _A("etukyykky", 4, 4), _A("maastaveto", 4, 4), _A("pohjenousu", 4, 15)]}
+    _A("etukyykky", 4, 4), _A("tempausveto", 3, 3), _A("pohjenousu", 4, 15)]}
 
 PLAN_BLUEPRINTS = {
     "bodaus": {

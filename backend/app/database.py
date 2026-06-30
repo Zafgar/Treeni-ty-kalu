@@ -318,6 +318,33 @@ FOOD_LIBRARY = [
 ]
 
 
+def ensure_extra_exercises():
+    """Lisää tietyt liikkeet jos ne puuttuvat (idempotentti, ajetaan aina).
+    Näin olemassa olevat kannat saavat uudet liikkeet ilman uudelleenluontia."""
+    from sqlalchemy import text
+
+    # (nimi, kategoria, lihasryhmä, väline, sarjat, toistot)
+    extra = [
+        ("Rinnalleveto", "olympia", "koko keho", "tanko", 5, 3),
+        ("Työntö telineestä", "olympia", "olkapää/jalat", "tanko", 5, 2),
+        ("Tempausveto", "olympia", "takaketju", "tanko", 4, 3),
+        ("Rinnallevedon veto", "olympia", "takaketju", "tanko", 4, 3),
+        ("Tempauskyykky (overhead squat)", "olympia", "koko keho", "tanko", 4, 4),
+        ("Riipunnasta tempaus", "olympia", "koko keho", "tanko", 4, 2),
+    ]
+    with engine.begin() as conn:
+        existing = {r[0] for r in conn.execute(text("SELECT name FROM exercises")).fetchall()}
+        for name, cat, mg, eq, sets, reps in extra:
+            if name in existing:
+                continue
+            conn.execute(
+                text("INSERT INTO exercises (name, category, muscle_group, equipment, "
+                     "default_sets, default_reps, is_main_lift, sport, unit, created_at) "
+                     "VALUES (:n, :c, :m, :e, :s, :r, 0, 'olympia', 'kg', CURRENT_TIMESTAMP)"),
+                {"n": name, "c": cat, "m": mg, "e": eq, "s": sets, "r": reps},
+            )
+
+
 def ensure_seed_foods():
     """Siemennä laaja suomalainen ruokakirjasto (per 100 g) jos kirjasto tyhjä."""
     from sqlalchemy import text

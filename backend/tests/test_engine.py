@@ -272,6 +272,43 @@ def test_forecast_measurement_growth_and_decline():
     assert engine.forecast_measurement([(base, 40), (base, 41)], 12) == []  # liian vähän
 
 
+def test_measurement_ceiling_and_floor():
+    # Hauis katto ~0.25*pituus
+    assert engine.measurement_ceiling("hauis", 180) == round(180 * 0.25, 1)
+    assert engine.measurement_ceiling("hauis", 180, "nainen") < engine.measurement_ceiling("hauis", 180)
+    assert engine.measurement_ceiling("vyötärö", 180) is None  # ei kasvukattoa
+    assert engine.measurement_floor("vyötärö", 180) == round(180 * 0.42, 1)
+
+
+def test_forecast_measurement_respects_ceiling():
+    from datetime import date, timedelta
+    base = date(2026, 1, 1)
+    # Lähellä kattoa (45) kasvava hauis -> ennuste ei ylitä kattoa reippaasti
+    grow = [(base + timedelta(weeks=i), 44 + i * 0.2) for i in range(5)]
+    fc = engine.forecast_measurement(grow, 26, ceiling=45.0)
+    assert fc[-1]["mid"] <= 45 * 1.05  # taipuu kattoa kohti
+
+
+def test_measurement_insight():
+    # Kasvu kun paino+vyötärö nousee -> rasvavihje
+    n = engine.measurement_insight("hauis", 0.2, 41, 45.0, bw_trend=0.3, waist_trend=0.2)
+    assert "rasvaa" in n
+    # Vakaa dieetillä -> lihas säilyy
+    n2 = engine.measurement_insight("hauis", 0.0, 41, 45.0, bw_trend=-0.5, waist_trend=-0.2)
+    assert "säilyy" in n2.lower()
+    # Lihaskasvu kun paino/vyötärö ei nouse
+    n3 = engine.measurement_insight("reisi", 0.3, 60, 68.0, bw_trend=0.0, waist_trend=0.0)
+    assert "lihaskasvu" in n3.lower()
+
+
+def test_recent_rate_per_week():
+    from datetime import date, timedelta
+    base = date(2026, 1, 1)
+    pts = [(base + timedelta(weeks=i), 80 + i) for i in range(4)]
+    assert round(engine.recent_rate_per_week(pts)) == 1  # +1/viikko
+    assert engine.recent_rate_per_week([(base, 80)]) is None
+
+
 def test_estimate_workout_kcal():
     k = engine.estimate_workout_kcal(85, 60)
     assert k and 350 < k < 600   # ~85*0.0875*60 ≈ 446

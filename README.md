@@ -109,8 +109,13 @@ python -m pytest backend/tests/ -q
   olympianosto) ja treenikerrat/viikko (3–6) → järjestelmä rakentaa valmiin
   viikko-ohjelman liikkeineen (haetaan kirjastosta) ja sarjoineen; pääliikkeiden
   painot lasketaan 1RM:stä
-- **Mittojen kasvun ennuste:** ympärysmittojen kehitys ennustetaan omasta
-  historiasta (raaja voi kasvaa, vyötärö pienentyä dieetillä) haarukkana
+- **Mittojen kasvun ennuste (älykäs):** ympärysmittojen kehitys ennustetaan
+  ensisijaisesti omasta historiasta (adaptoituu: jos jokin kasvaa odotettua
+  nopeammin, ennuste seuraa; jos hidastuu, mitoittuu uudelleen). Pituuspohjainen
+  **pehmeä luonnollinen katto** (aloittelija kasvaa pidempään, edistynyt
+  tasaantuu; data voi ylittää mallin). **Painon/rasvan kytkentä**: paino+vyötärö
+  nousee → tunnistaa kasvun osin rasvaksi; dieetillä vakaa raaja → ymmärtää
+  lihaksen säilyvän eikä pakota laskua
 - **Kehityksen seuranta:** arvioidun 1RM:n kehityskäyrä per liike (useita
   liikkeitä samassa kuvaajassa), ennätystaulukko ja yleisnäkymä haulla
 - **Lajitotalit:** esim. voimanoston total ala-/yläraja-arvioineen ja

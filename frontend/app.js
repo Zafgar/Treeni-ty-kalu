@@ -1153,6 +1153,21 @@ async function loadBody() {
   }
   if (hasFc) legend.append(el("span", { class: "muted" }, " — katkoviiva = ennuste (oman datan trendistä)"));
   drawLineChart(document.getElementById("measure-chart"), series, { unit: "cm" });
+
+  // Tulkinnat (kasvu rasvaa/lihasta, vakaa dieetillä, lähellä kattoa…)
+  const ins = document.getElementById("measure-insights");
+  ins.innerHTML = "";
+  const insights = s.measurement_insights || {};
+  const rows = Object.entries(insights).filter(([, v]) => v.note || v.ceiling);
+  if (rows.length) {
+    rows.forEach(([site, v]) => {
+      const parts = [];
+      if (v.note) parts.push(v.note);
+      if (v.ceiling) parts.push(`arvioitu luonnollinen katto ~${v.ceiling} cm`);
+      ins.append(el("div", { class: "muted", style: "margin-top:4px" },
+        `${site}: ${parts.join(" · ")}`));
+    });
+  }
 }
 
 document.getElementById("b-save").addEventListener("click", async () => {

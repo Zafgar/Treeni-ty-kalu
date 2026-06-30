@@ -132,14 +132,33 @@ def body_summary(profile_id: int = Query(...), db: Session = Depends(get_db)):
         by_site.setdefault(m.site, []).append({"date": m.entry_date.isoformat(), "value": m.value_cm})
         raw_by_site.setdefault(m.site, []).append((m.entry_date, m.value_cm))
 
-    # Mittojen kasvun/laskun ennuste (omasta historiasta) kohdille joilla
-    # on tarpeeksi dataa. Vyötärö voi laskea (dieetti), raaja kasvaa.
+    # Painon ja vyötärön trendit ennusteen tulkintaa varten
+    height = profile.height_cm if profile else None
+    sex = profile.sex if profile else None
+    weight_hist = [(e.entry_date, e.bodyweight) for e in entries if e.bodyweight is not None]
+    bw_trend = engine.recent_rate_per_week(weight_hist) if len(weight_hist) >= 2 else None
+    waist_trend = (engine.recent_rate_per_week(raw_by_site["vyötärö"])
+                   if len(raw_by_site.get("vyötärö", [])) >= 2 else None)
+
+    # Mittojen kasvun/laskun ennuste (omasta historiasta) + tulkinta.
+    # Data edellä; pituuspohjainen pehmeä katto/pohja; adaptoituu omaan tahtiin.
     measurement_forecasts: dict[str, list] = {}
+    measurement_insights: dict[str, dict] = {}
     for site, hist in raw_by_site.items():
         conf = engine.forecast_confidence(len(hist), (hist[-1][0] - hist[0][0]).days)
-        fc = engine.forecast_measurement(hist, 26, conf)
+        ceiling = engine.measurement_ceiling(site, height, sex)
+        floor = engine.measurement_floor(site, height)
+        fc = engine.forecast_measurement(hist, 26, conf, ceiling=ceiling, floor=floor)
         if fc:
             measurement_forecasts[site] = fc
+        rate = engine.recent_rate_per_week(hist)
+        current = hist[-1][1]
+        note = engine.measurement_insight(site, rate, current, ceiling, bw_trend, waist_trend)
+        if note or ceiling:
+            measurement_insights[site] = {
+                "note": note, "ceiling": ceiling, "current": current,
+                "rate_per_week": round(rate, 2) if rate is not None else None,
+            }
 
     return {
         "weight_series": weight_series,
@@ -148,4 +167,5 @@ def body_summary(profile_id: int = Query(...), db: Session = Depends(get_db)):
         "physique": physique,
         "measurement_sites": by_site,
         "measurement_forecasts": measurement_forecasts,
+        "measurement_insights": measurement_insights,
     }

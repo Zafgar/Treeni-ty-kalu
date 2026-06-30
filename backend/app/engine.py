@@ -379,13 +379,61 @@ def forecast_progress(
     return out
 
 
-def forecast_measurement(history: list[tuple], horizon_weeks: int = 26,
-                         confidence: float = 1.0) -> list[dict]:
-    """Ennusta ympärysmitan kehitys (sallii kasvun JA laskun).
+# Ympärysmittojen luonnolliset kattokertoimet (pituuteen suhteutettuna,
+# miehet). Pehmeä raja — ei absoluuttinen; genetiikka/aineet voivat ylittää,
+# ja jos oma data jo ylittää, kattoa nostetaan datan mukaan. Vyötärölle ei
+# kasvukattoa (matalampi parempi) vaan pohja.
+MEAS_CEILING_MULT = {
+    "hauis": 0.25, "rintakehä": 0.68, "reisi": 0.38, "pohje": 0.235,
+    "hartia": 0.72, "kyynärvarsi": 0.19, "forkku": 0.19,
+}
+FEMALE_MEAS_FACTOR = 0.85
 
-    Toisin kuin voimaennuste, mitta voi myös pienentyä (esim. vyötärö
-    dieetillä). Projektoi lähitrendin vaimennettuna ajan myötä — perustuu
-    ensisijaisesti omaan dataan (miten keho on aiemmin muuttunut).
+
+def measurement_ceiling(site: str, height_cm: float | None, sex: str | None = None) -> float | None:
+    """Arvioitu luonnollinen kattomitta (cm) pituuden mukaan. Vyötärölle None."""
+    if not height_cm:
+        return None
+    mult = MEAS_CEILING_MULT.get((site or "").lower())
+    if mult is None:
+        return None
+    factor = FEMALE_MEAS_FACTOR if (sex or "").lower().startswith("nain") else 1.0
+    return round(height_cm * mult * factor, 1)
+
+
+def measurement_floor(site: str, height_cm: float | None) -> float | None:
+    """Pehmeä alaraja (cm): vyötärö ei laske loputtomiin, raaja ei kutistu mitättömäksi."""
+    if not height_cm:
+        return None
+    s = (site or "").lower()
+    if s == "vyötärö":
+        return round(height_cm * 0.42, 1)
+    mult = MEAS_CEILING_MULT.get(s)
+    return round(height_cm * mult * 0.6, 1) if mult else None
+
+
+def recent_rate_per_week(history: list[tuple], window_days: int = 84) -> float | None:
+    """Lähihistorian muutostahti (yksikköä/viikko). Voi olla negatiivinen."""
+    valid = sorted([(d, v) for d, v in history if v is not None], key=lambda p: p[0])
+    if len(valid) < 2:
+        return None
+    base = valid[0][0]
+    pts = [((d - base).days, v) for d, v in valid]
+    last = pts[-1][0]
+    recent = [p for p in pts if p[0] >= last - window_days] or pts
+    return _linear_rate(recent) * 7
+
+
+def forecast_measurement(history: list[tuple], horizon_weeks: int = 26,
+                         confidence: float = 1.0, ceiling: float | None = None,
+                         floor: float | None = None) -> list[dict]:
+    """Ennusta ympärysmitan kehitys datavetoisesti (kasvu JA lasku).
+
+    Perustuu ENSISIJAISESTI omaan lähitrendiin (adaptoituu: jos esim. reisi
+    kasvaa odotettua nopeammin, ennuste seuraa sitä; jos hidastuu, mitoittuu
+    uudelleen seuraavalla kerralla). Kasvu tasaantuu pehmeästi kohti
+    pituuspohjaista luonnollista kattoa, lasku kohti pohjaa. Aineet/genetiikka:
+    jos data jo ylittää mallinnetun katon, katto nostetaan datan mukaan.
     """
     valid = [(d, v) for d, v in history if v and v > 0]
     if len(valid) < 3:  # mitalle tarvitaan hieman enemmän dataa
@@ -399,12 +447,27 @@ def forecast_measurement(history: list[tuple], horizon_weeks: int = 26,
     current = valid[-1][1]
     spread_mult = 1.6 - 0.6 * max(0.0, min(1.0, confidence))
 
+    # Pehmeä katto: ei rajoita jos data jo ylittää sen (huomioi geneettisesti
+    # lahjakkaat / aineet). Pieni puskuri jotta ennuste ei jää heti seinään.
+    if ceiling is not None:
+        ceiling = max(ceiling, current * 1.03)
+
     from datetime import timedelta
     out = []
     value = current
     for w in range(1, horizon_weeks + 1):
-        # Muutos tasaantuu ajan myötä (keho ei muutu loputtomiin lineaarisesti)
-        value += rate_per_week * (0.96 ** w)
+        step = rate_per_week * (0.96 ** w)  # tasaantuu ajan myötä
+        if step > 0 and ceiling:
+            # Kasvu hidastuu lähestyttäessä kattoa (vähenevä tuotto)
+            room = max(0.0, ceiling - value)
+            step *= min(1.0, room / (ceiling * 0.1))
+            value = min(ceiling, value + step)
+        elif step < 0 and floor:
+            room = max(0.0, value - floor)
+            step *= min(1.0, room / (floor * 0.1 + 1))
+            value = max(floor, value + step)
+        else:
+            value += step
         spread = (0.3 + 0.04 * abs(value - current) + 0.01 * (w ** 0.5)) * spread_mult
         out.append({
             "date": (valid[-1][0] + timedelta(weeks=w)).isoformat(),
@@ -413,6 +476,39 @@ def forecast_measurement(history: list[tuple], horizon_weeks: int = 26,
             "high": round(value + spread, 1),
         })
     return out
+
+
+def measurement_insight(site: str, rate_per_week: float | None, current: float | None,
+                        ceiling: float | None, bw_trend: float | None,
+                        waist_trend: float | None) -> str:
+    """Tulkitse mitan kehitys suhteessa painoon, vyötäröön ja kattoon.
+
+    Tunnistaa mm.: rasvavetoinen kasvu (paino+vyötärö nousee), lihaskasvu
+    (paino/vyötärö ei nouse), vakaa dieetillä (lihas säilyy), lähellä kattoa.
+    """
+    if rate_per_week is None or current is None:
+        return ""
+    s = (site or "").lower()
+    notes = []
+    bw = bw_trend or 0.0
+    waist = waist_trend or 0.0
+    if ceiling and current >= ceiling * 0.95 and rate_per_week > 0:
+        notes.append("lähellä arvioitua luonnollista kattoa — kasvu hidastuu")
+    if s != "vyötärö":
+        if rate_per_week > 0.05 and bw > 0.1 and waist > 0.1:
+            notes.append("kasvu todennäköisesti osin rasvaa (paino ja vyötärö nousevat)")
+        elif rate_per_week > 0.05 and bw <= 0.05 and waist <= 0.05:
+            notes.append("lihaskasvua — paino/vyötärö ei nouse")
+        elif abs(rate_per_week) < 0.03 and bw < -0.1:
+            notes.append("pysyy vakaana dieetillä — lihas säilyy hyvin")
+        elif rate_per_week < -0.05 and bw < -0.1:
+            notes.append("pienenee painonpudotuksen myötä")
+    else:  # vyötärö
+        if rate_per_week < -0.05 and bw < -0.05:
+            notes.append("kapenee dieetillä — rasva vähenee")
+        elif rate_per_week > 0.05 and bw > 0.05:
+            notes.append("kasvaa painon noustessa — seuraa ettei rasvaa kerry liikaa")
+    return "; ".join(notes)
 
 
 def volume_verdict(sets_week: int, sets_prev: int) -> dict:
