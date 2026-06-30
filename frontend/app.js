@@ -116,10 +116,16 @@ async function loadExercises() {
         el("div", { class: "row-between" },
           el("div", {}, el("strong", {}, ex.name),
             ex.muscle_group ? el("span", { class: "muted" }, " · " + ex.muscle_group) : ""),
-          el("button", { class: "small danger", onclick: async () => {
-            if (confirm(`Poista liike "${ex.name}"?`)) { await api.del(`/api/exercises/${ex.id}`); loadExercises(); }
-          } }, "Poista")),
+          el("div", { class: "btn-row" },
+            ex.description ? el("button", { class: "small", onclick: (e) => {
+              const d = e.target.closest(".item").querySelector(".ex-desc");
+              d.style.display = d.style.display === "none" ? "" : "none";
+            } }, "Ohje") : "",
+            el("button", { class: "small danger", onclick: async () => {
+              if (confirm(`Poista liike "${ex.name}"?`)) { await api.del(`/api/exercises/${ex.id}`); loadExercises(); }
+            } }, "Poista"))),
         el("div", { class: "btn-row" }, ...tags));
+      if (ex.description) item.append(el("div", { class: "ex-desc muted", style: "display:none;margin-top:6px" }, ex.description));
       list.append(item);
     }
   }
@@ -667,11 +673,35 @@ let selectedProgress = new Set();
 async function loadProgress() {
   renderProgressChips();
   renderBackfill();
+  await loadForecastAccuracy();
   await loadVolume();
   await loadLevels();
   await loadSports();
   await loadLoadTimeline();
   await loadRecordsTable();
+}
+
+async function loadForecastAccuracy() {
+  const card = document.getElementById("accuracy-card");
+  const div = document.getElementById("accuracy-content");
+  const data = await api.get(pq("/api/stats/forecast-accuracy"));
+  if (!data.overall) { card.style.display = "none"; return; }
+  card.style.display = "";
+  div.innerHTML = "";
+  const o = data.overall;
+  div.append(el("div", { class: "result-box" },
+    el("div", { class: "big" }, `${o.within_band_pct}% haarukan sisällä`),
+    el("div", { class: "muted" }, `${o.count} erääntynyttä ennustetta · keskivirhe ${o.mae} (${o.avg_error_pct} %)`)));
+  const tbl = el("table", {});
+  tbl.append(el("tr", {}, el("th", {}, "Kohde"), el("th", {}, "Tehty"), el("th", {}, "Horisontti"),
+    el("th", {}, "Ennuste"), el("th", {}, "Toteuma"), el("th", {}, "Ero")));
+  data.comparisons.slice(0, 12).forEach((c) => tbl.append(el("tr", {},
+    el("td", {}, c.label), el("td", { class: "muted" }, c.made_on),
+    el("td", {}, `${c.horizon_weeks} vk`), el("td", {}, String(c.predicted)),
+    el("td", {}, String(c.actual)),
+    el("td", { class: "tag " + (c.within_band ? "status-done" : "status-skip") },
+      `${c.error >= 0 ? "+" : ""}${c.error}`))));
+  div.append(tbl);
 }
 
 async function loadVolume() {
@@ -726,6 +756,10 @@ async function loadLevels() {
       el("div", { class: "level-bar" }, el("div", { class: "level-fill", style: `width:${pct}%` })),
       el("div", { class: "muted" },
         `${l.current_1rm} kg` + (l.next_level ? ` · seuraava: ${l.next_level} @ ${l.next_threshold_kg} kg` : " · huipputaso!")));
+    if (l.population_avg) {
+      box.append(el("div", { class: "muted" },
+        `Väestön keskiarvo painoluokassasi ~${l.population_avg} kg · sinä ${l.vs_population}× keskiarvo`));
+    }
     div.append(box);
   });
 }

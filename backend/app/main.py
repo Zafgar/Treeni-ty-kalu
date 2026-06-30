@@ -16,6 +16,7 @@ from .database import (
     engine,
     ensure_columns,
     ensure_default_profile,
+    ensure_exercise_descriptions,
     ensure_extra_exercises,
     ensure_seed_exercises,
     ensure_seed_foods,
@@ -40,6 +41,7 @@ ensure_columns()
 ensure_default_profile()
 ensure_seed_exercises()
 ensure_extra_exercises()
+ensure_exercise_descriptions()
 ensure_seed_foods()
 
 app = FastAPI(

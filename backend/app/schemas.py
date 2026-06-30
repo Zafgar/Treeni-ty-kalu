@@ -15,6 +15,7 @@ class ExerciseBase(BaseModel):
     default_sets: int = 3
     default_reps: int = 10
     unit: str = "kg"
+    description: str | None = None
     notes: str | None = None
 
 

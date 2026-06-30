@@ -61,6 +61,7 @@ def ensure_columns():
         ("workout_sessions", "feeling_note", "TEXT"),
         ("foods", "category", "VARCHAR(60)"),
         ("foods", "is_favorite", "BOOLEAN DEFAULT 0"),
+        ("exercises", "description", "TEXT"),
     ]
     inspector = inspect(engine)
     existing_tables = set(inspector.get_table_names())
@@ -342,6 +343,53 @@ def ensure_extra_exercises():
                      "default_sets, default_reps, is_main_lift, sport, unit, created_at) "
                      "VALUES (:n, :c, :m, :e, :s, :r, 0, 'olympia', 'kg', CURRENT_TIMESTAMP)"),
                 {"n": name, "c": cat, "m": mg, "e": eq, "s": sets, "r": reps},
+            )
+
+
+EXERCISE_DESCRIPTIONS = {
+    "Penkkipunnerrus": "Idea: kehittää rinnan, olkapään etuosan ja ojentajan voimaa. "
+        "Maaten penkille, lapatuki kasaan, tanko rinnan alaosaan hallitusti, työnnä ylös jalat tukena.",
+    "Takakyykky": "Idea: alavartalon (etureidet, pakarat) ja keskivartalon päävoimaliike. "
+        "Tanko ylä-selälle, rintakehä ylös, kyykkää kantapäät maassa vähintään reidet vaakaan, työnnä ylös.",
+    "Maastaveto": "Idea: koko takaketjun (selkä, pakarat, takareidet) voimaliike. "
+        "Tanko lähelle säärtä, selkä suorana, työnnä lattiasta jaloilla ja ojenna lonkka loppuun.",
+    "Pystypunnerrus": "Idea: olkapäiden ja ojentajien pystysuora työntövoima. "
+        "Tanko/käsipainot hartioilta suoraan ylös pään yli, keskivartalo tiukkana, vältä selän notkoa.",
+    "Tankosoutu": "Idea: yläselän paksuus ja vetovoima. Lantiosta etunoja, selkä suorana, "
+        "vedä tanko alavatsaa kohti lapaa vetäen, laske hallitusti.",
+    "Ylätalja eteen": "Idea: leveän selkälihaksen leveys. Vedä tanko rintaan lapaa alas vetäen, "
+        "kyynärpäät alas ja taakse, hallittu palautus.",
+    "Leuanveto": "Idea: leveä selkä ja hauis omalla kehonpainolla. Vedä leuka tangon yli "
+        "lapaa alas vetäen, laske täysin suoriin käsiin.",
+    "Hauiskääntö tanko": "Idea: hauiksen eristävä liike. Kyynärpäät paikallaan kyljissä, "
+        "käännä tanko ylös hauista jännittäen, laske hallitusti.",
+    "Romanialainen maastaveto": "Idea: takareiden ja pakaran venyttävä voima. Lähes suorin jaloin "
+        "työnnä lantio taakse, tanko lähellä jalkoja, tunne venytys takareisissä.",
+    "Jalkaprässi": "Idea: etureiden ja pakaran turvallinen massaliike. Jalat lavalla, "
+        "laske polvet hallitusti ~90°, työnnä takaisin lukitsematta polvia.",
+    "Tempaus": "Idea: olympianosto — tanko lattialta suoraan käsien varaan yhdellä vedolla. "
+        "Vaatii tekniikkaa: räjähtävä veto, nopea alituki. Tekniikka ennen kuormaa.",
+    "Rinnalleveto ja työntö": "Idea: olympianosto — tanko rinnalle ja siitä työntäen pään yli. "
+        "Kaksiosainen räjähtävä liike, vaatii liikkuvuutta ja tekniikkaa.",
+    "Dippi": "Idea: alarinnan ja ojentajan kehonpainoliike. Laske hallitusti kunnes olkavarsi "
+        "vaakaan, työnnä ylös. Hieman etunoja korostaa rintaa.",
+    "Pohjenousu": "Idea: pohkeen eristävä liike. Nouse varpaille täydellä liikeradalla, "
+        "tauko huipulla, laske kantapää hallitusti alas asti.",
+    "Sivunostot": "Idea: olkapään sivuosa (leveys). Nosta käsipainot sivuille hartiatasoon, "
+        "kevyt kyynärtaivutus, laske hallitusti — älä heilauta.",
+}
+
+
+def ensure_exercise_descriptions():
+    """Täytä suoritusohjeet tunnetuille liikkeille (vain jos puuttuu)."""
+    from sqlalchemy import text
+
+    with engine.begin() as conn:
+        for name, desc in EXERCISE_DESCRIPTIONS.items():
+            conn.execute(
+                text("UPDATE exercises SET description = :d "
+                     "WHERE name = :n AND (description IS NULL OR description = '')"),
+                {"d": desc, "n": name},
             )
 
 

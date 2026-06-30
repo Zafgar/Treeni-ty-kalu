@@ -177,8 +177,16 @@ python -m pytest backend/tests/ -q
   yhdistettynä yhteispisteiksi — kuva sekä ulkonäön että voiman tasosta
 - **kcal-itsearvio:** jos treenin kulutusta ei syötetä (älykello), järjestelmä
   arvioi sen kehon painosta ja kestosta
+- **Ennusteen osuvuus & itsekalibrointi:** järjestelmä tallentaa ennusteet ja
+  vertaa myöhemmin toteumaan (näet menneet ennusteet vs. todellisuus). Osuvuus
+  **kalibroi tulevat ennusteet** tarkemmiksi — jos ennusteet ovat aliarvioineet,
+  tahtia nostetaan, ja päinvastoin. Ennuste annetaan jopa **1 vuoden** päähän
+  (loukkaantuminen/sairaus voi tuoda takapakkia)
 - **Voimatasot:** 8 porrasta (aloittelija → SM/EM/MM-luokka) kehon painoon ja
-  sukupuoleen suhteutettuna, edistymispalkki ja seuraavan tason kynnys
+  sukupuoleen suhteutettuna, edistymispalkki ja seuraavan tason kynnys.
+  Mukana **väestön keskiarvo** painoluokassasi vertailuksi ("sinä 2.3× keskiarvo")
+- **Liikkeiden selitteet:** pääliikkeille ja yleisille liikkeille suoritusohje
+  ja liikkeen idea (näytetään "Ohje"-napista Liikkeet-välilehdellä)
 - **Fysiikkataso:** 8 porrasta (aloittelija → IFBB Pro) FFMI:n perusteella
   (paino + rasva-% + pituus), edistymispalkki Keho-välilehdellä
 - **PWA:** asennettavissa puhelimen kotinäytölle (manifest + service worker),

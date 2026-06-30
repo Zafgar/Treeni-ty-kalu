@@ -142,15 +142,18 @@ def body_summary(profile_id: int = Query(...), db: Session = Depends(get_db)):
 
     # Mittojen kasvun/laskun ennuste (omasta historiasta) + tulkinta.
     # Data edellä; pituuspohjainen pehmeä katto/pohja; adaptoituu omaan tahtiin.
+    from .stats import _calibration_for_key, _snapshot_forecast
     measurement_forecasts: dict[str, list] = {}
     measurement_insights: dict[str, dict] = {}
     for site, hist in raw_by_site.items():
         conf = engine.forecast_confidence(len(hist), (hist[-1][0] - hist[0][0]).days)
         ceiling = engine.measurement_ceiling(site, height, sex)
         floor = engine.measurement_floor(site, height)
-        fc = engine.forecast_measurement(hist, 26, conf, ceiling=ceiling, floor=floor)
+        calib = _calibration_for_key(db, profile_id, "measurement", site, hist)
+        fc = engine.forecast_measurement(hist, 52, conf, ceiling=ceiling, floor=floor, rate_calibration=calib)
         if fc:
             measurement_forecasts[site] = fc
+            _snapshot_forecast(db, profile_id, "measurement", site, hist[-1][1], fc)
         rate = engine.recent_rate_per_week(hist)
         current = hist[-1][1]
         note = engine.measurement_insight(site, rate, current, ceiling, bw_trend, waist_trend)

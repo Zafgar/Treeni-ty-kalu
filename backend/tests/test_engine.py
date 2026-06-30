@@ -327,6 +327,42 @@ def test_proportion_score():
     assert engine.proportion_score({}, 180) is None
 
 
+def test_population_average():
+    avg = engine.population_average("squat", 100, "mies")
+    assert avg == 90.0  # 0.9 * 100
+    assert engine.population_average("squat", 100, "nainen") < avg
+    assert engine.population_average("curl", 100) is None
+
+
+def test_calibration_factor():
+    # Toteuma kasvoi 2x ennustettua -> kerroin > 1 (aliarvioitiin)
+    m = [{"base": 100, "predicted": 110, "actual": 120},
+         {"base": 100, "predicted": 105, "actual": 110}]
+    assert engine.calibration_factor(m) > 1.0
+    # Yliarvioitu -> < 1
+    m2 = [{"base": 100, "predicted": 120, "actual": 105},
+          {"base": 100, "predicted": 115, "actual": 108}]
+    assert engine.calibration_factor(m2) < 1.0
+    # Liian vähän dataa -> 1.0
+    assert engine.calibration_factor([{"base": 100, "predicted": 110, "actual": 120}]) == 1.0
+
+
+def test_value_near():
+    from datetime import date
+    series = [(date(2026, 1, 1), 100), (date(2026, 2, 1), 110)]
+    assert engine.value_near(series, date(2026, 2, 3)) == 110
+    assert engine.value_near(series, date(2026, 6, 1)) is None  # liian kaukana
+
+
+def test_forecast_calibration_scales_rate():
+    from datetime import date, timedelta
+    base = date(2026, 1, 1)
+    hist = [(base + timedelta(weeks=i), 100 + i * 2) for i in range(6)]
+    low = engine.forecast_progress(hist, 12, ceiling=200, rate_calibration=0.7)
+    high = engine.forecast_progress(hist, 12, ceiling=200, rate_calibration=1.3)
+    assert high[-1]["mid"] > low[-1]["mid"]  # isompi kalibrointi -> nopeampi ennuste
+
+
 def test_pearson():
     assert engine.pearson([1, 2, 3, 4], [2, 4, 6, 8]) == 1.0
     assert engine.pearson([1, 2, 3, 4], [8, 6, 4, 2]) == -1.0

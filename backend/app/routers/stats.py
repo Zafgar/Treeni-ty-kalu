@@ -118,13 +118,65 @@ def _bodyweight_trend(db: Session, profile_id: int | None) -> float | None:
     return engine.weight_trend(points, max(d for d, _ in points))
 
 
+HORIZON_CHECKPOINTS = [4, 12, 26, 52]
+
+
+def _snapshot_forecast(db, profile_id, kind, ref, base_value, forecast_points):
+    """Tallenna ennuste osuvuusvertailua varten (korkeintaan kerran/viikko per kohde)."""
+    if profile_id is None or not forecast_points:
+        return
+    from datetime import date as _date, timedelta as _td
+    recent = db.query(models.ForecastLog).filter(
+        models.ForecastLog.profile_id == profile_id, models.ForecastLog.kind == kind,
+        models.ForecastLog.ref == str(ref), models.ForecastLog.made_on >= _date.today() - _td(days=6)
+    ).first()
+    if recent:
+        return
+    today = _date.today()
+    for h in HORIZON_CHECKPOINTS:
+        if h - 1 < len(forecast_points):
+            p = forecast_points[h - 1]
+            db.add(models.ForecastLog(
+                profile_id=profile_id, kind=kind, ref=str(ref), made_on=today,
+                horizon_weeks=h, base_value=round(base_value, 1),
+                predicted=p["mid"], predicted_low=p["low"], predicted_high=p["high"],
+                target_date=today + _td(weeks=h)))
+    db.commit()
+
+
+def _matured_for_key(db, profile_id, kind, ref, actual_series):
+    """Palauta erääntyneet (target_date <= tänään) ennusteet + toteuma."""
+    from datetime import date as _date
+    rows = db.query(models.ForecastLog).filter(
+        models.ForecastLog.profile_id == profile_id, models.ForecastLog.kind == kind,
+        models.ForecastLog.ref == str(ref), models.ForecastLog.target_date <= _date.today()
+    ).order_by(models.ForecastLog.target_date).all()
+    out = []
+    for r in rows:
+        actual = engine.value_near(actual_series, r.target_date)
+        if actual is None:
+            continue
+        out.append({"made_on": r.made_on, "target_date": r.target_date,
+                    "horizon_weeks": r.horizon_weeks, "base": r.base_value,
+                    "predicted": r.predicted, "low": r.predicted_low, "high": r.predicted_high,
+                    "actual": round(actual, 1)})
+    return out
+
+
+def _calibration_for_key(db, profile_id, kind, ref, actual_series) -> float:
+    if profile_id is None:
+        return 1.0
+    matured = _matured_for_key(db, profile_id, kind, ref, actual_series)
+    return engine.calibration_factor(matured)
+
+
 @router.get("/exercises/{exercise_id}/history")
 def exercise_history(
     exercise_id: int,
     profile_id: int | None = Query(None),
     window_days: int = Query(DEFAULT_WINDOW_DAYS),
     forecast: bool = Query(True),
-    horizon_weeks: int = Query(26),
+    horizon_weeks: int = Query(52),
     db: Session = Depends(get_db),
 ):
     """Yhden liikkeen kehityskäyrä + ennätykset + realistinen ennuste."""
@@ -151,14 +203,24 @@ def exercise_history(
         conf = engine.forecast_confidence(len(valid_pts), span_days)
         bw_trend = _bodyweight_trend(db, profile_id) or 0.0
         history = [(p["date"], p["estimated_1rm"]) for p in valid_pts]
+        # Kalibrointi aiemman osuvuuden mukaan
+        calib = _calibration_for_key(db, profile_id, "lift", exercise_id, history)
         forecast_points = engine.forecast_progress(
-            history, horizon_weeks, ceiling, bodyweight_trend_per_week=bw_trend, confidence=conf)
+            history, horizon_weeks, ceiling, bodyweight_trend_per_week=bw_trend,
+            confidence=conf, rate_calibration=calib)
+        _snapshot_forecast(db, profile_id, "lift", exercise_id, valid_pts[-1]["estimated_1rm"], forecast_points)
         conf_label = "korkea" if conf >= 0.7 else "kohtalainen" if conf >= 0.4 else "matala"
+        calib_note = ""
+        if calib > 1.05:
+            calib_note = "Aiemmat ennusteet aliarvioivat — tahtia nostettu. "
+        elif calib < 0.95:
+            calib_note = "Aiemmat ennusteet yliarvioivat — tahtia laskettu. "
         forecast_meta = {
             "confidence": conf, "confidence_label": conf_label,
-            "bodyweight_trend": bw_trend, "sessions": len(valid_pts),
+            "bodyweight_trend": bw_trend, "sessions": len(valid_pts), "calibration": calib,
             "note": ("Ennuste perustuu toteutuneeseen tahtiin ja naturaalinostajan "
-                     "realistiseen kattoon. " +
+                     "realistiseen kattoon (jopa 1 v eteenpäin; loukkaantuminen tai "
+                     "sairaus voi tuoda takapakkia). " + calib_note +
                      ("Painon lasku hidastaa arvioitua kehitystä. " if bw_trend < -0.1 else "") +
                      f"Luottamus: {conf_label} ({len(valid_pts)} treenikertaa). Lisää dataa tarkentaa."),
         }
@@ -468,8 +530,10 @@ def levels(profile_id: int | None = Query(None), db: Session = Depends(get_db)):
             continue
         lvl = engine.strength_level(lift_key, rec["current_1rm"], bw, sex)
         if lvl:
+            pop_avg = engine.population_average(lift_key, bw, sex)
+            vs_avg = round(rec["current_1rm"] / pop_avg, 1) if pop_avg else None
             result.append({"exercise_name": ex.name, "current_1rm": rec["current_1rm"],
-                           "bodyweight": bw, **lvl})
+                           "bodyweight": bw, "population_avg": pop_avg, "vs_population": vs_avg, **lvl})
     return {"bodyweight": bw, "all_levels": engine.STRENGTH_LEVELS, "lifts": result}
 
 
@@ -683,6 +747,54 @@ def volume_ack(profile_id: int = Query(...), week_key: str = Query(...), db: Ses
         db.add(models.VolumeAck(profile_id=profile_id, week_key=week_key))
         db.commit()
     return {"acknowledged": True, "week_key": week_key}
+
+
+@router.get("/forecast-accuracy")
+def forecast_accuracy(profile_id: int = Query(...), db: Session = Depends(get_db)):
+    """Aiempien ennusteiden osuvuus: mitä ennuste lupasi vs. mitä toteutui.
+
+    Auttaa sekä käyttäjää (näe miten ennusteet ovat osuneet) että järjestelmää
+    (kalibroi tulevia tarkemmiksi). Vain erääntyneet (target_date mennyt) mukana.
+    """
+    keys = (db.query(models.ForecastLog.kind, models.ForecastLog.ref)
+            .filter(models.ForecastLog.profile_id == profile_id).distinct().all())
+    comparisons = []
+    for kind, ref in keys:
+        if kind == "lift":
+            try:
+                pts = _exercise_session_points(db, int(ref), profile_id)
+            except (ValueError, TypeError):
+                continue
+            actual_series = [(p["date"], p["estimated_1rm"]) for p in pts if p["estimated_1rm"] > 0]
+            ex = db.get(models.Exercise, int(ref))
+            label = ex.name if ex else f"liike {ref}"
+        else:  # measurement
+            ms = (db.query(models.Measurement)
+                  .filter(models.Measurement.profile_id == profile_id, models.Measurement.site == ref)
+                  .order_by(models.Measurement.entry_date).all())
+            actual_series = [(m.entry_date, m.value_cm) for m in ms]
+            label = ref
+        for m in _matured_for_key(db, profile_id, kind, ref, actual_series):
+            pred_gain = m["predicted"] - m["base"]
+            err = m["actual"] - m["predicted"]
+            err_pct = round(abs(err) / m["predicted"] * 100, 1) if m["predicted"] else None
+            comparisons.append({
+                "kind": kind, "label": label, "made_on": m["made_on"].isoformat(),
+                "target_date": m["target_date"].isoformat(), "horizon_weeks": m["horizon_weeks"],
+                "base": m["base"], "predicted": m["predicted"], "actual": m["actual"],
+                "error": round(err, 1), "error_pct": err_pct,
+                "within_band": m["low"] <= m["actual"] <= m["high"],
+            })
+    comparisons.sort(key=lambda c: c["target_date"], reverse=True)
+    n = len(comparisons)
+    overall = None
+    if n:
+        within = sum(1 for c in comparisons if c["within_band"])
+        mae = round(sum(abs(c["error"]) for c in comparisons) / n, 1)
+        avg_err_pct = round(sum(c["error_pct"] for c in comparisons if c["error_pct"] is not None) /
+                            max(1, sum(1 for c in comparisons if c["error_pct"] is not None)), 1)
+        overall = {"count": n, "within_band_pct": round(within / n * 100), "mae": mae, "avg_error_pct": avg_err_pct}
+    return {"overall": overall, "comparisons": comparisons[:30]}
 
 
 @router.get("/sports")

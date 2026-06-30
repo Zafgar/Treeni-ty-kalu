@@ -70,6 +70,8 @@ class Exercise(Base):
     default_sets: Mapped[int] = mapped_column(Integer, default=3)
     default_reps: Mapped[int] = mapped_column(Integer, default=10)
     unit: Mapped[str] = mapped_column(String(10), default="kg")
+    # Suoritusohje + liikkeen idea (näytetään jos haluaa katsoa)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
@@ -326,6 +328,28 @@ class MealItem(Base):
 
     meal: Mapped["Meal"] = relationship(back_populates="items")
     food: Mapped["Food"] = relationship()
+
+
+class ForecastLog(Base):
+    """Tallennettu ennuste myöhempää osuvuusvertailua varten.
+
+    Kun ennuste lasketaan, tallennetaan mitä se lupasi tietyille horisonteille.
+    Myöhemmin verrataan toteumaan -> nähdään osuvuus ja kalibroidaan tulevia.
+    """
+
+    __tablename__ = "forecast_logs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    profile_id: Mapped[int] = mapped_column(ForeignKey("profiles.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[str] = mapped_column(String(16), index=True)  # "lift" | "measurement"
+    ref: Mapped[str] = mapped_column(String(60), index=True)   # exercise_id tai mittakohta
+    made_on: Mapped[date] = mapped_column(Date, default=date.today, index=True)
+    horizon_weeks: Mapped[int] = mapped_column(Integer)
+    base_value: Mapped[float] = mapped_column(Float)
+    predicted: Mapped[float] = mapped_column(Float)
+    predicted_low: Mapped[float] = mapped_column(Float)
+    predicted_high: Mapped[float] = mapped_column(Float)
+    target_date: Mapped[date] = mapped_column(Date, index=True)
 
 
 class VolumeAck(Base):

@@ -175,6 +175,51 @@ def natural_ceiling(lift_key: str, bodyweight: float, sex: str | None = None) ->
     return round(NATURAL_CEILINGS[lift_key] * factor * bodyweight, 1)
 
 
+# Väestön keskiarvo (treenamaton aikuinen): 1RM / kehon paino, miehet.
+POPULATION_AVG = {"squat": 0.9, "bench": 0.75, "deadlift": 1.1, "ohp": 0.45}
+
+
+def population_average(lift_key: str, bodyweight: float, sex: str | None = None) -> float | None:
+    """Arvio mitä keskimääräinen (treenamaton) ihminen nostaa omassa painossaan."""
+    if lift_key not in POPULATION_AVG or not bodyweight or bodyweight <= 0:
+        return None
+    factor = FEMALE_FACTOR if (sex or "").lower().startswith("nain") else 1.0
+    return round(POPULATION_AVG[lift_key] * factor * bodyweight, 1)
+
+
+def value_near(series: list[tuple], target_date, tol_days: int = 18) -> float | None:
+    """Palauta sarjan arvo lähimmältä päivältä target_daten ympärillä (tol sisällä)."""
+    best = None
+    best_diff = None
+    for d, v in series:
+        if v is None:
+            continue
+        diff = abs((d - target_date).days)
+        if diff <= tol_days and (best_diff is None or diff < best_diff):
+            best, best_diff = v, diff
+    return best
+
+
+def calibration_factor(matured: list[dict]) -> float:
+    """Laske kalibrointikerroin aiemmista toteutuneista ennusteista.
+
+    matured: [{"base", "predicted", "actual"}]. Vertaa ennustettua ja
+    toteutunutta muutosta -> kerroin tuleville ennusteille (rajattu 0.6–1.4).
+    """
+    ratios = []
+    for m in matured:
+        pred_gain = m["predicted"] - m["base"]
+        act_gain = m["actual"] - m["base"]
+        if abs(pred_gain) < 0.5:  # liian pieni ennustettu muutos -> ohita
+            continue
+        ratios.append(act_gain / pred_gain)
+    if len(ratios) < 2:
+        return 1.0
+    ratios.sort()
+    mid = ratios[len(ratios) // 2]  # mediaani robustiksi
+    return max(0.6, min(1.4, round(mid, 2)))
+
+
 def classify_lift(name: str) -> str | None:
     """Tunnista liike voimastandardiksi nimen perusteella."""
     n = (name or "").lower()
@@ -326,6 +371,7 @@ def forecast_confidence(n_points: int, span_days: int) -> float:
 def forecast_progress(
     history: list[tuple], horizon_weeks: int = 26, ceiling: float | None = None,
     bodyweight_trend_per_week: float = 0.0, confidence: float = 1.0,
+    rate_calibration: float = 1.0,
 ) -> list[dict]:
     """Ennusta kehitys realistisesti vähenevällä tuotolla (data + malli).
 
@@ -344,7 +390,9 @@ def forecast_progress(
     last_day = pts[-1][0]
     recent = [p for p in pts if p[0] >= last_day - 84] or pts
     rate_per_day = max(0.0, _linear_rate(recent))  # ei ennusteta laskua
-    rate_per_week = rate_per_day * 7
+    # Kalibrointi: aiemman osuvuuden mukaan (jos ennusteet ovat aliarvioineet
+    # -> nostetaan tahtia, jos yliarvioineet -> lasketaan). Rajattu maltilliseksi.
+    rate_per_week = rate_per_day * 7 * max(0.6, min(1.4, rate_calibration))
 
     current = valid[-1][1]
     if ceiling is None or ceiling <= current:
@@ -426,7 +474,7 @@ def recent_rate_per_week(history: list[tuple], window_days: int = 84) -> float |
 
 def forecast_measurement(history: list[tuple], horizon_weeks: int = 26,
                          confidence: float = 1.0, ceiling: float | None = None,
-                         floor: float | None = None) -> list[dict]:
+                         floor: float | None = None, rate_calibration: float = 1.0) -> list[dict]:
     """Ennusta ympärysmitan kehitys datavetoisesti (kasvu JA lasku).
 
     Perustuu ENSISIJAISESTI omaan lähitrendiin (adaptoituu: jos esim. reisi
@@ -443,7 +491,7 @@ def forecast_measurement(history: list[tuple], horizon_weeks: int = 26,
     pts = [((d - base).days, v) for d, v in valid]
     last_day = pts[-1][0]
     recent = [p for p in pts if p[0] >= last_day - 84] or pts
-    rate_per_week = _linear_rate(recent) * 7  # voi olla negatiivinen
+    rate_per_week = _linear_rate(recent) * 7 * max(0.6, min(1.4, rate_calibration))  # voi olla negatiivinen
     current = valid[-1][1]
     spread_mult = 1.6 - 0.6 * max(0.0, min(1.0, confidence))
 
