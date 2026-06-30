@@ -1,0 +1,18 @@
+# Render-pilvialustan konfiguraatio (https://render.com).
+# Render lukee tämän automaattisesti kun yhdistät GitHub-repon.
+services:
+  - type: web
+    name: treeni-ty-kalu
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+    envVars:
+      - key: TREENI_DB_PATH
+        value: /data/treeni.db
+    # Pysyvä levy tietokannalle (jotta data säilyy uudelleenkäynnistyksissä).
+    # HUOM: levy on Renderissä maksullinen ominaisuus. Ilman levyä sovellus
+    # toimii, mutta data nollautuu uudelleenjulkaisussa -> sopii testaukseen.
+    disk:
+      name: treeni-data
+      mountPath: /data
+      sizeGB: 1

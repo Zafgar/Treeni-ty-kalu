@@ -55,11 +55,33 @@ Testaaminen Android-puhelimella (puhelin ja tietokone samassa wifi-verkossa):
    sovelluksenaan ilman selainpalkkia. (iPhone: Safari → Jaa → *Lisää
    Koti-valikkoon*.)
 
-> Data tallentuu aina **tietokoneelle** (`data/treeni.db`), ei puhelimeen —
-> puhelin on vain näyttö/käyttöliittymä, joka ottaa yhteyden koneeseen.
-> Jos haluat käyttää sovellusta ilman omaa konetta päällä, se pitää myöhemmin
-> viedä palvelimelle (esim. pieni VPS tai pilvipalvelu) — voin auttaa siinä kun
-> on ajankohtaista.
+> Lähiverkkokäytössä data tallentuu **tietokoneelle** (`data/treeni.db`), ei
+> puhelimeen — puhelin on vain näyttö, joka ottaa yhteyden koneeseen. Tämä toimii
+> vain kun **kone on päällä ja samassa wifissä**.
+
+## Käyttö ilman omaa konetta (vienti pilveen)
+
+Jotta sovellus toimii puhelimella **missä vain ja vaikka oma kone on sammuksissa**,
+se viedään pilveen. Repo sisältää valmiin `Dockerfile`n (yksi kontti tarjoilee
+sekä API:n että käyttöliittymän) ja konfiguraatiot Renderille (`render.yaml`) ja
+Fly.io:lle (`fly.toml`).
+
+**Render (helpoin, lukee `render.yaml`n automaattisesti):**
+
+1. Pushaa repo GitHubiin (jos ei vielä siellä).
+2. Luo tili osoitteessa <https://render.com> → *New* → *Blueprint* → valitse repo.
+3. Render rakentaa Dockerfilen ja antaa pysyvän `https://…onrender.com`-osoitteen.
+4. Avaa osoite puhelimella ja asenna kotinäytölle (PWA). Kone saa olla sammuksissa.
+
+**Pysyvä tietokanta:** sovellus lukee tietokannan polun ympäristömuuttujasta
+`TREENI_DB_PATH` (oletus pilvessä `/data/treeni.db`). Liitä alustan **pysyvä
+levy/volyymi** `/data`-polkuun, niin data säilyy uudelleenjulkaisuissa.
+- Render: `render.yaml`ssa on `disk` valmiina (huom. levy on Renderissä maksullinen;
+  ilman levyä toimii, mutta data nollautuu uudelleenjulkaisussa).
+- Fly.io: `fly launch` + `fly volumes create treeni_data --size 1` (volyymi).
+
+**Portit:** pilvialusta antaa portin `PORT`-ympäristömuuttujassa, ja kontti
+sitoo siihen automaattisesti — sinun ei tarvitse avata portteja itse.
 
 ## Testit
 

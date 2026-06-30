@@ -1,0 +1,28 @@
+# Fly.io-konfiguraatio (https://fly.io). Vaihtoehto Renderille; Flyssä on
+# pieni pysyvä volyymi tietokannalle. Luo sovellus: `fly launch` (lukee tämän),
+# luo volyymi: `fly volumes create treeni_data --size 1`.
+app = "treeni-ty-kalu"
+primary_region = "arn"  # Tukholma; vaihda haluamaasi
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  TREENI_DB_PATH = "/data/treeni.db"
+  PORT = "8080"
+
+[[mounts]]
+  source = "treeni_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 0
+
+[[http_service.checks]]
+  path = "/api/health"
+  interval = "30s"
+  timeout = "5s"

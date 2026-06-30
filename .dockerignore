@@ -1,0 +1,12 @@
+.git
+.venv
+venv
+__pycache__
+*.pyc
+data
+*.db
+*.sqlite3
+node_modules
+.vscode
+.idea
+.DS_Store

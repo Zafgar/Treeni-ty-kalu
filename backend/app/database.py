@@ -1,13 +1,20 @@
 """Tietokantayhteys ja istunnon hallinta (SQLite + SQLAlchemy)."""
+import os
 from pathlib import Path
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-# Tietokanta talletetaan projektin juureen kansioon data/
-DATA_DIR = Path(__file__).resolve().parents[2] / "data"
-DATA_DIR.mkdir(exist_ok=True)
-DB_PATH = DATA_DIR / "treeni.db"
+# Tietokannan sijainti. Pilvessä voi osoittaa pysyvään levyyn ympäristömuuttujalla
+# TREENI_DB_PATH (esim. /data/treeni.db). Muuten projektin juuren data/-kansio.
+_db_env = os.environ.get("TREENI_DB_PATH")
+if _db_env:
+    DB_PATH = Path(_db_env)
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+else:
+    DATA_DIR = Path(__file__).resolve().parents[2] / "data"
+    DATA_DIR.mkdir(exist_ok=True)
+    DB_PATH = DATA_DIR / "treeni.db"
 
 SQLALCHEMY_DATABASE_URL = f"sqlite:///{DB_PATH}"
 
