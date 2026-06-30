@@ -149,3 +149,160 @@ def build_program(payload: TemplateBuild, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(program)
     return {"program_id": program.id, "name": program.name}
+
+
+# =================== KOKO-OHJELMAN GENERAATTORI ===================
+# Valitse laji + treenikerrat/viikko -> järjestelmä rakentaa valmiin
+# viikko-ohjelman liikkeineen (haetaan kirjastosta) ja sarjoineen.
+# Pääliikkeissä on percent_scheme -> painot lasketaan 1RM:stä automaattisesti.
+
+# Päivämallit. main = pääliike percent_schemellä, acc = lisäliike (kategoria).
+def _M(name, sets, reps_scheme, pct):
+    return {"name": name, "sets": sets, "rep_scheme": reps_scheme, "percent_scheme": pct}
+
+
+def _A(name, sets, reps):
+    return {"name": name, "sets": sets, "reps": reps}
+
+
+_PUSH = {"label": "Työntö (rinta/olka/ojentaja)", "items": [
+    _M("penkkipunnerrus", 4, "6,6,6,6", "72,75,77,77"),
+    _A("vinopenkki", 3, 10), _A("pystypunnerrus", 3, 10),
+    _A("sivunostot", 3, 15), _A("taljapunnerrus", 3, 12)]}
+_PULL = {"label": "Veto (selkä/hauis)", "items": [
+    _M("maastaveto", 3, "5,5,5", "72,77,80"),
+    _A("leuanveto", 3, 8), _A("alatalja soutu", 3, 10),
+    _A("ylätalja", 3, 12), _A("hauiskääntö tanko", 3, 12)]}
+_LEGS = {"label": "Jalat", "items": [
+    _M("takakyykky", 4, "6,6,6,6", "72,75,77,77"),
+    _A("jalkaprässi", 3, 12), _A("romanialainen maastaveto", 3, 10),
+    _A("jalkojen koukistus", 3, 12), _A("pohjenousu", 4, 15)]}
+_UPPER = {"label": "Yläkroppa", "items": [
+    _M("penkkipunnerrus", 4, "6,6,6,6", "72,75,77,77"),
+    _A("tankosoutu", 4, 8), _A("pystypunnerrus", 3, 10),
+    _A("ylätalja", 3, 12), _A("hauiskääntö tanko", 3, 12), _A("taljapunnerrus", 3, 12)]}
+_LOWER = {"label": "Alakroppa", "items": [
+    _M("takakyykky", 4, "6,6,6,6", "72,75,77,77"),
+    _A("romanialainen maastaveto", 3, 10), _A("jalkaprässi", 3, 12),
+    _A("jalkojen koukistus", 3, 12), _A("pohjenousu", 4, 15)]}
+
+# Voimanosto
+_PL_SQUAT = {"label": "Kyykkypäivä", "items": [
+    _M("takakyykky", 5, "5,5,5,3,3", "75,80,82,85,85"),
+    _A("etukyykky", 3, 6), _A("jalkaprässi", 3, 10), _A("jalkojen koukistus", 3, 12)]}
+_PL_BENCH = {"label": "Penkkipäivä", "items": [
+    _M("penkkipunnerrus", 5, "5,5,5,3,3", "75,80,82,85,85"),
+    _A("kapea penkki", 3, 8), _A("pystypunnerrus", 3, 8), _A("taljapunnerrus", 3, 12)]}
+_PL_DL = {"label": "Maastavetopäivä", "items": [
+    _M("maastaveto", 5, "5,3,3,2,2", "75,82,85,88,88"),
+    _A("romanialainen maastaveto", 3, 8), _A("tankosoutu", 3, 8), _A("ylätalja", 3, 10)]}
+_PL_BENCH_VOL = {"label": "Penkki (volyymi)", "items": [
+    _M("penkkipunnerrus", 5, "8,8,8,8,8", "68,68,68,68,68"),
+    _A("vinopenkki", 3, 10), _A("taljaristikko", 3, 12), _A("sivunostot", 3, 15)]}
+
+# Olympia
+_OL_SNATCH = {"label": "Tempauspäivä", "items": [
+    _M("tempaus", 6, "3,3,2,2,1,1", "70,75,80,82,85,85"),
+    _A("etukyykky", 4, 4), _A("maastaveto", 3, 4), _A("pystypunnerrus", 3, 6)]}
+_OL_CJ = {"label": "Rinnalleveto & työntö", "items": [
+    _M("rinnalleveto ja työntö", 6, "2,2,1,1,1,1", "70,75,80,82,85,85"),
+    _A("etukyykky", 4, 3), _A("tankosoutu", 3, 6), _A("pystypunnerrus", 3, 6)]}
+_OL_SQUAT = {"label": "Kyykky & vedot", "items": [
+    _M("takakyykky", 5, "4,4,3,3,2", "75,80,82,85,87"),
+    _A("etukyykky", 4, 4), _A("maastaveto", 4, 4), _A("pohjenousu", 4, 15)]}
+
+PLAN_BLUEPRINTS = {
+    "bodaus": {
+        "goal": "hypertrofia",
+        "guidance": ("Lihasmassaohjelma. Pääliikkeissä lähtöpaino lasketaan 1RM:stä; "
+                     "lisäliikkeissä valitse paino jolla viimeiset toistot ovat haastavia "
+                     "(1–2 varastoa). Lisää painoa tai toistoja kun liike etenee."),
+        "days": {3: [_PUSH, _PULL, _LEGS], 4: [_UPPER, _LOWER, _UPPER, _LOWER],
+                 5: [_PUSH, _PULL, _LEGS, _UPPER, _LOWER], 6: [_PUSH, _PULL, _LEGS, _PUSH, _PULL, _LEGS]},
+    },
+    "voimanosto": {
+        "goal": "voima",
+        "guidance": ("Voimanosto-ohjelma kyykylle, penkille ja maastavedolle. Pääliikkeet "
+                     "raskaina (% 1RM:stä), apuliikkeet tukevat. Nosta prosentteja varovasti "
+                     "kun nostot menevät varmasti ja puhtaasti."),
+        "days": {3: [_PL_SQUAT, _PL_BENCH, _PL_DL], 4: [_PL_SQUAT, _PL_BENCH, _PL_DL, _PL_BENCH_VOL]},
+    },
+    "olympia": {
+        "goal": "olympia",
+        "guidance": ("Olympianosto-ohjelma (tempaus ja rinnalleveto & työntö). Tekniikka "
+                     "edellä: matalat toistot, pitkät palautukset, laatu ennen kuormaa. "
+                     "Etukyykky ja vedot tukevat nostoja."),
+        "days": {3: [_OL_SNATCH, _OL_CJ, _OL_SQUAT], 4: [_OL_SNATCH, _OL_CJ, _OL_SQUAT, _OL_SNATCH]},
+    },
+}
+
+
+class GenerateIn(BaseModel):
+    plan: str  # bodaus | voimanosto | olympia
+    days_per_week: int = 3
+    profile_id: int | None = None
+    name: str | None = None
+
+
+def _find_exercise(db: Session, keyword: str):
+    """Etsi liike kirjastosta nimen perusteella (sisältää avainsanan)."""
+    kw = keyword.lower()
+    matches = [e for e in db.query(models.Exercise).order_by(models.Exercise.name).all()
+               if kw in e.name.lower()]
+    return matches[0] if matches else None
+
+
+@router.get("/plans")
+def list_plans():
+    """Listaa generoitavat ohjelmatyypit ja niiden tuetut treenikerrat/viikko."""
+    return [
+        {"id": pid, "goal": b["goal"], "guidance": b["guidance"],
+         "days_options": sorted(b["days"].keys())}
+        for pid, b in PLAN_BLUEPRINTS.items()
+    ]
+
+
+@router.post("/generate")
+def generate_program(payload: GenerateIn, db: Session = Depends(get_db)):
+    """Rakenna valmis viikko-ohjelma lajista ja treenikerroista/viikko."""
+    bp = PLAN_BLUEPRINTS.get(payload.plan)
+    if not bp:
+        raise HTTPException(status_code=404, detail="Ohjelmatyyppiä ei löytynyt.")
+    # Valitse lähin tuettu treenikertamäärä
+    options = sorted(bp["days"].keys())
+    days_n = min(options, key=lambda x: abs(x - payload.days_per_week))
+    day_blueprints = bp["days"][days_n]
+
+    plan_names = {"bodaus": "Lihasmassa", "voimanosto": "Voimanosto", "olympia": "Olympianosto"}
+    program = models.Program(
+        name=payload.name or f"{plan_names.get(payload.plan, payload.plan)} {days_n}x/vk",
+        profile_id=payload.profile_id, schedule_type="weekly",
+        goal=bp["goal"], description=bp["guidance"], is_active=True,
+    )
+    missing = set()
+    for di, dbp in enumerate(day_blueprints):
+        day = models.ProgramDay(order_index=di, day_type="train", label=dbp["label"])
+        oi = 0
+        for item in dbp["items"]:
+            ex = _find_exercise(db, item["name"])
+            if not ex:
+                missing.add(item["name"])
+                continue
+            if "percent_scheme" in item:
+                day.exercises.append(models.ProgramExercise(
+                    exercise_id=ex.id, order_index=oi,
+                    target_sets=item["sets"], target_reps=int(float(item["rep_scheme"].split(",")[0])),
+                    rep_scheme=item["rep_scheme"], percent_scheme=item["percent_scheme"],
+                    rest_seconds=180, target_rir=2))
+            else:
+                day.exercises.append(models.ProgramExercise(
+                    exercise_id=ex.id, order_index=oi,
+                    target_sets=item["sets"], target_reps=item["reps"],
+                    rest_seconds=90, target_rir=2))
+            oi += 1
+        program.days.append(day)
+    db.add(program)
+    db.commit()
+    db.refresh(program)
+    return {"program_id": program.id, "name": program.name, "days": days_n,
+            "missing_exercises": sorted(missing)}

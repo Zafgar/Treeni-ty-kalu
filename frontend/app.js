@@ -890,6 +890,41 @@ function renderRecordsTable() {
 document.getElementById("records-search").addEventListener("input", renderRecordsTable);
 
 // =================== VALMIIT POHJAT ===================
+document.getElementById("generate-btn").addEventListener("click", async () => {
+  const panel = document.getElementById("generate-panel");
+  panel.classList.toggle("hidden");
+  if (panel.classList.contains("hidden")) return;
+  panel.innerHTML = "";
+  const plans = await api.get("/api/templates/plans");
+  const planNames = { bodaus: "Lihasmassa (bodaus)", voimanosto: "Voimanosto", olympia: "Olympianosto" };
+  const planSel = el("select", {});
+  plans.forEach((p) => planSel.append(el("option", { value: p.id }, planNames[p.id] || p.id)));
+  const daysSel = el("select", {});
+  const info = el("div", { class: "muted", style: "margin:8px 0" });
+  function refreshDays() {
+    const p = plans.find((x) => x.id === planSel.value);
+    daysSel.innerHTML = "";
+    p.days_options.forEach((d) => daysSel.append(el("option", { value: d }, `${d}× viikossa`)));
+    info.textContent = p.guidance;
+  }
+  planSel.addEventListener("change", refreshDays);
+  panel.append(
+    el("div", { class: "grid" }, el("label", {}, "Laji", planSel), el("label", {}, "Treenikerrat", daysSel)),
+    info,
+    el("div", { class: "btn-row" },
+      el("button", { class: "success", onclick: async () => {
+        const r = await api.post("/api/templates/generate", {
+          plan: planSel.value, days_per_week: +daysSel.value, profile_id: currentProfileId });
+        panel.classList.add("hidden");
+        await loadPrograms();
+        let msg = `Ohjelma "${r.name}" luotu (${r.days} treenipäivää).`;
+        if (r.missing_exercises && r.missing_exercises.length) msg += ` Huom: ${r.missing_exercises.length} liikettä puuttui kirjastosta.`;
+        alert(msg);
+      } }, "Luo ohjelma"),
+      el("button", { onclick: () => panel.classList.add("hidden") }, "Peruuta")));
+  refreshDays();
+});
+
 document.getElementById("template-btn").addEventListener("click", async () => {
   if (!exercisesCache.length) return alert("Lisää ensin liikkeitä.");
   const panel = document.getElementById("template-panel");
@@ -1099,12 +1134,24 @@ async function loadBody() {
   legend.innerHTML = "";
   const series = [];
   let idx = 0;
+  const fcs = s.measurement_forecasts || {};
+  let hasFc = false;
   for (const [site, pts] of Object.entries(s.measurement_sites)) {
     const color = CHART_COLORS[idx % CHART_COLORS.length];
     series.push({ color, points: pts.map((p) => ({ x: new Date(p.date).getTime(), y: p.value })) });
     legend.append(el("span", { class: "tag", style: `color:${color};border-color:${color}` }, site));
+    // Ennuste (katkoviiva + haarukka) jos dataa riittää
+    if (fcs[site] && fcs[site].length && pts.length) {
+      const last = pts[pts.length - 1];
+      const anchor = { x: new Date(last.date).getTime(), y: last.value };
+      const fc = fcs[site].map((p) => ({ x: new Date(p.date).getTime(), y: p.mid }));
+      const band = fcs[site].map((p) => ({ x: new Date(p.date).getTime(), low: p.low, high: p.high }));
+      series.push({ color, dashed: true, points: [anchor, ...fc], band });
+      hasFc = true;
+    }
     idx++;
   }
+  if (hasFc) legend.append(el("span", { class: "muted" }, " — katkoviiva = ennuste (oman datan trendistä)"));
   drawLineChart(document.getElementById("measure-chart"), series, { unit: "cm" });
 }
 

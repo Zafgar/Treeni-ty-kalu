@@ -127,8 +127,19 @@ def body_summary(profile_id: int = Query(...), db: Session = Depends(get_db)):
         .all()
     )
     by_site: dict[str, list[dict]] = {}
+    raw_by_site: dict[str, list] = {}
     for m in measurements:
         by_site.setdefault(m.site, []).append({"date": m.entry_date.isoformat(), "value": m.value_cm})
+        raw_by_site.setdefault(m.site, []).append((m.entry_date, m.value_cm))
+
+    # Mittojen kasvun/laskun ennuste (omasta historiasta) kohdille joilla
+    # on tarpeeksi dataa. Vyötärö voi laskea (dieetti), raaja kasvaa.
+    measurement_forecasts: dict[str, list] = {}
+    for site, hist in raw_by_site.items():
+        conf = engine.forecast_confidence(len(hist), (hist[-1][0] - hist[0][0]).days)
+        fc = engine.forecast_measurement(hist, 26, conf)
+        if fc:
+            measurement_forecasts[site] = fc
 
     return {
         "weight_series": weight_series,
@@ -136,4 +147,5 @@ def body_summary(profile_id: int = Query(...), db: Session = Depends(get_db)):
         "composition": composition,
         "physique": physique,
         "measurement_sites": by_site,
+        "measurement_forecasts": measurement_forecasts,
     }

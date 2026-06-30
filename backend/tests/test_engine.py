@@ -260,6 +260,18 @@ def test_forecast_confidence_widens_band():
     assert width_unsure > width_sure  # vähemmän dataa -> leveämpi haarukka
 
 
+def test_forecast_measurement_growth_and_decline():
+    from datetime import date, timedelta
+    base = date(2026, 1, 1)
+    grow = [(base + timedelta(weeks=i), 39 + i * 0.3) for i in range(5)]
+    fc = engine.forecast_measurement(grow, 12)
+    assert fc and fc[-1]["mid"] > 40  # kasvava käsi jatkaa kasvua
+    shrink = [(base + timedelta(weeks=i), 90 - i * 0.5) for i in range(5)]
+    fcs = engine.forecast_measurement(shrink, 12)
+    assert fcs and fcs[-1]["mid"] < 90  # vyötärö voi pienentyä
+    assert engine.forecast_measurement([(base, 40), (base, 41)], 12) == []  # liian vähän
+
+
 def test_estimate_workout_kcal():
     k = engine.estimate_workout_kcal(85, 60)
     assert k and 350 < k < 600   # ~85*0.0875*60 ≈ 446

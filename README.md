@@ -105,6 +105,12 @@ python -m pytest backend/tests/ -q
 - **Valmiit pohjat:** voimajaksot (5×5, prosenttipohjainen maksimivoima,
   pyramidi-hypertrofia) ohjeineen; lähtöpaino lasketaan automaattisesti
   tämänhetkisestä arvioidusta 1RM:stä
+- **Automaattinen ohjelmageneraattori:** valitse laji (lihasmassa/voimanosto/
+  olympianosto) ja treenikerrat/viikko (3–6) → järjestelmä rakentaa valmiin
+  viikko-ohjelman liikkeineen (haetaan kirjastosta) ja sarjoineen; pääliikkeiden
+  painot lasketaan 1RM:stä
+- **Mittojen kasvun ennuste:** ympärysmittojen kehitys ennustetaan omasta
+  historiasta (raaja voi kasvaa, vyötärö pienentyä dieetillä) haarukkana
 - **Kehityksen seuranta:** arvioidun 1RM:n kehityskäyrä per liike (useita
   liikkeitä samassa kuvaajassa), ennätystaulukko ja yleisnäkymä haulla
 - **Lajitotalit:** esim. voimanoston total ala-/yläraja-arvioineen ja

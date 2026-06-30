@@ -379,6 +379,42 @@ def forecast_progress(
     return out
 
 
+def forecast_measurement(history: list[tuple], horizon_weeks: int = 26,
+                         confidence: float = 1.0) -> list[dict]:
+    """Ennusta ympärysmitan kehitys (sallii kasvun JA laskun).
+
+    Toisin kuin voimaennuste, mitta voi myös pienentyä (esim. vyötärö
+    dieetillä). Projektoi lähitrendin vaimennettuna ajan myötä — perustuu
+    ensisijaisesti omaan dataan (miten keho on aiemmin muuttunut).
+    """
+    valid = [(d, v) for d, v in history if v and v > 0]
+    if len(valid) < 3:  # mitalle tarvitaan hieman enemmän dataa
+        return []
+    valid.sort(key=lambda p: p[0])
+    base = valid[0][0]
+    pts = [((d - base).days, v) for d, v in valid]
+    last_day = pts[-1][0]
+    recent = [p for p in pts if p[0] >= last_day - 84] or pts
+    rate_per_week = _linear_rate(recent) * 7  # voi olla negatiivinen
+    current = valid[-1][1]
+    spread_mult = 1.6 - 0.6 * max(0.0, min(1.0, confidence))
+
+    from datetime import timedelta
+    out = []
+    value = current
+    for w in range(1, horizon_weeks + 1):
+        # Muutos tasaantuu ajan myötä (keho ei muutu loputtomiin lineaarisesti)
+        value += rate_per_week * (0.96 ** w)
+        spread = (0.3 + 0.04 * abs(value - current) + 0.01 * (w ** 0.5)) * spread_mult
+        out.append({
+            "date": (valid[-1][0] + timedelta(weeks=w)).isoformat(),
+            "mid": round(value, 1),
+            "low": round(value - spread, 1),
+            "high": round(value + spread, 1),
+        })
+    return out
+
+
 def volume_verdict(sets_week: int, sets_prev: int) -> dict:
     """Arvioi lihasryhmän viikkovolyymi ja anna ehdotus.
 

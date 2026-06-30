@@ -210,6 +210,44 @@ def test_volume_analysis_and_ack(client):
     assert va2["acknowledged"] is True
 
 
+def test_generate_program(client):
+    # Liikekirjasto on testikannassa tyhjä -> seedataan tarvittavat liikkeet
+    for name in ["Takakyykky", "Penkkipunnerrus", "Maastaveto", "Jalkaprässi",
+                 "Romanialainen maastaveto", "Jalkojen koukistus", "Pohjenousu",
+                 "Vinopenkki tanko", "Pystypunnerrus", "Sivunostot", "Taljapunnerrus",
+                 "Leuanveto", "Alatalja soutu", "Ylätalja eteen", "Hauiskääntö tanko"]:
+        client.post("/api/exercises", json={"name": name, "category": "yleinen"})
+    plans = client.get("/api/templates/plans").json()
+    assert any(p["id"] == "voimanosto" for p in plans)
+    r = client.post("/api/templates/generate", json={"plan": "bodaus", "days_per_week": 3, "profile_id": 1}).json()
+    assert r["days"] == 3
+    prog = client.get(f"/api/programs/{r['program_id']}").json()
+    assert prog["schedule_type"] == "weekly"
+    assert len(prog["days"]) == 3
+    # pääliikkeellä on percent_scheme
+    assert any(pe.get("percent_scheme") for d in prog["days"] for pe in d["exercises"])
+
+
+def test_generate_closest_days(client):
+    client.post("/api/exercises", json={"name": "Takakyykky"})
+    client.post("/api/exercises", json={"name": "Penkkipunnerrus"})
+    client.post("/api/exercises", json={"name": "Maastaveto"})
+    # voimanosto tukee 3 ja 4 -> pyyntö 7 antaa lähimmän (4)
+    r = client.post("/api/templates/generate", json={"plan": "voimanosto", "days_per_week": 7, "profile_id": 1}).json()
+    assert r["days"] == 4
+
+
+def test_measurement_forecast(client):
+    from datetime import date, timedelta
+    base = date(2026, 1, 1)
+    for i in range(5):
+        client.post("/api/body/measurements?profile_id=1", json={
+            "entry_date": (base + timedelta(weeks=i)).isoformat(), "site": "hauis", "value_cm": 39 + i * 0.4})
+    s = client.get("/api/body/summary?profile_id=1").json()
+    assert "hauis" in s["measurement_forecasts"]
+    assert len(s["measurement_forecasts"]["hauis"]) > 0
+
+
 def test_load_timeline(client):
     ex = client.post("/api/exercises", json={"name": "Kyykky"}).json()
     client.post("/api/workouts", json={
