@@ -173,6 +173,12 @@ td input.notes { width: 100%; }
 .tag.status-skip { background: rgba(154,163,178,0.12); color: var(--muted); }
 
 .exercise-block.ex-done { border-left: 3px solid var(--accent-2); padding-left: 12px; }
+.item.ex-done { border-left: 3px solid var(--accent); }
+
+.section-label { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--muted); margin: 14px 0 6px; font-weight: 700; }
+.history-block { margin-top: 14px; }
+.history-block > button { margin-bottom: 8px; }
 
 .level-bar { background: var(--surface-2); border-radius: 999px; height: 8px; margin: 8px 0; overflow: hidden; }
 .level-fill { height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent-2)); border-radius: 999px; }

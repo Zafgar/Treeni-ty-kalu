@@ -183,23 +183,44 @@ document.getElementById("new-exercise-btn").addEventListener("click", () => {
 
 // =================== OHJELMAT ===================
 async function loadPrograms() {
-  const programs = await api.get(pq("/api/programs"));
+  let programs = await api.get(pq("/api/programs"));
+  // Aktiivinen ohjelma ensin
+  programs = programs.slice().sort((a, b) => (b.is_active ? 1 : 0) - (a.is_active ? 1 : 0));
   const list = document.getElementById("program-list");
   list.innerHTML = "";
   if (!programs.length) {
     list.append(el("p", { class: "muted" }, "Ei ohjelmia vielä."));
   }
   for (const p of programs) {
-    const item = el("div", { class: "item" });
+    const item = el("div", { class: "item" + (p.is_active ? " ex-done" : "") });
     item.append(el("div", { class: "row-between" },
-      el("strong", {}, p.name),
-      el("button", { class: "small danger", onclick: async () => {
-        if (confirm(`Poista ohjelma "${p.name}"?`)) { await api.del(`/api/programs/${p.id}`); loadPrograms(); }
-      } }, "Poista")
+      el("div", { class: "btn-row", style: "align-items:center" },
+        el("strong", {}, p.name),
+        p.is_active ? el("span", { class: "tag status-done" }, "Aktiivinen") : ""),
+      el("div", { class: "btn-row" },
+        p.is_active
+          ? el("button", { class: "small", onclick: async () => { await api.post(`/api/programs/${p.id}/finish`); loadPrograms(); loadWorkouts(); } }, "Päätä")
+          : el("button", { class: "small primary", title: "Vie ohjelman treenipäivät Treenit-välilehdelle", onclick: async () => {
+              await api.post(`/api/programs/${p.id}/activate`); loadPrograms(); loadWorkouts();
+              alert("Ohjelma aktivoitu. Treenipäivät löytyvät nyt Treenit-välilehdeltä.");
+            } }, "Aktivoi"),
+        el("button", { class: "small danger", onclick: async () => {
+          if (confirm(`Poista ohjelma "${p.name}"?`)) { await api.del(`/api/programs/${p.id}`); loadPrograms(); }
+        } }, "Poista"))
     ));
     const meta = [p.schedule_type === "cycle" ? "Sykli" : "Viikko"];
     if (p.goal) meta.push(p.goal);
     item.append(el("div", { class: "muted" }, meta.join(" · ")));
+    // Yhteenveto: kesto + montako treeniä tehty/skipattu
+    const sum = await api.get(`/api/programs/${p.id}/summary`);
+    const sparts = [];
+    if (sum.start_date) sparts.push(`alkoi ${sum.start_date}`);
+    if (sum.end_date) sparts.push(`päättyi ${sum.end_date}`);
+    if (sum.duration_days != null) sparts.push(`${sum.duration_days} pv`);
+    sparts.push(`${sum.workouts_completed} treeniä tehty`);
+    if (sum.workouts_skipped) sparts.push(`${sum.workouts_skipped} skipattu`);
+    if (sum.workouts_planned_open) sparts.push(`${sum.workouts_planned_open} kesken`);
+    item.append(el("div", { class: "muted" }, sparts.join(" · ")));
     for (const day of p.days) {
       const db = el("div", { class: "day-block " + (day.day_type === "rest" ? "rest" : "") });
       db.append(el("strong", {}, (day.label || `Päivä ${day.order_index + 1}`) +
@@ -300,41 +321,63 @@ document.getElementById("new-program-btn").addEventListener("click", () => {
 });
 
 // =================== TREENIT ===================
+function renderWorkoutItem(w, opts = {}) {
+  const total = w.exercises.reduce((sum, we) => {
+    let v = we.sets.reduce((s, set) => s + (set.completed ? set.reps * set.weight : 0), 0);
+    if (we.missed_reps) {
+      const topW = Math.max(0, ...we.sets.filter((st) => st.completed).map((st) => st.weight));
+      v = Math.max(0, v - we.missed_reps * topW);
+    }
+    return sum + v;
+  }, 0);
+  const statusInfo = {
+    planned: ["Suunniteltu", "status-planned"],
+    completed: ["Suoritettu", "status-done"],
+    skipped: ["Skipattu", "status-skip"],
+  }[w.status] || ["", ""];
+  const feelEmoji = { positive: "😀", neutral: "😐", negative: "😟" }[w.feeling] || "";
+  return el("div", { class: "item" + (opts.active ? " ex-done" : "") },
+    el("div", { class: "row-between" },
+      el("div", { class: "btn-row", style: "align-items:center" },
+        el("strong", {}, `${w.session_date} — ${w.name || "Treeni"}`),
+        el("span", { class: "tag " + statusInfo[1] }, statusInfo[0]),
+        feelEmoji ? el("span", { title: w.feeling_note || "" }, feelEmoji) : ""),
+      el("div", { class: "btn-row" },
+        el("button", { class: "small" + (opts.active ? " primary" : ""), onclick: () => openWorkoutEditor(w.id) }, opts.active ? "Jatka" : "Avaa"),
+        el("button", { class: "small danger", onclick: async () => {
+          if (confirm("Poista treeni?")) { await api.del(`/api/workouts/${w.id}`); loadWorkouts(); }
+        } }, "Poista"))),
+    el("div", { class: "muted" }, `${w.exercises.length} liikettä · kokonaiskuorma ${Math.round(total)} kg` +
+      (w.duration_min ? ` · ${w.duration_min} min` : "") + (w.kcal_burned ? ` · ${Math.round(w.kcal_burned)} kcal` : ""))
+  );
+}
+
 async function loadWorkouts() {
   const workouts = await api.get(pq("/api/workouts"));
   const list = document.getElementById("workout-list");
   list.innerHTML = "";
-  if (!workouts.length) list.append(el("p", { class: "muted" }, "Ei treenejä vielä."));
-  for (const w of workouts) {
-    const total = w.exercises.reduce((sum, we) => {
-      let v = we.sets.reduce((s, set) => s + (set.completed ? set.reps * set.weight : 0), 0);
-      if (we.missed_reps) {
-        const topW = Math.max(0, ...we.sets.filter((st) => st.completed).map((st) => st.weight));
-        v = Math.max(0, v - we.missed_reps * topW);
-      }
-      return sum + v;
-    }, 0);
-    const statusInfo = {
-      planned: ["Suunniteltu", "status-planned"],
-      completed: ["Suoritettu", "status-done"],
-      skipped: ["Skipattu", "status-skip"],
-    }[w.status] || ["", ""];
-    const feelEmoji = { positive: "😀", neutral: "😐", negative: "😟" }[w.feeling] || "";
-    const item = el("div", { class: "item" },
-      el("div", { class: "row-between" },
-        el("div", { class: "btn-row", style: "align-items:center" },
-          el("strong", {}, `${w.session_date} — ${w.name || "Treeni"}`),
-          el("span", { class: "tag " + statusInfo[1] }, statusInfo[0]),
-          feelEmoji ? el("span", { title: w.feeling_note || "" }, feelEmoji) : ""),
-        el("div", { class: "btn-row" },
-          el("button", { class: "small", onclick: () => openWorkoutEditor(w.id) }, "Avaa"),
-          el("button", { class: "small danger", onclick: async () => {
-            if (confirm("Poista treeni?")) { await api.del(`/api/workouts/${w.id}`); loadWorkouts(); }
-          } }, "Poista"))),
-      el("div", { class: "muted" }, `${w.exercises.length} liikettä · kokonaiskuorma ${Math.round(total)} kg` +
-        (w.duration_min ? ` · ${w.duration_min} min` : "") + (w.kcal_burned ? ` · ${Math.round(w.kcal_burned)} kcal` : ""))
-    );
-    list.append(item);
+  if (!workouts.length) { list.append(el("p", { class: "muted" }, "Ei treenejä vielä.")); return; }
+
+  // Aktiiviset = suunnitellut (vielä tekemättä) ylös. Tehdyt/skipatut
+  // supistetaan historiaksi alle.
+  const active = workouts.filter((w) => w.status === "planned");
+  const past = workouts.filter((w) => w.status !== "planned");
+
+  if (active.length) {
+    list.append(el("div", { class: "section-label" }, "Aktiiviset treenit"));
+    for (const w of active) list.append(renderWorkoutItem(w, { active: true }));
+  } else {
+    list.append(el("p", { class: "muted" }, "Ei aktiivista treeniä. Aloita uusi tai aktivoi ohjelma."));
+  }
+
+  if (past.length) {
+    const histWrap = el("div", { class: "hidden" });
+    for (const w of past) histWrap.append(renderWorkoutItem(w));
+    const toggle = el("button", { class: "small", onclick: () => {
+      const open = !histWrap.classList.toggle("hidden");
+      toggle.textContent = open ? `▾ Aiemmat treenit (${past.length})` : `▸ Aiemmat treenit (${past.length})`;
+    } }, `▸ Aiemmat treenit (${past.length})`);
+    list.append(el("div", { class: "history-block" }, toggle, histWrap));
   }
 }
 
@@ -1056,8 +1099,46 @@ async function refreshActiveTab() {
   if (loader) await loader(); else await loadOverview();
 }
 
+async function loadNetworkInfo() {
+  const box = document.getElementById("network-info");
+  if (!box) return;
+  try {
+    const info = await api.get("/api/network-info");
+    box.innerHTML = "";
+    const isLocal = info.lan_ip === "127.0.0.1";
+    box.append(
+      el("div", { class: "btn-row", style: "align-items:center;gap:8px;flex-wrap:wrap" },
+        el("a", { href: info.phone_url, target: "_blank",
+          style: "font-size:1.2em;font-weight:700;color:var(--accent)" }, info.phone_url),
+        el("button", { class: "small", onclick: async () => {
+          try { await navigator.clipboard.writeText(info.phone_url); }
+          catch (e) { /* leikepöytä ei käytettävissä */ }
+        } }, "Kopioi")),
+      isLocal
+        ? el("div", { class: "muted", style: "margin-top:6px" },
+            "Lähiverkon IP:tä ei tunnistettu. Tarkista että kone on wifissä — " +
+            "puhelimen pitää olla samassa verkossa.")
+        : el("div", { class: "muted", style: "margin-top:6px" },
+            "Kirjoita osoite puhelimen selaimeen tai skannaa QR alta."),
+    );
+    if (!isLocal) {
+      const qr = el("img", {
+        alt: "QR-koodi osoitteeseen " + info.phone_url,
+        style: "margin-top:10px;width:160px;height:160px;background:#fff;border-radius:8px;padding:6px",
+        src: "https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=" +
+          encodeURIComponent(info.phone_url),
+      });
+      qr.onerror = () => qr.remove(); // jos ei nettiä, jätä pois
+      box.append(qr);
+    }
+  } catch (e) {
+    box.textContent = "Osoitteen haku epäonnistui.";
+  }
+}
+
 async function loadProfilesTab() {
   await loadProfiles();
+  loadNetworkInfo();
   const list = document.getElementById("profile-list");
   list.innerHTML = "";
   for (const p of profilesCache) {

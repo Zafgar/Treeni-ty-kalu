@@ -91,6 +91,8 @@ class ProgramBase(BaseModel):
     description: str | None = None
     goal: str | None = None
     is_active: bool = True
+    start_date: date | None = None
+    end_date: date | None = None
 
 
 class ProgramCreate(ProgramBase):

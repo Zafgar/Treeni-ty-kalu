@@ -76,6 +76,91 @@ def delete_program(program_id: int, db: Session = Depends(get_db)):
     db.commit()
 
 
+@router.post("/{program_id}/activate", response_model=schemas.ProgramOut)
+def activate_program(program_id: int, db: Session = Depends(get_db)):
+    """Aseta ohjelma aktiiviseksi. Saman profiilin muut aktiiviset päättyvät."""
+    from datetime import date
+
+    program = db.get(models.Program, program_id)
+    if not program:
+        raise HTTPException(status_code=404, detail="Ohjelmaa ei löytynyt.")
+    # Päätä muut saman profiilin aktiiviset ohjelmat
+    others = db.query(models.Program).filter(
+        models.Program.profile_id == program.profile_id,
+        models.Program.is_active.is_(True), models.Program.id != program_id).all()
+    for o in others:
+        o.is_active = False
+        if not o.end_date:
+            o.end_date = date.today()
+    program.is_active = True
+    program.end_date = None
+    if not program.start_date:
+        program.start_date = date.today()
+
+    # Siirrä ohjelman treenipäivät suoraan Treenit-välilehdelle suunniteltuina
+    # treeneinä. Ei luoda kaksoiskappaleita: jos päivälle on jo avoin
+    # (planned) treeni, se jätetään ennalleen.
+    from .workouts import build_planned_session
+
+    for day in program.days:
+        if day.day_type != "train":
+            continue
+        existing_open = (db.query(models.WorkoutSession)
+                         .filter(models.WorkoutSession.program_day_id == day.id,
+                                 models.WorkoutSession.status == "planned")
+                         .first())
+        if existing_open:
+            continue
+        db.add(build_planned_session(day, db))
+
+    db.commit()
+    db.refresh(program)
+    return program
+
+
+@router.post("/{program_id}/finish", response_model=schemas.ProgramOut)
+def finish_program(program_id: int, db: Session = Depends(get_db)):
+    """Päätä ohjelma (asettaa lopetuspäivän ja poistaa aktiivisuuden)."""
+    from datetime import date
+
+    program = db.get(models.Program, program_id)
+    if not program:
+        raise HTTPException(status_code=404, detail="Ohjelmaa ei löytynyt.")
+    program.is_active = False
+    program.end_date = date.today()
+    db.commit()
+    db.refresh(program)
+    return program
+
+
+@router.get("/{program_id}/summary")
+def program_summary(program_id: int, db: Session = Depends(get_db)):
+    """Yhteenveto: kesto ja montako treeniä ohjelman pohjalta tehtiin/skipattiin."""
+    from datetime import date
+
+    program = db.get(models.Program, program_id)
+    if not program:
+        raise HTTPException(status_code=404, detail="Ohjelmaa ei löytynyt.")
+    day_ids = [d.id for d in program.days]
+    sessions = (db.query(models.WorkoutSession)
+                .filter(models.WorkoutSession.program_day_id.in_(day_ids)).all()
+                if day_ids else [])
+    completed = sum(1 for s in sessions if s.status == "completed")
+    skipped = sum(1 for s in sessions if s.status == "skipped")
+    planned = sum(1 for s in sessions if s.status == "planned")
+    end = program.end_date or (date.today() if program.is_active else None)
+    duration = (end - program.start_date).days if (program.start_date and end) else None
+    train_days = sum(1 for d in program.days if d.day_type == "train")
+    return {
+        "program_id": program_id, "name": program.name, "is_active": program.is_active,
+        "start_date": program.start_date.isoformat() if program.start_date else None,
+        "end_date": program.end_date.isoformat() if program.end_date else None,
+        "duration_days": duration, "train_days_in_program": train_days,
+        "workouts_completed": completed, "workouts_skipped": skipped,
+        "workouts_planned_open": planned,
+    }
+
+
 # ---------- Päivät (muokkaus lennossa) ----------
 @router.post("/{program_id}/days", response_model=schemas.ProgramDayOut, status_code=201)
 def add_day(program_id: int, payload: schemas.ProgramDayCreate, db: Session = Depends(get_db)):

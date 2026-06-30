@@ -88,6 +88,9 @@ class Program(Base):
     # Mihin ohjelma tähtää, esim. "voima", "hypertrofia", "voimanostototal"
     goal: Mapped[str | None] = mapped_column(String(80), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Aktivoinnin aloitus ja lopetus (paljonko ohjelma kesti)
+    start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     days: Mapped[list["ProgramDay"]] = relationship(

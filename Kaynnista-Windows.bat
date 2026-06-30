@@ -74,9 +74,11 @@ echo.
 REM --- Avaa selain ~4 sekunnin kuluttua (kun palvelin on pystyssa) ---
 start "" /min cmd /c "ping -n 5 127.0.0.1 >nul & start http://localhost:8000"
 
-REM --- Kaynnista palvelin (jaa tahan pyorimaan) ---
+REM --- Kaynnista palvelin (jaa tahan pyorimaan). 0.0.0.0 = myos puhelin samassa
+REM     wifissa paasee kasiksi; sovellus nayttaa osoitteen ruudulla. Windows voi
+REM     kysya palomuurilupaa ensimmaisella kerralla -> valitse "Salli". ---
 cd backend
-"..\.venv\Scripts\python.exe" -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+"..\.venv\Scripts\python.exe" -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 echo.
 echo  Palvelin sammutettu.

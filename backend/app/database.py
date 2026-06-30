@@ -62,6 +62,8 @@ def ensure_columns():
         ("foods", "category", "VARCHAR(60)"),
         ("foods", "is_favorite", "BOOLEAN DEFAULT 0"),
         ("exercises", "description", "TEXT"),
+        ("programs", "start_date", "DATE"),
+        ("programs", "end_date", "DATE"),
     ]
     inspector = inspect(engine)
     existing_tables = set(inspector.get_table_names())

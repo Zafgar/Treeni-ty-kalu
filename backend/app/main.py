@@ -4,9 +4,10 @@ Tarjoaa REST-API:n (liikkeet, ohjelmat, treenit, laskentamoottori) ja
 serveeraa selainkäyttöliittymän staattisista tiedostoista. Sama palvelin
 toimii PC:llä ja myöhemmin puhelimella (selain / PWA).
 """
+import socket
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -72,6 +73,21 @@ app.include_router(diet.router)
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/api/network-info")
+def network_info(request: Request):
+    """Koneen lähiverkko-IP ja osoite, jolla puhelin yhdistää samassa wifissä."""
+    ip = "127.0.0.1"
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+    except OSError:
+        pass
+    port = request.url.port or 8000
+    return {"lan_ip": ip, "port": port, "phone_url": f"http://{ip}:{port}"}
 
 
 # Serveeraa selainkäyttöliittymä (frontend/) sovelluksen juuresta.
