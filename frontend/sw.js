@@ -1,5 +1,13 @@
 // Service worker — mahdollistaa asennuksen puhelimeen (PWA) ja offline-rungon.
-const CACHE = "treeni-v1";
+//
+// TÄRKEÄÄ: käytä network-first-strategiaa sovelluksen rungolle. Sovellus
+// päivittyy usein, ja se ajetaan omalta koneelta — joten haetaan AINA tuorein
+// versio verkosta kun palvelin on tavoitettavissa, ja turvaudutaan välimuistiin
+// vain offline-tilassa. (Aiempi cache-first jätti vanhan app.js:n näkyviin
+// päivitysten jälkeen.)
+//
+// Versionumeroa nostamalla vanha välimuisti tyhjenee aktivoinnissa.
+const CACHE = "treeni-v3";
 const ASSETS = ["/", "/static/style.css", "/static/app.js", "/icon.svg", "/manifest.json"];
 
 self.addEventListener("install", (e) => {
@@ -17,15 +25,14 @@ self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
   // API: aina verkosta (data on tuoretta), ei välimuistia.
   if (url.pathname.startsWith("/api/")) return;
-  // Staattinen runko: välimuisti ensin, päivitä taustalla.
+  // Staattinen runko: VERKKO ENSIN, päivitä välimuisti; offline -> välimuisti.
   e.respondWith(
-    caches.match(e.request).then((cached) =>
-      cached ||
-      fetch(e.request).then((res) => {
+    fetch(e.request)
+      .then((res) => {
         const copy = res.clone();
         caches.open(CACHE).then((c) => c.put(e.request, copy)).catch(() => {});
         return res;
-      }).catch(() => cached)
-    )
+      })
+      .catch(() => caches.match(e.request))
   );
 });

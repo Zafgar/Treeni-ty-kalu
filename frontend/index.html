@@ -407,8 +407,21 @@
   <script src="/static/app.js"></script>
   <script>
     // Rekisteröi service worker -> sovelluksen voi asentaa puhelimen kotinäytölle.
+    // Kun uusi versio aktivoituu (controllerchange), ladataan sivu kerran
+    // uudelleen, jotta päivitykset näkyvät heti eikä vanha välimuisti jää jumiin.
     if ("serviceWorker" in navigator) {
-      window.addEventListener("load", () => navigator.serviceWorker.register("/sw.js").catch(() => {}));
+      let reloaded = false;
+      navigator.serviceWorker.addEventListener("controllerchange", () => {
+        if (reloaded) return;
+        reloaded = true;
+        window.location.reload();
+      });
+      window.addEventListener("load", async () => {
+        try {
+          const reg = await navigator.serviceWorker.register("/sw.js");
+          reg.update();
+        } catch (e) { /* ohitetaan */ }
+      });
     }
   </script>
 </body>
