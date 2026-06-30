@@ -1,4 +1,6 @@
-fastapi==0.115.6
-uvicorn[standard]==0.34.0
-sqlalchemy==2.0.36
-pydantic==2.10.4
+# Versiot vapaina (>=), jotta pip valitsee koneen Python-versiolle valmiina
+# löytyvät paketit (wheels) eikä yritä kääntää lähdekoodista (vaatisi Rustin).
+fastapi>=0.115
+uvicorn[standard]>=0.30
+sqlalchemy>=2.0.30
+pydantic>=2.9

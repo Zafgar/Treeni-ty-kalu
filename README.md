@@ -32,6 +32,13 @@ tekstipohjainen käynnistyskomento.)
 > Puhelinkäyttöä varten samassa wifissä: muuta `.bat`-tiedostossa `--host 127.0.0.1`
 > muotoon `--host 0.0.0.0`, ja avaa puhelimella `http://<koneen-ip>:8000`.
 
+**Jos asennus epäonnistuu** ("Failed building wheel for pydantic-core" tms.):
+syynä on yleensä **liian uusi Python-versio**, jolle ei vielä ole valmiita
+paketteja (jolloin pip yrittää kääntää lähdekoodista). Korjaus: asenna
+**Python 3.12** (<https://www.python.org/downloads/release/python-3127/>),
+poista projektin `.venv`-kansio ja tuplaklikkaa `.bat` uudelleen. Käynnistys
+osaa nyt myös valita 3.12:n automaattisesti jos se on asennettuna.
+
 ### Mac / Linux
 
 ```bash

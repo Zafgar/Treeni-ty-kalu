@@ -5,38 +5,61 @@ REM  Tuplaklikkaa tata tiedostoa. Se asentaa tarvittavat
 REM  ensimmaisella kerralla, kaynnistaa sovelluksen ja avaa
 REM  selaimen osoitteeseen http://localhost:8000
 REM ============================================================
-setlocal
+setlocal enabledelayedexpansion
 cd /d "%~dp0"
 title Treeni-ty-kalu
 
-REM --- Etsi Python (py-launcher tai python) ---
+REM --- Etsi Python. Suositaan vakaita versioita (3.12/3.11), joille loytyy
+REM     varmasti valmiit paketit. Hyvin uusi versio voi puuttua paketteja. ---
 set "PYEXE="
-where py >nul 2>nul && set "PYEXE=py -3"
+where py >nul 2>nul
+if %errorlevel%==0 (
+  for %%V in (3.12 3.11 3.13 3.10) do (
+    if not defined PYEXE (
+      py -%%V -c "import sys" >nul 2>nul
+      if !errorlevel!==0 set "PYEXE=py -%%V"
+    )
+  )
+  if not defined PYEXE set "PYEXE=py -3"
+)
 if not defined PYEXE (
-  where python >nul 2>nul && set "PYEXE=python"
+  where python >nul 2>nul
+  if !errorlevel!==0 set "PYEXE=python"
 )
 if not defined PYEXE (
   echo.
   echo  Pythonia ei loytynyt koneelta.
-  echo  Asenna Python 3.11 tai uudempi: https://www.python.org/downloads/
+  echo  Asenna Python 3.12: https://www.python.org/downloads/release/python-3127/
   echo  TARKEAA: rastita asennuksessa "Add Python to PATH".
   echo.
   pause
   exit /b 1
 )
+echo  Kaytetaan Pythonia: !PYEXE!
 
-REM --- Ensimmainen kaynnistys: luo ymparisto ja asenna riippuvuudet ---
+REM --- Luo virtuaaliymparisto jos puuttuu ---
 if not exist ".venv\Scripts\python.exe" (
+  echo  Luodaan ymparisto...
+  !PYEXE! -m venv .venv
+)
+
+REM --- Asenna riippuvuudet jos puuttuvat (myos jos edellinen asennus jai kesken) ---
+".venv\Scripts\python.exe" -c "import fastapi, uvicorn, sqlalchemy, pydantic" >nul 2>nul
+if errorlevel 1 (
   echo.
-  echo  Ensimmainen kaynnistys: asennetaan tarvittavat osat...
-  echo  Tama voi kestaa pari minuuttia. Odota rauhassa.
+  echo  Asennetaan tarvittavat osat... Tama voi kestaa pari minuuttia.
   echo.
-  %PYEXE% -m venv .venv
   ".venv\Scripts\python.exe" -m pip install --upgrade pip
   ".venv\Scripts\python.exe" -m pip install -r requirements.txt
+  ".venv\Scripts\python.exe" -c "import fastapi, uvicorn, sqlalchemy, pydantic" >nul 2>nul
   if errorlevel 1 (
     echo.
-    echo  Asennus epaonnistui. Tarkista internetyhteys ja yrita uudelleen.
+    echo  Asennus epaonnistui.
+    echo  Yleisin syy: kayttamasi Python-versio on niin uusi, ettei valmiita
+    echo  paketteja ole viela. Korjaus: asenna Python 3.12 ja kokeile uudelleen:
+    echo    https://www.python.org/downloads/release/python-3127/
+    echo  (Voit poistaa .venv-kansion ennen uutta yritysta.)
+    echo.
     pause
     exit /b 1
   )
