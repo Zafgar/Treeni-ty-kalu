@@ -113,15 +113,32 @@ def convert_scheme(
     )
 
 
-def body_composition(bodyweight: float, body_fat_pct: float, height_cm: float | None = None) -> dict:
+def creatine_water_kg(bodyweight: float) -> float:
+    """Kreatiinin sitoman lihasveden arvio (kg). ~1.1 % kehonpainosta, rajattu
+    0.7–1.6 kg. Tämä on vettä lihaksissa — EI rasvaa — joten se kuuluu
+    rasvattomaan massaan, ei rasvamassaan."""
+    if not bodyweight or bodyweight <= 0:
+        return 0.0
+    return round(max(0.7, min(1.6, bodyweight * 0.011)), 2)
+
+
+def body_composition(bodyweight: float, body_fat_pct: float, height_cm: float | None = None,
+                     creatine: bool = False) -> dict:
     """Arvioi kehon koostumus painosta ja rasvaprosentista.
 
     Palauttaa rasvamassan, rasvattoman massan (lihakset+luut+vesi), FFMI:n
     (rasvattoman massan indeksi, jos pituus annettu) ja BMI:n.
+
+    creatine: jos kreatiini on käytössä, osa painosta on lihasten sitomaa vettä.
+    Se EI ole rasvaa, joten rasvamassa lasketaan painosta josta vesi on poistettu
+    ja vesi luetaan rasvattomaan massaan. Näin rasva-% ei näytä turhaan huonommalta.
     """
-    fat_mass = round(bodyweight * body_fat_pct / 100.0, 1)
+    cre = creatine_water_kg(bodyweight) if creatine else 0.0
+    fat_mass = round((bodyweight - cre) * body_fat_pct / 100.0, 1)
     lean_mass = round(bodyweight - fat_mass, 1)
     out = {"fat_mass_kg": fat_mass, "lean_mass_kg": lean_mass}
+    if creatine:
+        out["creatine_water_kg"] = cre
     if height_cm and height_cm > 0:
         h_m = height_cm / 100.0
         out["bmi"] = round(bodyweight / (h_m * h_m), 1)
@@ -149,6 +166,17 @@ KCAL_PER_KG = 7700.0
 STRENGTH_LEVELS = [
     "Aloittelija", "Harrastaja", "Keskitaso", "Edistynyt",
     "Kokenut", "Piirimestaritaso", "SM-taso (kansallinen)", "Maailmanluokka (EM/MM)",
+]
+# Lyhyt selitys jokaiselle tasolle: mitä se käytännössä tarkoittaa.
+LEVEL_MEANINGS = [
+    "Vasta-alkaja: tekniikka opettelussa, voima nousee nopeasti.",
+    "Säännöllinen treenaaja: perusvoima rakentunut, yli täysin treenamattoman.",
+    "Keskitason harjoittelija: selvästi keskivertoa vahvempi.",
+    "Edistynyt: vuosien johdonmukaisen treenin tulos, vahva tavallisessa salissa.",
+    "Kokenut: erittäin vahva, lähestyy kilpatasoa omassa painoluokassaan.",
+    "Piirimestaritaso: pärjäisi alueellisissa (piirin) kisoissa.",
+    "SM-taso: kansallisen tason kilpailija.",
+    "Maailmanluokka: EM/MM-tason nostaja, lähellä lajin huippua.",
 ]
 FEMALE_FACTOR = 0.72
 
@@ -258,10 +286,13 @@ def strength_level(lift_key: str, one_rm: float, bodyweight: float, sex: str | N
         "lift": lift_key,
         "level_index": level_idx if reached_first else -1,
         "level": STRENGTH_LEVELS[level_idx] if reached_first else "Alle aloittelija",
+        "level_meaning": LEVEL_MEANINGS[level_idx] if reached_first else "Alle aloittelijatason — jatka treeniä, taso nousee pian.",
         "ratio": round(ratio, 2),
         "next_level": STRENGTH_LEVELS[level_idx + 1] if level_idx < len(STRENGTH_LEVELS) - 1 else None,
         "next_threshold_kg": next_threshold_kg,
         "ceiling_kg": round(thresholds[-1] * bodyweight, 1),
+        # Jokaisen 8 tason raja kiloina tällä kehonpainolla -> palkin asteikko
+        "thresholds_kg": [round(t * bodyweight, 1) for t in thresholds],
     }
 
 

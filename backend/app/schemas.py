@@ -228,6 +228,7 @@ class ProfileBase(BaseModel):
     birthdate: date | None = None
     height_cm: float | None = None
     color: str | None = None
+    creatine: bool = False
     notes: str | None = None
 
 
@@ -241,6 +242,7 @@ class ProfileUpdate(BaseModel):
     birthdate: date | None = None
     height_cm: float | None = None
     color: str | None = None
+    creatine: bool | None = None
     notes: str | None = None
 
 

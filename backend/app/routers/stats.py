@@ -534,7 +534,8 @@ def levels(profile_id: int | None = Query(None), db: Session = Depends(get_db)):
             vs_avg = round(rec["current_1rm"] / pop_avg, 1) if pop_avg else None
             result.append({"exercise_name": ex.name, "current_1rm": rec["current_1rm"],
                            "bodyweight": bw, "population_avg": pop_avg, "vs_population": vs_avg, **lvl})
-    return {"bodyweight": bw, "all_levels": engine.STRENGTH_LEVELS, "lifts": result}
+    return {"bodyweight": bw, "all_levels": engine.STRENGTH_LEVELS,
+            "level_meanings": engine.LEVEL_MEANINGS, "lifts": result}
 
 
 @router.get("/body-score")
@@ -565,7 +566,8 @@ def body_score(profile_id: int = Query(...), db: Session = Depends(get_db)):
     bf_e = (db.query(models.BodyEntry).filter(models.BodyEntry.profile_id == profile_id,
             models.BodyEntry.body_fat_pct.isnot(None)).order_by(models.BodyEntry.entry_date.desc()).first())
     if bw_e and bf_e:
-        comp = engine.body_composition(bw_e.bodyweight, bf_e.body_fat_pct, height)
+        creatine = bool(profile.creatine) if profile else False
+        comp = engine.body_composition(bw_e.bodyweight, bf_e.body_fat_pct, height, creatine=creatine)
         physique = engine.physique_level(comp.get("ffmi"), sex)
 
     # Voimataso: pääliikkeiden keskimääräinen taso (0–7) -> 0–100

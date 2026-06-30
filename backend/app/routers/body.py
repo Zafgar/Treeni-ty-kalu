@@ -113,9 +113,11 @@ def body_summary(profile_id: int = Query(...), db: Session = Depends(get_db)):
     physique = None
     if latest_w and latest_bf:
         height = profile.height_cm if profile else None
-        composition = engine.body_composition(latest_w.bodyweight, latest_bf.body_fat_pct, height)
+        creatine = bool(profile.creatine) if profile else False
+        composition = engine.body_composition(latest_w.bodyweight, latest_bf.body_fat_pct, height, creatine=creatine)
         composition["bodyweight"] = latest_w.bodyweight
         composition["body_fat_pct"] = latest_bf.body_fat_pct
+        composition["creatine"] = creatine
         # Fysiikkataso (aloittelija → IFBB Pro) FFMI:stä
         physique = engine.physique_level(composition.get("ffmi"), profile.sex if profile else None)
 
@@ -168,6 +170,9 @@ def body_summary(profile_id: int = Query(...), db: Session = Depends(get_db)):
         "body_fat_series": bf_series,
         "composition": composition,
         "physique": physique,
+        "height_cm": height,
+        "sex": sex,
+        "creatine": bool(profile.creatine) if profile else False,
         "measurement_sites": by_site,
         "measurement_forecasts": measurement_forecasts,
         "measurement_insights": measurement_insights,

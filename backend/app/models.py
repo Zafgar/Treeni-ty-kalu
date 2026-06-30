@@ -46,6 +46,8 @@ class Profile(Base):
     height_cm: Mapped[float | None] = mapped_column(Float, nullable=True)
     # Korostusväri UI:ssa (esim. "#4f8cff")
     color: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Onko kreatiini käytössä -> osa painosta on lihasvettä, ei rasvaa
+    creatine: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 

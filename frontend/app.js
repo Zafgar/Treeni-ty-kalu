@@ -891,18 +891,47 @@ async function loadLevels() {
     div.append(el("p", { class: "muted" }, "Kirjaa pääliikkeitä (kyykky, penkki, maastaveto, pystypunnerrus) nähdäksesi tason."));
     return;
   }
+  // Selite kaikista tasoista (avattava) — mitä mikäkin taso tarkoittaa
+  const meanings = data.level_meanings || [];
+  const legendWrap = el("div", { class: "hidden" });
+  data.all_levels.forEach((name, i) => {
+    legendWrap.append(el("div", { class: "muted", style: "margin:2px 0" },
+      el("strong", { style: "color:var(--text)" }, `${i + 1}. ${name}: `), meanings[i] || ""));
+  });
+  const legBtn = el("button", { class: "small", onclick: () => {
+    const open = !legendWrap.classList.toggle("hidden");
+    legBtn.textContent = open ? "▾ Mitä tasot tarkoittavat" : "▸ Mitä tasot tarkoittavat";
+  } }, "▸ Mitä tasot tarkoittavat");
+  div.append(el("div", { style: "margin-bottom:10px" }, legBtn, legendWrap));
+
   data.lifts.forEach((l) => {
-    const pct = Math.min(100, Math.round(((l.level_index + 1) / data.all_levels.length) * 100));
+    const total = data.all_levels.length;
     const box = el("div", { class: "item" },
       el("div", { class: "row-between" },
         el("strong", {}, l.exercise_name),
-        el("span", { class: "tag main" }, `${l.level} (${l.ratio}× paino)`)),
-      el("div", { class: "level-bar" }, el("div", { class: "level-fill", style: `width:${pct}%` })),
-      el("div", { class: "muted" },
-        `${l.current_1rm} kg` + (l.next_level ? ` · seuraava: ${l.next_level} @ ${l.next_threshold_kg} kg` : " · huipputaso!")));
+        el("span", { class: "tag main", title: l.level_meaning || "" }, `${l.level} (${l.ratio}× paino)`)));
+
+    // Segmentoitu palkki: jokainen 8 tasosta oma lohko. Värillinen = saavutettu.
+    // Hover näyttää tason nimen, rajan kiloina ja merkityksen.
+    const seg = el("div", { class: "seg-bar" });
+    (l.thresholds_kg || []).forEach((thr, i) => {
+      const reached = i <= l.level_index;
+      const isCurrent = i === l.level_index;
+      seg.append(el("div", {
+        class: "seg" + (reached ? " on" : "") + (isCurrent ? " current" : ""),
+        title: `${data.all_levels[i]} — raja ${thr} kg` + (meanings[i] ? `\n${meanings[i]}` : ""),
+      }));
+    });
+    box.append(seg);
+
+    // Nykytaso + sen merkitys + seuraavan tason raja kiloina
+    box.append(el("div", { class: "muted", style: "margin-top:6px" }, l.level_meaning || ""));
+    box.append(el("div", { class: "muted" },
+      `Arvioitu 1RM ${l.current_1rm} kg` +
+      (l.next_level ? ` · seuraavaan tasoon (${l.next_level}) tarvitaan ${l.next_threshold_kg} kg` : " · olet huipputasolla!")));
     if (l.population_avg) {
       box.append(el("div", { class: "muted" },
-        `Väestön keskiarvo painoluokassasi ~${l.population_avg} kg · sinä ${l.vs_population}× keskiarvo`));
+        `Väestön keskiarvo painollasi ~${l.population_avg} kg · sinä ${l.vs_population}× keskiarvo`));
     }
     div.append(box);
   });
@@ -1346,16 +1375,140 @@ async function renderBodypartLevels() {
   });
 }
 
+// ---- Kehon hahmo mittojen suhteista (SVG, etukuva) ----
+function svgEl(tag, attrs) {
+  const e = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  return e;
+}
+
+function renderBodyFigure(sites, height) {
+  const area = document.getElementById("figure-area");
+  const dateWrap = document.getElementById("figure-date-wrap");
+  area.innerHTML = ""; dateWrap.innerHTML = "";
+  const siteNames = Object.keys(sites || {});
+  if (!siteNames.length) {
+    area.append(el("p", { class: "muted" }, "Lisää ympärysmittoja (vyötärö, hartia, reisi…) niin piirrän hahmon."));
+    return;
+  }
+  // Kaikki mittauspäivät (uniikit, järjestyksessä)
+  const dateSet = new Set();
+  siteNames.forEach((s) => sites[s].forEach((p) => dateSet.add(p.date)));
+  const dates = [...dateSet].sort();
+
+  function valueAsOf(site, dateStr) {
+    if (!sites[site]) return null;
+    let v = null;
+    for (const p of sites[site]) { if (p.date <= dateStr) v = p.value; }
+    return v;
+  }
+
+  function draw(dateStr) {
+    area.innerHTML = "";
+    const h = height || 178; // px-skaala pituuden mukaan
+    // cm -> kuvan leveys: puolikas etuleveys ≈ (ympärys/π/2), skaalattuna pituuteen
+    const FIG_H = 360, cx = 150;
+    const pxPerCm = FIG_H / h;
+    // Oletukset jos mitta puuttuu (keskiverto, suhteessa pituuteen)
+    const def = { hartia: h * 0.62, rintakehä: h * 0.55, vyötärö: h * 0.46,
+      lantio: h * 0.52, hauis: h * 0.18, reisi: h * 0.30, pohje: h * 0.21, kaula: h * 0.21 };
+    const m = (site) => {
+      const v = valueAsOf(site, dateStr);
+      return { v: v, w: ((v != null ? v : def[site]) / Math.PI) * pxPerCm * 1.15, real: v != null };
+    };
+    const sh = m("hartia"), ch = m("rintakehä"), wa = m("vyötärö"), hip = m("lantio"),
+      arm = m("hauis"), th = m("reisi"), ca = m("pohje"), neck = m("kaula");
+
+    const svg = svgEl("svg", { viewBox: "0 0 300 430", width: "240", height: "344",
+      style: "max-width:100%" });
+    const grad = "url(#bodyGrad)";
+    const defs = svgEl("defs", {});
+    const lg = svgEl("linearGradient", { id: "bodyGrad", x1: "0", y1: "0", x2: "0", y2: "1" });
+    lg.append(svgEl("stop", { offset: "0", "stop-color": "#4f8cff" }));
+    lg.append(svgEl("stop", { offset: "1", "stop-color": "#34d399" }));
+    defs.append(lg); svg.append(defs);
+
+    // Pystytasot
+    const yNeck = 60, yShoulder = 78, yChest = 120, yWaist = 190, yHip = 225, yKnee = 320, yAnkle = 405;
+    // Pää
+    svg.append(svgEl("circle", { cx, cy: 36, r: 22, fill: grad }));
+    // Kaula
+    svg.append(svgEl("rect", { x: cx - neck.w / 2, y: yNeck - 6, width: neck.w, height: 18, fill: grad, rx: 4 }));
+    // Vartalo: hartia -> rinta -> vyötärö -> lantio (polygoni, peilataan)
+    const torso = [
+      [cx - sh.w, yShoulder], [cx + sh.w, yShoulder],
+      [cx + ch.w, yChest], [cx + wa.w, yWaist], [cx + hip.w, yHip],
+      [cx - hip.w, yHip], [cx - wa.w, yWaist], [cx - ch.w, yChest],
+    ].map((p) => p.join(",")).join(" ");
+    svg.append(svgEl("polygon", { points: torso, fill: grad, opacity: "0.92" }));
+    // Kädet (olkavarren leveys hauiksesta)
+    [-1, 1].forEach((d) => {
+      const xTop = cx + d * (sh.w - 2);
+      svg.append(svgEl("path", {
+        d: `M ${xTop} ${yShoulder + 2} q ${d * (arm.w)} 40 ${d * (arm.w * 0.5)} 110`,
+        stroke: grad, "stroke-width": Math.max(8, arm.w * 1.1), "stroke-linecap": "round", fill: "none",
+      }));
+    });
+    // Jalat (reisi -> pohje)
+    [-1, 1].forEach((d) => {
+      const xHip = cx + d * (hip.w * 0.5);
+      svg.append(svgEl("line", { x1: xHip, y1: yHip, x2: xHip, y2: yKnee,
+        stroke: grad, "stroke-width": Math.max(10, th.w * 1.2), "stroke-linecap": "round" }));
+      svg.append(svgEl("line", { x1: xHip, y1: yKnee, x2: xHip, y2: yAnkle,
+        stroke: grad, "stroke-width": Math.max(8, ca.w * 1.2), "stroke-linecap": "round" }));
+    });
+    area.append(svg);
+
+    // Mitat-listaus hahmon alle (oikeat vs. oletetut)
+    const order = ["hartia", "rintakehä", "vyötärö", "lantio", "hauis", "reisi", "pohje"];
+    const mm = { hartia: sh, rintakehä: ch, vyötärö: wa, lantio: hip, hauis: arm, reisi: th, pohje: ca };
+    const info = el("div", { class: "btn-row", style: "justify-content:center;margin-top:6px" });
+    order.forEach((site) => {
+      const o = mm[site];
+      info.append(el("span", { class: "tag" + (o.real ? "" : " "), style: o.real ? "" : "opacity:0.5" },
+        `${site} ${o.v != null ? o.v + "cm" : "—"}`));
+    });
+    area.append(info);
+    if (order.some((s) => !mm[s].real)) {
+      area.append(el("div", { class: "muted", style: "margin-top:4px" },
+        "Himmeät kohdat ovat arvioita (mitta puuttuu) — lisää mitta tarkentaaksesi hahmoa."));
+    }
+  }
+
+  // Aikajana jos useita päiviä
+  if (dates.length > 1) {
+    const slider = el("input", { type: "range", min: "0", max: String(dates.length - 1),
+      value: String(dates.length - 1), style: "width:100%" });
+    const lbl = el("div", { class: "muted", style: "text-align:center" }, dates[dates.length - 1]);
+    slider.addEventListener("input", () => { lbl.textContent = dates[+slider.value]; draw(dates[+slider.value]); });
+    dateWrap.append(slider, lbl);
+  }
+  draw(dates[dates.length - 1]);
+}
+
 async function loadBody() {
   document.getElementById("b-date").value = new Date().toISOString().slice(0, 10);
   document.getElementById("m-date").value = new Date().toISOString().slice(0, 10);
   const s = await api.get(pq("/api/body/summary"));
   renderBodyScore();
   renderBodypartLevels();
+  renderBodyFigure(s.measurement_sites, s.height_cm);
 
   // Koostumus
   const comp = document.getElementById("composition");
   comp.innerHTML = "";
+
+  // Kreatiini päällä/pois -kytkin: vaikuttaa koostumusarvioon (lihasvesi ≠ rasva)
+  const creToggle = el("input", { type: "checkbox" });
+  creToggle.checked = !!s.creatine;
+  creToggle.addEventListener("change", async () => {
+    await api.patch(`/api/profiles/${currentProfileId}`, { creatine: creToggle.checked });
+    loadBody();
+  });
+  comp.append(el("label", { class: "btn-row", style: "align-items:center;gap:8px;margin:0 0 10px",
+    title: "Kreatiini sitoo lihaksiin vettä (~1 kg). Se ei ole rasvaa, joten päällä ollessa rasvamassa lasketaan tarkemmin." },
+    creToggle, el("span", {}, "Kreatiini käytössä")));
+
   if (s.composition) {
     const c = s.composition;
     comp.append(el("div", { class: "result-box" },
@@ -1363,7 +1516,8 @@ async function loadBody() {
       el("div", { class: "big" }, `Lihasmassa ~${c.lean_mass_kg} kg`),
       el("div", { class: "muted" },
         `Rasvamassa ~${c.fat_mass_kg} kg` +
-        (c.bmi ? ` · BMI ${c.bmi}` : "") + (c.ffmi ? ` · FFMI ${c.ffmi}` : ""))));
+        (c.bmi ? ` · BMI ${c.bmi}` : "") + (c.ffmi ? ` · FFMI ${c.ffmi}` : "") +
+        (c.creatine_water_kg ? ` · josta kreatiinivettä ~${c.creatine_water_kg} kg (ei rasvaa)` : ""))));
     // Fysiikkataso (aloittelija → IFBB Pro)
     if (s.physique) {
       const p = s.physique;
