@@ -1226,6 +1226,27 @@ document.getElementById("diet-start").addEventListener("click", async () => {
   renderDietStatus();
 });
 
+document.getElementById("mp-go").addEventListener("click", async () => {
+  const v = (id) => document.getElementById(id).value;
+  const path = `/api/diet/meal-plan?meals=${+v("mp-meals") || 4}` +
+    `&wake=${v("mp-wake")}&sleep=${v("mp-sleep")}` + (v("mp-train") ? `&training=${v("mp-train")}` : "");
+  const r = await api.get(pq(path));
+  const div = document.getElementById("mp-result");
+  div.innerHTML = "";
+  if (!r.meals || !r.meals.length) {
+    div.append(el("p", { class: "muted" }, r.message || "Ei aikataulua.")); return;
+  }
+  if (r.fasting) div.append(el("div", { class: "muted", style: "margin:8px 0" }, "16:8-paasto: syönti-ikkuna rajattu."));
+  const tbl = el("table", {});
+  tbl.append(el("tr", {}, el("th", {}, "Aika"), el("th", {}, "Ateria"),
+    el("th", {}, "kcal"), el("th", {}, "P"), el("th", {}, "H"), el("th", {}, "R"), el("th", {}, "")));
+  r.meals.forEach((m) => tbl.append(el("tr", {},
+    el("td", {}, m.time), el("td", {}, m.label), el("td", {}, String(m.kcal)),
+    el("td", {}, `${m.protein_g}g`), el("td", {}, `${m.carbs_g}g`), el("td", {}, `${m.fat_g}g`),
+    el("td", { class: "muted" }, m.note || ""))));
+  div.append(tbl);
+});
+
 async function renderDietStatus() {
   const s = await api.get(pq("/api/diet/status"));
   const div = document.getElementById("diet-status");

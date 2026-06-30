@@ -35,6 +35,32 @@ uvicorn app.main:app --reload
 
 API-dokumentaatio (Swagger UI): <http://localhost:8000/docs>
 
+## Käyttö puhelimella (Android / iPhone)
+
+Sovellus toimii **samalla palvelimella** sekä tietokoneella että puhelimella —
+puhelimeen ei tarvitse ladata mitään GitHubista. Käyttöliittymä on responsiivinen
+(välilehdet swipe-rivinä, taulukot vierivät, kentät pinoutuvat) ja toimii sekä
+PC:n leveällä että puhelimen kapealla näytöllä.
+
+Testaaminen Android-puhelimella (puhelin ja tietokone samassa wifi-verkossa):
+
+1. **Käynnistä palvelin tietokoneella** niin että se kuuntelee koko verkkoa
+   (run.sh tekee tämän jo: `--host 0.0.0.0`). Käsin: `uvicorn app.main:app --host 0.0.0.0 --port 8000`.
+2. **Selvitä tietokoneen lähiverkko-IP**, esim. `192.168.1.50`
+   (Windows: `ipconfig`, Mac/Linux: `ip addr` / `ifconfig`).
+3. **Avaa puhelimen selaimessa** osoite `http://192.168.1.50:8000`
+   (käytä koneesi IP:tä). Sovellus aukeaa heti.
+4. **Asenna kotinäytölle (PWA):** Chrome Android → valikko (⋮) → *Lisää
+   aloitusnäyttöön* / *Asenna sovellus*. Tämän jälkeen se avautuu omana
+   sovelluksenaan ilman selainpalkkia. (iPhone: Safari → Jaa → *Lisää
+   Koti-valikkoon*.)
+
+> Data tallentuu aina **tietokoneelle** (`data/treeni.db`), ei puhelimeen —
+> puhelin on vain näyttö/käyttöliittymä, joka ottaa yhteyden koneeseen.
+> Jos haluat käyttää sovellusta ilman omaa konetta päällä, se pitää myöhemmin
+> viedä palvelimelle (esim. pieni VPS tai pilvipalvelu) — voin auttaa siinä kun
+> on ajankohtaista.
+
 ## Testit
 
 ```bash
@@ -86,6 +112,10 @@ python -m pytest backend/tests/ -q
   **liikaa/liian vähän -varoitus** dieettitavoitteeseen nähden; makrojen
   (kcal/P/H/R) kehitysgraafi. **Omat ateriat** (esim. smoothie = maito + marjat +
   whey) tallennetaan ja pikakirjataan yhdellä napilla.
+- **Ateria-aikataulu (ravinnejaksotus):** jaksottaa päivän makrot aterioille
+  (2–8 kpl) kellonaikojen ja treeniajan mukaan — treenin ympärille enemmän
+  hiilaria, kauemmas rasvaa; proteiini tasan. 16:8-mallilla syönti-ikkuna
+  rajataan automaattisesti.
 - **Liikekirjasto:** valmiit liikkeet kategorioittain (rinta, selkä, jalat,
   olkapäät, hauis, ojentajat, vatsa, pohkeet, olympia) ja välineittäin (tanko,
   käsipainot, talja, kone, keho, kahvakuula); kukin järkevillä oletussarjoilla.

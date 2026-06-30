@@ -139,6 +139,22 @@
         </div>
         <div id="diet-model-info" class="muted"></div>
       </div>
+
+      <div class="card">
+        <h3>Ateria-aikataulu (ravinnejaksotus)</h3>
+        <p class="muted">Jaksottaa päivän makrot aterioille kellonaikojen ja treeniajan
+          mukaan — treenin ympärille enemmän hiilaria. 16:8-mallilla syönti-ikkuna
+          rajataan automaattisesti.</p>
+        <div class="grid">
+          <label>Aterioita/pv<input id="mp-meals" type="number" value="4" min="2" max="8" /></label>
+          <label>Herätys<input id="mp-wake" type="time" value="07:00" /></label>
+          <label>Nukkumaan<input id="mp-sleep" type="time" value="23:00" /></label>
+          <label>Treeniaika<input id="mp-train" type="time" value="17:00" /></label>
+        </div>
+        <button id="mp-go" class="primary">Rakenna aikataulu</button>
+        <div id="mp-result"></div>
+      </div>
+
       <div id="diet-status"></div>
     </section>
 

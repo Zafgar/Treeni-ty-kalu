@@ -453,6 +453,111 @@ def day_targets(targets: dict, training_days: int, workout_kcal_avg: float | Non
     }
 
 
+def _parse_clock(s: str | None, default_min: int) -> int:
+    """Muunna 'HH:MM' minuuteiksi keskiyöstä."""
+    if not s:
+        return default_min
+    try:
+        h, m = s.split(":")
+        return int(h) * 60 + int(m)
+    except (ValueError, AttributeError):
+        return default_min
+
+
+def _fmt_clock(minutes: int) -> str:
+    minutes = max(0, min(24 * 60 - 1, int(round(minutes))))
+    return f"{minutes // 60:02d}:{minutes % 60:02d}"
+
+
+def _meal_label(idx: int, total: int) -> str:
+    """Anna aterialle järkevä nimi sijainnin ja määrän mukaan."""
+    if idx == 0:
+        return "Aamupala"
+    if idx == total - 1:
+        return "Iltapala" if total >= 4 else "Päivällinen"
+    # Keskimmäiset: lounas ja päivällinen pääaterioina, muut välipaloja
+    mid = total // 2
+    if idx == mid:
+        return "Lounas"
+    if idx == total - 2 and total >= 4:
+        return "Päivällinen"
+    return "Välipala"
+
+
+def meal_schedule(targets: dict, meals: int, wake: str | None = None,
+                  sleep: str | None = None, training: str | None = None,
+                  fasting_16_8: bool = False) -> list[dict]:
+    """Jaksota päivän makrot aterioille kellonaikojen ja treenin mukaan.
+
+    - Proteiini jaetaan tasaisesti (paras lihasten kannalta).
+    - Hiilarit painottuvat treenin ympärille (ennen/jälkeen treenin enemmän).
+    - Rasva painottuu treenistä kauempana oleviin aterioihin.
+    - 16:8: syönti-ikkuna rajataan 8 tuntiin.
+    """
+    meals = max(2, min(8, meals))
+    wake_min = _parse_clock(wake, 7 * 60)
+    sleep_min = _parse_clock(sleep, 23 * 60)
+
+    if fasting_16_8:
+        eat_start = wake_min + 5 * 60   # esim. herää 7 -> syönti alkaa 12
+        eat_end = eat_start + 8 * 60
+    else:
+        eat_start = wake_min + 60
+        eat_end = sleep_min - 60
+    if eat_end <= eat_start:
+        eat_end = eat_start + 8 * 60
+
+    # Ateria-ajat tasaisin välein syönti-ikkunassa
+    if meals == 1:
+        times = [(eat_start + eat_end) // 2]
+    else:
+        step = (eat_end - eat_start) / (meals - 1)
+        times = [round(eat_start + step * i) for i in range(meals)]
+
+    training_min = _parse_clock(training, None) if training else None
+
+    # Hiilaripainot: treenin ympärillä isommat
+    carb_w = [1.0] * meals
+    pre_idx = post_idx = None
+    if training_min is not None:
+        before = [(i, t) for i, t in enumerate(times) if t <= training_min]
+        after = [(i, t) for i, t in enumerate(times) if t >= training_min]
+        if before:
+            pre_idx = max(before, key=lambda x: x[1])[0]
+            carb_w[pre_idx] = 1.6
+        if after:
+            post_idx = min(after, key=lambda x: x[1])[0]
+            carb_w[post_idx] = 1.8
+
+    carb_w_sum = sum(carb_w)
+    # Rasvapainot: hiilaripainojen käänteisarvo (rasvaa pois treeniaterioista)
+    fat_w = [1.0 / w for w in carb_w]
+    fat_w_sum = sum(fat_w)
+
+    total_p = targets["protein_g"]
+    total_c = targets["carbs_g"]
+    total_f = targets["fat_g"]
+
+    plan = []
+    for i in range(meals):
+        p = round(total_p / meals)
+        c = round(total_c * carb_w[i] / carb_w_sum)
+        f = round(total_f * fat_w[i] / fat_w_sum)
+        kcal = round(p * 4 + c * 4 + f * 9)
+        note = ""
+        if i == pre_idx:
+            note = "ennen treeniä — enemmän hiilaria"
+        elif i == post_idx:
+            note = "treenin jälkeen — palautushiilarit + proteiini"
+        plan.append({
+            "time": _fmt_clock(times[i]),
+            "label": _meal_label(i, meals),
+            "kcal": kcal, "protein_g": p, "carbs_g": c, "fat_g": f,
+            "note": note,
+        })
+    return plan
+
+
 def weekly_review(target_daily_kcal: float, actual_avg_kcal: float | None,
                   target_rate: float, actual_rate: float | None) -> dict:
     """Viikkoyhteenveto: kalorien noudattaminen ja tahdin osuvuus tavoitteeseen."""

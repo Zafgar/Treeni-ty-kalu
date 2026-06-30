@@ -126,6 +126,31 @@ def test_day_targets_no_cycling():
     assert engine.day_targets(targets, 7)["cycled"] is False
 
 
+def test_meal_schedule():
+    targets = {"kcal": 2400, "protein_g": 180, "carbs_g": 250, "fat_g": 70}
+    plan = engine.meal_schedule(targets, meals=4, wake="07:00", sleep="23:00", training="17:00")
+    assert len(plan) == 4
+    # Proteiini jaettu tasaisesti
+    assert all(m["protein_g"] == 45 for m in plan)
+    # Makrosummat säilyvät suunnilleen
+    assert abs(sum(m["protein_g"] for m in plan) - 180) <= 4
+    assert abs(sum(m["carbs_g"] for m in plan) - 250) <= 4
+    # Treenin ympärillä on hiilaripainotteinen ateria (note asetettu)
+    assert any("treeni" in m["note"].lower() for m in plan)
+    # Ajat nousevat
+    times = [m["time"] for m in plan]
+    assert times == sorted(times)
+
+
+def test_meal_schedule_fasting():
+    targets = {"kcal": 2000, "protein_g": 160, "carbs_g": 180, "fat_g": 60}
+    plan = engine.meal_schedule(targets, meals=3, wake="07:00", fasting_16_8=True)
+    # Syönti alkaa noin 12:00 (herää 7 + 5 h)
+    assert plan[0]["time"] >= "11:30"
+    # Viimeinen ateria ennen 20:30 (8 h ikkuna)
+    assert plan[-1]["time"] <= "20:30"
+
+
 def test_weekly_review():
     r = engine.weekly_review(2500, 2480, -0.5, -0.5)
     assert r["target_weekly_kcal"] == 17500

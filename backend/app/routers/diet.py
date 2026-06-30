@@ -265,3 +265,68 @@ def diet_status(profile_id: int = Query(...), db: Session = Depends(get_db)):
         "strength_note": strength_note,
         "body_areas": _area_assessment(db, profile_id),
     }
+
+
+def _current_targets(db: Session, profile_id: int) -> tuple[dict | None, bool]:
+    """Laske tämänhetkiset päivätavoitteet (sama logiikka kuin statuksessa).
+    Palauttaa (targets, is_fasting). Käytetään ateria-aikataulussa."""
+    phase = (
+        db.query(models.DietPhase)
+        .filter(models.DietPhase.profile_id == profile_id, models.DietPhase.is_active.is_(True))
+        .first()
+    )
+    goal = phase.goal if phase else "maintain"
+    target_rate = phase.target_rate if phase else 0.0
+    entries = (
+        db.query(models.BodyEntry)
+        .filter(models.BodyEntry.profile_id == profile_id, models.BodyEntry.bodyweight.isnot(None))
+        .order_by(models.BodyEntry.entry_date)
+        .all()
+    )
+    points = [(e.entry_date, e.bodyweight) for e in entries]
+    if not points:
+        return None, False
+    ref_date = max(d for d, _ in points)
+    week_avg = engine.weekly_average(points, ref_date, 7) or points[-1][1]
+    kcal_by_date = _daily_kcal(db, profile_id)
+    start = ref_date - timedelta(days=13)
+    intake_days = [kcal_by_date[d] for d in kcal_by_date if start <= d <= ref_date]
+    avg_intake = sum(intake_days) / len(intake_days) if intake_days else None
+    w_start = engine.weekly_average(points, start + timedelta(days=6), 7)
+    w_end = engine.weekly_average(points, ref_date, 7)
+    weight_change = (w_end - w_start) if (w_start and w_end) else 0.0
+    tdee = engine.adaptive_tdee(avg_intake, weight_change, 14) if avg_intake else None
+    if not tdee:
+        tdee = round(week_avg * 33)
+    model = next((m for m in DIET_MODELS if phase and m["name"] == phase.model), None)
+    low_carb = bool(model and model.get("low_carb"))
+    fasting = bool(model and model["id"] == "cut_16_8")
+    targets = engine.macro_targets(week_avg, goal, tdee, target_rate, low_carb=low_carb)
+    return targets, fasting
+
+
+@router.get("/meal-plan")
+def meal_plan(
+    profile_id: int = Query(...),
+    meals: int = Query(4),
+    wake: str | None = Query(None),
+    sleep: str | None = Query(None),
+    training: str | None = Query(None),
+    db: Session = Depends(get_db),
+):
+    """Jaksota päivän makrot aterioille kellonaikojen ja treeniajan mukaan.
+
+    meals: aterioiden määrä (sisältää välipalat). wake/sleep/training: 'HH:MM'.
+    16:8-paastomalli rajaa syönti-ikkunan automaattisesti.
+    """
+    targets, fasting = _current_targets(db, profile_id)
+    if not targets:
+        return {"message": "Aseta dieettivaihe ja kirjaa paino, niin saat ateria-aikataulun.",
+                "meals": []}
+    plan = engine.meal_schedule(targets, meals, wake, sleep, training, fasting_16_8=fasting)
+    return {
+        "targets": targets,
+        "fasting": fasting,
+        "meals_per_day": meals,
+        "meals": plan,
+    }
