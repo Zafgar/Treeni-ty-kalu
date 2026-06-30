@@ -327,6 +327,23 @@ def test_proportion_score():
     assert engine.proportion_score({}, 180) is None
 
 
+def test_bodypart_level():
+    # Iso hauis (45cm @180cm = 0.25) -> korkea taso
+    big = engine.bodypart_level("hauis", 45, 180, "mies")
+    assert big["level_index"] >= 4
+    small = engine.bodypart_level("hauis", 32, 180, "mies")
+    assert small["level_index"] <= 0
+    # Vyötärö käänteinen: ohut vyötärö (76cm @180 = 0.42) -> korkea taso
+    lean = engine.bodypart_level("vyötärö", 76, 180)
+    fat = engine.bodypart_level("vyötärö", 100, 180)
+    assert lean["level_index"] > fat["level_index"]
+    assert lean["reversed"] is True
+    # Tuntematon kohta
+    assert engine.bodypart_level("nilkka", 22, 180) is None
+    # Ilman pituutta
+    assert engine.bodypart_level("hauis", 40, None) is None
+
+
 def test_population_average():
     avg = engine.population_average("squat", 100, "mies")
     assert avg == 90.0  # 0.9 * 100

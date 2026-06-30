@@ -438,6 +438,71 @@ MEAS_CEILING_MULT = {
 FEMALE_MEAS_FACTOR = 0.85
 
 
+# Kehon osien tasot (7 porrasta) ympärysmitta/pituus -suhteena. Kasvukohdille
+# nouseva (isompi = parempi), vyötärölle käänteinen (pienempi = parempi).
+BODYPART_LEVELS = [
+    "Keskiverto", "Harrastaja", "Keskitaso", "Edistynyt",
+    "Kokenut", "Eliitti (natural-huippu)", "IFBB Pro -luokka",
+]
+BODYPART_STANDARDS = {  # kasvukohdat: pituuskerroin nousevasti
+    "hauis": [0.18, 0.20, 0.215, 0.23, 0.245, 0.26, 0.28],
+    "rintakehä": [0.55, 0.59, 0.62, 0.65, 0.68, 0.71, 0.74],
+    "reisi": [0.30, 0.32, 0.34, 0.36, 0.38, 0.40, 0.42],
+    "pohje": [0.19, 0.205, 0.215, 0.225, 0.235, 0.245, 0.255],
+    "hartia": [0.60, 0.63, 0.66, 0.69, 0.72, 0.75, 0.78],
+    "kyynärvarsi": [0.155, 0.165, 0.175, 0.185, 0.195, 0.205, 0.215],
+    "forkku": [0.155, 0.165, 0.175, 0.185, 0.195, 0.205, 0.215],
+}
+WAIST_STANDARD = [0.52, 0.50, 0.48, 0.46, 0.44, 0.42, 0.40]  # vyötärö: pienempi parempi
+
+
+def bodypart_level(site: str, value_cm: float, height_cm: float | None,
+                   sex: str | None = None) -> dict | None:
+    """Luokittele kehon osa väestön keskiarvosta IFBB Pro -luokkaan pituuteen
+    suhteutettuna. Vyötärö käänteisesti (pienempi vyötärö = korkeampi taso)."""
+    if not height_cm or height_cm <= 0 or not value_cm:
+        return None
+    s = (site or "").lower()
+    ratio = value_cm / height_cm
+    female = (sex or "").lower().startswith("nain")
+
+    if s == "vyötärö":
+        thresholds = WAIST_STANDARD
+        idx = -1
+        for i, t in enumerate(thresholds):
+            if ratio <= t:
+                idx = i
+        reached = ratio <= thresholds[0]
+        avg_cm = round(thresholds[0] * height_cm, 1)
+        top_cm = round(thresholds[-1] * height_cm, 1)
+    elif s in BODYPART_STANDARDS:
+        factor = FEMALE_FACTOR if female else 1.0  # naisilla pienemmät kerrat
+        # huom: vain lievä skaalaus, ei yhtä jyrkkä kuin voimassa
+        factor = 0.9 if female else 1.0
+        thresholds = [t * factor for t in BODYPART_STANDARDS[s]]
+        idx = -1
+        for i, t in enumerate(thresholds):
+            if ratio >= t:
+                idx = i
+        reached = ratio >= thresholds[0]
+        avg_cm = round(thresholds[0] * height_cm, 1)
+        top_cm = round(thresholds[-1] * height_cm, 1)
+    else:
+        return None
+
+    return {
+        "site": site,
+        "value_cm": value_cm,
+        "level_index": idx if reached else -1,
+        "level": BODYPART_LEVELS[idx] if reached else ("Yli keskiarvon (paljon vyötäröä)" if s == "vyötärö" else "Alle keskiarvon"),
+        "ratio": round(ratio, 3),
+        "population_avg_cm": avg_cm,
+        "elite_cm": top_cm,
+        "levels": BODYPART_LEVELS,
+        "reversed": s == "vyötärö",
+    }
+
+
 def measurement_ceiling(site: str, height_cm: float | None, sex: str | None = None) -> float | None:
     """Arvioitu luonnollinen kattomitta (cm) pituuden mukaan. Vyötärölle None."""
     if not height_cm:

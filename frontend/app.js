@@ -1127,11 +1127,37 @@ async function renderBodyScore() {
   div.append(el("div", { class: "muted", style: "margin-top:6px" }, bs.note));
 }
 
+async function renderBodypartLevels() {
+  const div = document.getElementById("bodypart-levels");
+  div.innerHTML = "";
+  const data = await api.get(pq("/api/stats/bodypart-levels"));
+  if (!data.height_cm) {
+    div.append(el("p", { class: "muted" }, "Aseta pituus profiiliin nähdäksesi kehon osien tasot.")); return;
+  }
+  if (!data.parts.length) {
+    div.append(el("p", { class: "muted" }, "Lisää ympärysmittoja nähdäksesi osien tasot.")); return;
+  }
+  const total = data.all_levels.length;
+  data.parts.forEach((p) => {
+    const pct = p.level_index < 0 ? 4 : Math.round(((p.level_index + 1) / total) * 100);
+    const ref = p.reversed
+      ? `keskiarvo ~${p.population_avg_cm} cm · huippu(ohut) ~${p.elite_cm} cm`
+      : `keskiarvo ~${p.population_avg_cm} cm · huippu ~${p.elite_cm} cm`;
+    div.append(el("div", { class: "item" },
+      el("div", { class: "row-between" },
+        el("strong", { style: "text-transform:capitalize" }, p.site),
+        el("span", { class: "tag main" }, `${p.level} (${p.value_cm} cm)`)),
+      el("div", { class: "level-bar" }, el("div", { class: "level-fill", style: `width:${pct}%` })),
+      el("div", { class: "muted" }, `${ref} · sinä ${p.vs_population}× keskiarvo`)));
+  });
+}
+
 async function loadBody() {
   document.getElementById("b-date").value = new Date().toISOString().slice(0, 10);
   document.getElementById("m-date").value = new Date().toISOString().slice(0, 10);
   const s = await api.get(pq("/api/body/summary"));
   renderBodyScore();
+  renderBodypartLevels();
 
   // Koostumus
   const comp = document.getElementById("composition");

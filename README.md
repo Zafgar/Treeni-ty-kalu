@@ -175,6 +175,10 @@ python -m pytest backend/tests/ -q
 - **Kehon pisteet:** suhdepisteet ympärysmitoista (vyötärö/pituus,
   hartia/vyötärö, rintakehä/vyötärö), fysiikkataso (FFMI) ja voimataso
   yhdistettynä yhteispisteiksi — kuva sekä ulkonäön että voiman tasosta
+- **Kehon osien taso:** jokainen mittakohta (hauis, rintakehä, reisi, pohje,
+  hartia, vyötärö…) luokitellaan pituuteen suhteutettuna 7 portaalla väestön
+  keskiarvosta IFBB Pro -luokkaan, väestön keskiarvo- ja huipputaso-viittein
+  ("sinä 1.33× keskiarvo"). Vyötärö käänteisesti (pienempi = parempi)
 - **kcal-itsearvio:** jos treenin kulutusta ei syötetä (älykello), järjestelmä
   arvioi sen kehon painosta ja kestosta
 - **Ennusteen osuvuus & itsekalibrointi:** järjestelmä tallentaa ennusteet ja

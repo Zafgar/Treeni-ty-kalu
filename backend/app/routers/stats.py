@@ -593,6 +593,30 @@ def body_score(profile_id: int = Query(...), db: Session = Depends(get_db)):
     }
 
 
+@router.get("/bodypart-levels")
+def bodypart_levels(profile_id: int = Query(...), db: Session = Depends(get_db)):
+    """Kehon osien taso per mittakohta: väestön keskiarvosta IFBB Pro -luokkaan,
+    pituuteen suhteutettuna. Vyötärö käänteisesti (pienempi parempi)."""
+    profile = db.get(models.Profile, profile_id)
+    height = profile.height_cm if profile else None
+    sex = profile.sex if profile else None
+    # Viimeisin mitta per kohta
+    latest: dict[str, float] = {}
+    for m in (db.query(models.Measurement)
+              .filter(models.Measurement.profile_id == profile_id)
+              .order_by(models.Measurement.entry_date).all()):
+        latest[m.site] = m.value_cm
+    parts = []
+    for site, val in latest.items():
+        lvl = engine.bodypart_level(site, val, height, sex)
+        if lvl:
+            vs = round(val / lvl["population_avg_cm"], 2) if lvl["population_avg_cm"] else None
+            parts.append({**lvl, "vs_population": vs})
+    # Järjestä tason mukaan laskevasti
+    parts.sort(key=lambda p: p["level_index"], reverse=True)
+    return {"height_cm": height, "all_levels": engine.BODYPART_LEVELS, "parts": parts}
+
+
 # Metriikat joita voi korreloida (nimi -> kuvaus)
 CORRELATION_METRICS = {
     "bodyweight": "Kehon paino",
