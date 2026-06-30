@@ -224,3 +224,44 @@ input[id$="-search"] { width: 100%; margin-bottom: 8px; }
   /* Kaaviot mahtuvat leveyteen */
   canvas { width: 100%; }
 }
+
+/* ---------- Visuaalinen viimeistely & animaatiot ---------- */
+.logo { display: flex; align-items: center; gap: 9px; }
+.logo-icon { filter: drop-shadow(0 1px 4px rgba(79, 140, 255, 0.45)); flex-shrink: 0; }
+
+/* Välilehden pehmeä sisääntulo */
+.tab.active { animation: fadeInUp 0.28s ease both; }
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* Edistymispalkit kasvavat sisään */
+.level-fill { transform-origin: left center; animation: growBar 0.9s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+@keyframes growBar { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+
+/* Kortit nousevat hieman hoverissa */
+.card { transition: transform 0.15s ease, box-shadow 0.15s ease; }
+.card:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35); }
+
+/* Nappien painallus */
+button:active { transform: translateY(1px); }
+
+/* Aktiivinen välilehti hohtaa pehmeästi */
+nav#tabs button { transition: background 0.15s, color 0.15s, box-shadow 0.2s; }
+nav#tabs button.active { box-shadow: 0 0 0 1px var(--accent), 0 4px 14px rgba(79, 140, 255, 0.45); }
+
+/* Avatar-rengas */
+.avatar { box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.12), 0 2px 6px rgba(0, 0, 0, 0.4); }
+
+/* Isot luvut hieman eläväksi */
+.big { letter-spacing: -0.5px; }
+
+/* Tag-pehmennys */
+.tag { transition: transform 0.12s; }
+.item:hover .tag.main { transform: scale(1.03); }
+
+@media (prefers-reduced-motion: reduce) {
+  .tab.active, .level-fill { animation: none; }
+  .card:hover { transform: none; }
+}

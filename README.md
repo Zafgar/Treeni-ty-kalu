@@ -195,6 +195,10 @@ python -m pytest backend/tests/ -q
   (paino + rasva-% + pituus), edistymispalkki Keho-välilehdellä
 - **PWA:** asennettavissa puhelimen kotinäytölle (manifest + service worker),
   responsiivinen käyttöliittymä toimii sekä PC:llä että puhelimella
+- **Viimeistelty ulkoasu:** inline-SVG-logo, gradientti-aksentit, graafien
+  gradienttitäyttö, pehmeät animaatiot (välilehden sisääntulo, kasvavat
+  edistymispalkit, korttien hover) — kaikki itsenäisesti (ei ulkoisia
+  assetteja, offline-ystävällinen, kunnioittaa reduced-motion-asetusta)
 - **Ennustava graafi:** realistinen kehitysennuste haarukoineen — vähenevä
   tuotto kohti fysiologista kattoa (johdettu painosta ja voimastandardista)
 - **Vanhojen tulosten kirjaus:** merkitse aiempia tuloksia taaksepäin, niin

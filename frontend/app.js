@@ -589,6 +589,23 @@ function drawLineChart(canvas, series, opts = {}) {
   ctx.fillText(fmt(minX), pad.l, H - 12);
   ctx.textAlign = "right"; ctx.fillText(fmt(maxX), W - pad.r, H - 12); ctx.textAlign = "left";
 
+  // Gradienttitäyttö viivan alle kun yksi yhtenäinen sarja (näyttävämpi)
+  const solid = series.filter((s) => !s.dashed && s.points && s.points.length);
+  if (solid.length === 1) {
+    const s = solid[0];
+    const color = s.color || CHART_COLORS[0];
+    const pts = [...s.points].sort((a, b) => a.x - b.x);
+    const grad = ctx.createLinearGradient(0, pad.t, 0, pad.t + plotH);
+    grad.addColorStop(0, color + "44");
+    grad.addColorStop(1, color + "00");
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    pts.forEach((p, i) => { const X = xPix(p.x), Y = yPix(p.y); i ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y); });
+    ctx.lineTo(xPix(pts[pts.length - 1].x), pad.t + plotH);
+    ctx.lineTo(xPix(pts[0].x), pad.t + plotH);
+    ctx.closePath(); ctx.fill();
+  }
+
   // Piirrä ennustehaarukat (band) ensin taustalle
   series.forEach((s, idx) => {
     if (!s.band || !s.band.length) return;
