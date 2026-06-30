@@ -110,6 +110,7 @@ async function loadExercises() {
       const tags = [];
       if (ex.is_main_lift) tags.push(el("span", { class: "tag main" }, "pääliike"));
       if (ex.equipment) tags.push(el("span", { class: "tag" }, ex.equipment));
+      if (ex.per_hand) tags.push(el("span", { class: "tag", title: "Paino kirjataan per käsipaino, ei yhteispainona" }, "per käsi"));
       tags.push(el("span", { class: "tag" }, `${ex.default_sets}×${ex.default_reps}`));
       if (ex.sport) tags.push(el("span", { class: "tag" }, ex.sport));
       const item = el("div", { class: "item" },
@@ -204,6 +205,7 @@ async function loadPrograms() {
               await api.post(`/api/programs/${p.id}/activate`); loadPrograms(); loadWorkouts();
               alert("Ohjelma aktivoitu. Treenipäivät löytyvät nyt Treenit-välilehdeltä.");
             } }, "Aktivoi"),
+        el("button", { class: "small", onclick: () => openProgramEditor(p.id) }, "Muokkaa"),
         el("button", { class: "small danger", onclick: async () => {
           if (confirm(`Poista ohjelma "${p.name}"?`)) { await api.del(`/api/programs/${p.id}`); loadPrograms(); }
         } }, "Poista"))
@@ -243,6 +245,88 @@ async function loadPrograms() {
     }
     list.append(item);
   }
+}
+
+// Muokkaa olemassa olevaa ohjelmaa jälkikäteen: lisää/poista päiviä ja
+// liikkeitä, muokkaa sarjoja/toistoja/painoja. Muutokset tallentuvat heti
+// (granulaariset API-kutsut), joten päivien id:t säilyvät myös aktiivisessa
+// ohjelmassa eivätkä jo siirretyt treenit katoa.
+async function openProgramEditor(programId) {
+  if (!exercisesCache.length) exercisesCache = await api.get("/api/exercises");
+  const editor = document.getElementById("program-editor");
+
+  async function render() {
+    const p = await api.get(`/api/programs/${programId}`);
+    editor.classList.remove("hidden");
+    editor.innerHTML = "";
+    editor.scrollIntoView({ behavior: "smooth", block: "nearest" });
+
+    const name = el("input", { value: p.name, placeholder: "Ohjelman nimi" });
+    const goal = el("input", { value: p.goal || "", placeholder: "Tavoite" });
+    const saveHead = async () => { await api.patch(`/api/programs/${programId}`, { name: name.value.trim() || p.name, goal: goal.value.trim() || null }); };
+    name.addEventListener("change", saveHead);
+    goal.addEventListener("change", saveHead);
+
+    editor.append(
+      el("div", { class: "row-between" }, el("h3", { style: "margin:0" }, "Muokkaa ohjelmaa"),
+        el("button", { class: "small success", onclick: () => { editor.classList.add("hidden"); loadPrograms(); } }, "Valmis")),
+      el("div", { class: "grid" }, el("label", {}, "Nimi", name), el("label", {}, "Tavoite", goal)));
+
+    for (const day of p.days) {
+      const block = el("div", { class: "day-block " + (day.day_type === "rest" ? "rest" : "") });
+      const labelInput = el("input", { value: day.label || "", placeholder: "Päivän nimi" });
+      const typeSel = el("select", {}, el("option", { value: "train" }, "Treenipäivä"), el("option", { value: "rest" }, "Lepopäivä"));
+      typeSel.value = day.day_type;
+      const saveDay = async () => { await api.patch(`/api/programs/days/${day.id}`, { label: labelInput.value || null, day_type: typeSel.value }); render(); };
+      labelInput.addEventListener("change", saveDay);
+      typeSel.addEventListener("change", saveDay);
+      block.append(el("div", { class: "btn-row" }, labelInput, typeSel,
+        el("button", { class: "small danger", onclick: async () => {
+          if (confirm("Poista tämä päivä?")) { await api.del(`/api/programs/days/${day.id}`); render(); }
+        } }, "Poista päivä")));
+
+      if (day.day_type === "train") {
+        for (const pe of day.exercises) {
+          const sel = exerciseSelect();
+          sel.value = pe.exercise_id;
+          const sets = el("input", { type: "number", value: pe.target_sets });
+          const reps = el("input", { type: "number", value: pe.target_reps });
+          const wt = el("input", { type: "number", step: "0.5", value: pe.target_weight ?? "" });
+          const rest = el("input", { type: "number", value: pe.rest_seconds ?? "" });
+          const scheme = el("input", { value: pe.rep_scheme ?? "", placeholder: "12,10,8" });
+          const savePe = async () => {
+            await api.patch(`/api/programs/exercises/${pe.id}`, {
+              exercise_id: +sel.value, target_sets: +sets.value || 1, target_reps: +reps.value || 1,
+              target_weight: wt.value ? +wt.value : null, rest_seconds: rest.value ? +rest.value : null,
+              rep_scheme: scheme.value || null });
+          };
+          [sel, sets, reps, wt, rest, scheme].forEach((i) => i.addEventListener("change", savePe));
+          block.append(el("div", { class: "btn-row" }, sel,
+            el("label", {}, "sarjat", sets), el("label", {}, "toistot", reps),
+            el("label", {}, "kg", wt), el("label", {}, "palautus s", rest),
+            el("label", {}, "malli", scheme),
+            el("button", { class: "small danger", onclick: async () => { await api.del(`/api/programs/exercises/${pe.id}`); render(); } }, "x")));
+        }
+        block.append(el("button", { class: "small", onclick: async () => {
+          const ex0 = exercisesCache[0];
+          await api.post(`/api/programs/days/${day.id}/exercises`, {
+            exercise_id: ex0.id, order_index: day.exercises.length,
+            target_sets: ex0.default_sets || 3, target_reps: ex0.default_reps || 10 });
+          render();
+        } }, "+ Liike"));
+      }
+      editor.append(block);
+    }
+
+    editor.append(el("div", { class: "btn-row" },
+      el("button", { class: "small", onclick: async () => {
+        await api.post(`/api/programs/${programId}/days`, { order_index: p.days.length, day_type: "train", label: "", exercises: [] }); render();
+      } }, "+ Treenipäivä"),
+      el("button", { class: "small", onclick: async () => {
+        await api.post(`/api/programs/${programId}/days`, { order_index: p.days.length, day_type: "rest", label: "Lepo", exercises: [] }); render();
+      } }, "+ Lepopäivä")));
+  }
+  await render();
 }
 
 document.getElementById("new-program-btn").addEventListener("click", () => {
@@ -1477,16 +1561,25 @@ async function renderDayLog() {
 }
 
 document.getElementById("n-date").addEventListener("change", renderDayLog);
+document.getElementById("meal-search").addEventListener("input", renderMeals);
 document.getElementById("food-search").addEventListener("input", renderFoodResults);
 document.getElementById("food-cat").addEventListener("change", renderFoodResults);
 document.getElementById("food-fav-only").addEventListener("change", renderFoodResults);
 
 // ---- Omat ateriat ----
 async function renderMeals() {
-  const meals = await api.get(pq("/api/nutrition/meals"));
+  let meals = await api.get(pq("/api/nutrition/meals"));
+  const q = (document.getElementById("meal-search")?.value || "").trim().toLowerCase();
+  if (q) {
+    meals = meals.filter((m) =>
+      m.name.toLowerCase().includes(q) ||
+      m.items.some((it) => it.food.name.toLowerCase().includes(q)));
+  }
   const list = document.getElementById("meals-list");
   list.innerHTML = "";
-  if (!meals.length) list.append(el("p", { class: "muted" }, "Ei tallennettuja aterioita vielä."));
+  if (!meals.length) {
+    list.append(el("p", { class: "muted" }, q ? "Ei osumia haulle." : "Ei tallennettuja aterioita vielä."));
+  }
   meals.forEach((m) => {
     const kcal = m.items.reduce((a, it) => a + it.food.kcal * it.grams / 100, 0);
     list.append(el("div", { class: "item" },

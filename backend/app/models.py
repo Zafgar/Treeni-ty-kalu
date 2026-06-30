@@ -65,6 +65,9 @@ class Exercise(Base):
     sport: Mapped[str | None] = mapped_column(String(60), nullable=True)
     # Väline: tanko, käsipainot, talja, kahvakuula, keho, kone, muu
     equipment: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    # Onko paino per käsi (käsipainoliikkeet): tällöin kirjattu paino on
+    # yhden käsipainon paino, ei yhteispaino. Vaikuttaa tulkintaan ja vertailuun.
+    per_hand: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     # Yleisesti sopivat oletussarjat/-toistot (esim. moniniveliset 5x5,
     # eristävät 3x12) joilla liike alustetaan ohjelmaan/treeniin.
     default_sets: Mapped[int] = mapped_column(Integer, default=3)

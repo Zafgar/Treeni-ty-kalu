@@ -106,8 +106,10 @@
           <label>Unipisteet<input id="b-sscore" type="number" /></label>
           <label>HRV<input id="b-hrv" type="number" /></label>
           <label>Leposyke<input id="b-rhr" type="number" /></label>
-          <label>Kalorit<input id="b-kcal" type="number" /></label>
+          <label title="Päivän aikana syömäsi kokonaiskalorit. Käytetään dieettiohjauksessa ylläpitokalorien (TDEE) tarkentamiseen. Vapaaehtoinen.">Syödyt kalorit (kcal/pv)<input id="b-kcal" type="number" placeholder="koko päivän syönti" /></label>
         </div>
+        <p class="muted" style="margin:6px 0 0">Kalorit = koko päivän <strong>syödyt</strong> kalorit (ei treenin
+          poltto — sen voit kirjata treenin tietoihin). Tämä auttaa arvioimaan tarpeesi tarkemmin.</p>
         <button id="b-save" class="success">Tallenna kehodata</button>
       </div>
 
@@ -308,6 +310,7 @@
       <div class="card">
         <h3>Omat ateriat (esim. smoothie)</h3>
         <p class="muted">Tallenna toistuva kokonaisuus ja pikakirjaa se yhdellä napilla.</p>
+        <input id="meal-search" placeholder="Hae ateriaa (nimi tai raaka-aine)…" style="width:100%;margin-bottom:10px" />
         <div id="meals-list" class="list"></div>
         <button id="new-meal-btn" class="primary" style="margin-top:10px">+ Uusi ateria</button>
         <div id="meal-editor" class="hidden"></div>

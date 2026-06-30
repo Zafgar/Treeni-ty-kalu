@@ -64,6 +64,7 @@ def ensure_columns():
         ("exercises", "description", "TEXT"),
         ("programs", "start_date", "DATE"),
         ("programs", "end_date", "DATE"),
+        ("exercises", "per_hand", "BOOLEAN DEFAULT 0"),
     ]
     inspector = inspect(engine)
     existing_tables = set(inspector.get_table_names())
@@ -326,26 +327,69 @@ def ensure_extra_exercises():
     Näin olemassa olevat kannat saavat uudet liikkeet ilman uudelleenluontia."""
     from sqlalchemy import text
 
-    # (nimi, kategoria, lihasryhmä, väline, sarjat, toistot)
+    # (nimi, kategoria, lihasryhmä, väline, sarjat, toistot, laji, per_hand)
     extra = [
-        ("Rinnalleveto", "olympia", "koko keho", "tanko", 5, 3),
-        ("Työntö telineestä", "olympia", "olkapää/jalat", "tanko", 5, 2),
-        ("Tempausveto", "olympia", "takaketju", "tanko", 4, 3),
-        ("Rinnallevedon veto", "olympia", "takaketju", "tanko", 4, 3),
-        ("Tempauskyykky (overhead squat)", "olympia", "koko keho", "tanko", 4, 4),
-        ("Riipunnasta tempaus", "olympia", "koko keho", "tanko", 4, 2),
+        # Olympianostot
+        ("Rinnalleveto", "olympia", "koko keho", "tanko", 5, 3, "olympia", 0),
+        ("Työntö telineestä", "olympia", "olkapää/jalat", "tanko", 5, 2, "olympia", 0),
+        ("Tempausveto", "olympia", "takaketju", "tanko", 4, 3, "olympia", 0),
+        ("Rinnallevedon veto", "olympia", "takaketju", "tanko", 4, 3, "olympia", 0),
+        ("Tempauskyykky (overhead squat)", "olympia", "koko keho", "tanko", 4, 4, "olympia", 0),
+        ("Riipunnasta tempaus", "olympia", "koko keho", "tanko", 4, 2, "olympia", 0),
+        # Käsipainoliikkeet (paino = per käsipaino)
+        ("Vinopenkki käsipaino", "rinta", "ylärinta", "käsipainot", 4, 10, None, 1),
+        ("Penkkipunnerrus käsipaino", "rinta", "rinta", "käsipainot", 4, 10, None, 1),
+        ("Flyes käsipaino (vipunostot rinnalle)", "rinta", "rinta", "käsipainot", 3, 12, None, 1),
+        ("Käsipainosoutu (yhden käden)", "selkä", "yläselkä", "käsipainot", 4, 10, None, 1),
+        ("Pystypunnerrus käsipaino", "olkapää", "olkapää", "käsipainot", 4, 8, None, 1),
+        ("Hauiskääntö käsipaino", "kädet", "hauis", "käsipainot", 3, 12, None, 1),
+        ("Vasarakääntö käsipaino", "kädet", "hauis/kyynärvarsi", "käsipainot", 3, 12, None, 1),
+        ("Yhden käden ojentajapunnerrus käsipaino", "kädet", "ojentaja", "käsipainot", 3, 12, None, 1),
+        ("Ranskalainen punnerrus käsipaino", "kädet", "ojentaja", "käsipainot", 3, 12, None, 1),
+        ("Käsipainokyykky (goblet)", "jalat", "etureidet/pakara", "käsipainot", 3, 12, None, 0),
+        ("Bulgarialainen askelkyykky käsipaino", "jalat", "etureidet/pakara", "käsipainot", 3, 10, None, 1),
+        # Taljat
+        ("Alatalja soutu (kapea)", "selkä", "yläselkä", "talja", 4, 12, None, 0),
+        ("Alatalja soutu (leveä)", "selkä", "yläselkä", "talja", 4, 12, None, 0),
+        ("Ylätalja leveä", "selkä", "selän leveys", "talja", 4, 12, None, 0),
+        ("Ylätalja kapea/myötäote", "selkä", "selän leveys", "talja", 4, 12, None, 0),
+        ("Taljaveto kasvoille (face pull)", "olkapää", "takaolkapää", "talja", 3, 15, None, 0),
+        ("Ojentajapunnerrus taljassa (köysi)", "kädet", "ojentaja", "talja", 3, 14, None, 0),
+        ("Hauiskääntö taljassa", "kädet", "hauis", "talja", 3, 14, None, 0),
+        ("Taljavipunostot sivulle", "olkapää", "sivuolkapää", "talja", 3, 15, None, 1),
+        ("Taljan crossover (rinta)", "rinta", "rinta", "talja", 3, 14, None, 0),
+        # Laitteet / koneet
+        ("Reisiojennus (kone)", "jalat", "etureidet", "kone", 3, 14, None, 0),
+        ("Takareisikoukistus (kone)", "jalat", "takareidet", "kone", 3, 14, None, 0),
+        ("Pakaralaite / lonkan ojennus (kone)", "jalat", "pakara", "kone", 3, 14, None, 0),
+        ("Lähennys (kone, sisäreisi)", "jalat", "lähentäjät", "kone", 3, 15, None, 0),
+        ("Loitonnus (kone, pakara/lonkka)", "jalat", "loitontajat", "kone", 3, 15, None, 0),
+        ("Pohjenousu (kone)", "jalat", "pohkeet", "kone", 4, 12, None, 0),
+        ("Rintaprässi (kone)", "rinta", "rinta", "kone", 3, 12, None, 0),
+        ("Vipunostot rinnalle (pec deck)", "rinta", "rinta", "kone", 3, 14, None, 0),
+        ("Soutu (kone)", "selkä", "yläselkä", "kone", 4, 12, None, 0),
+        ("Olkapääprässi (kone)", "olkapää", "olkapää", "kone", 3, 12, None, 0),
+        ("Takaolkapää (reverse pec deck)", "olkapää", "takaolkapää", "kone", 3, 15, None, 0),
+        ("Vatsarutistus (kone)", "keskivartalo", "vatsa", "kone", 3, 15, None, 0),
+        ("Selän ojennus (kone/penkki)", "selkä", "alaselkä", "kone", 3, 15, None, 0),
+        ("Hack-kyykky (kone)", "jalat", "etureidet", "kone", 4, 10, None, 0),
     ]
     with engine.begin() as conn:
         existing = {r[0] for r in conn.execute(text("SELECT name FROM exercises")).fetchall()}
-        for name, cat, mg, eq, sets, reps in extra:
+        for name, cat, mg, eq, sets, reps, sport, per_hand in extra:
             if name in existing:
                 continue
             conn.execute(
                 text("INSERT INTO exercises (name, category, muscle_group, equipment, "
-                     "default_sets, default_reps, is_main_lift, sport, unit, created_at) "
-                     "VALUES (:n, :c, :m, :e, :s, :r, 0, 'olympia', 'kg', CURRENT_TIMESTAMP)"),
-                {"n": name, "c": cat, "m": mg, "e": eq, "s": sets, "r": reps},
+                     "default_sets, default_reps, is_main_lift, sport, unit, per_hand, created_at) "
+                     "VALUES (:n, :c, :m, :e, :s, :r, 0, :sport, 'kg', :ph, CURRENT_TIMESTAMP)"),
+                {"n": name, "c": cat, "m": mg, "e": eq, "s": sets, "r": reps,
+                 "sport": sport, "ph": per_hand},
             )
+        # Merkitse käsipainoliikkeet per_hand:ksi (paino = yhden käsipainon paino)
+        conn.execute(text(
+            "UPDATE exercises SET per_hand = 1 "
+            "WHERE equipment = 'käsipainot' AND (per_hand IS NULL OR per_hand = 0)"))
 
 
 EXERCISE_DESCRIPTIONS = {

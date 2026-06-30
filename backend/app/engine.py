@@ -148,7 +148,7 @@ KCAL_PER_KG = 7700.0
 # miehille; naisille kerrotaan FEMALE_FACTORilla. Liikekohtaiset standardit.
 STRENGTH_LEVELS = [
     "Aloittelija", "Harrastaja", "Keskitaso", "Edistynyt",
-    "Kokenut", "Alueellinen (piiri)", "Kansallinen (SM)", "Maailmanluokka (EM/MM)",
+    "Kokenut", "Piirimestaritaso", "SM-taso (kansallinen)", "Maailmanluokka (EM/MM)",
 ]
 FEMALE_FACTOR = 0.72
 
@@ -175,8 +175,9 @@ def natural_ceiling(lift_key: str, bodyweight: float, sex: str | None = None) ->
     return round(NATURAL_CEILINGS[lift_key] * factor * bodyweight, 1)
 
 
-# Väestön keskiarvo (treenamaton aikuinen): 1RM / kehon paino, miehet.
-POPULATION_AVG = {"squat": 0.9, "bench": 0.75, "deadlift": 1.1, "ohp": 0.45}
+# Väestön keskiarvo (TÄYSIN treenamaton aikuinen mies): 1RM / kehon paino.
+# Maltilliset luvut: treenamaton ~80 kg mies vetää maasta ~65–70 kg, ei yli 100.
+POPULATION_AVG = {"squat": 0.7, "bench": 0.5, "deadlift": 0.85, "ohp": 0.35}
 
 
 def population_average(lift_key: str, bodyweight: float, sex: str | None = None) -> float | None:
@@ -696,6 +697,28 @@ def adaptive_tdee(avg_intake_kcal: float, weight_change_kg: float, days: int) ->
     return round(avg_intake_kcal - (weight_change_kg * KCAL_PER_KG / days), 0)
 
 
+def baseline_tdee(bodyweight: float, height_cm: float | None, age: int | None,
+                  sex: str | None, training_days_per_week: float) -> float | None:
+    """Arvioi ylläpitokalorit (TDEE) ennen kuin syöntidataa on.
+
+    BMR Mifflin–St Jeor -kaavalla + aktiivisuuskerroin, joka kasvaa
+    viikoittaisten treenien mukaan. Näin "0 treeniä viikossa" antaa selvästi
+    matalamman tarpeen kuin "5 treeniä viikossa" — tarve muuttuu treenimäärän
+    mukaan, kuten pitääkin.
+    """
+    if not bodyweight or bodyweight <= 0:
+        return None
+    td = max(0.0, min(7.0, training_days_per_week or 0.0))
+    # Aktiivisuus: 0 treeniä -> 1.25 (arki), joka treeni nostaa ~0.06
+    activity = 1.25 + 0.06 * td
+    if height_cm and age:
+        s = -161.0 if (sex or "").lower().startswith("nain") else 5.0
+        bmr = 10.0 * bodyweight + 6.25 * height_cm - 5.0 * age + s
+        return round(bmr * activity, 0)
+    # Varakaava ilman pituutta/ikää: ~24 kcal/kg BMR * aktiivisuus
+    return round(bodyweight * 24.0 * activity, 0)
+
+
 def macro_targets(bodyweight: float, goal: str, tdee: float, target_rate: float,
                   low_carb: bool = False) -> dict:
     """Laske kcal- ja makrotavoitteet kehon painosta, tavoitteesta ja tahdista.
@@ -933,12 +956,42 @@ def waist_assessment(waist_cm: float | None, height_cm: float | None, goal: str)
     return out
 
 
+def assumed_working_rir(sets_at_weight: int) -> float:
+    """Oletettu varasto (RIR) työsarjalle kun sitä ei ole kirjattu.
+
+    Tärkeää: esim. 4x5 EI ole 5 toiston maksimi — ekoissa sarjoissa on varaa,
+    eikä ensimmäistä sarjaa viety uupumukseen. Jos varastoa ei merkitä, sitä
+    EI saa olettaa nollaksi, koska se aliarvioi 1RM:n. Mitä useampi sarja
+    samalla painolla, sitä enemmän varaa työsarjoissa oli.
+
+      1 sarja  -> 0.0  (todennäköisesti maksimiyritys / AMRAP)
+      2 sarjaa -> 1.0
+      3 sarjaa -> 2.0
+      4+ sarjaa-> 2.5
+    """
+    return {1: 0.0, 2: 1.0, 3: 2.0}.get(sets_at_weight, 2.5)
+
+
 def best_1rm_from_sets(sets: list[dict]) -> dict | None:
     """Palauta paras arvioitu 1RM joukosta sarjoja.
 
     sets: [{"weight": .., "reps": .., "rir": .. , "completed": bool}, ...]
     Vain suoritetut (completed) ja toistoja sisältävät sarjat huomioidaan.
+
+    Jos sarjan varastoa (RIR) ei ole kirjattu, se päätellään sen mukaan kuinka
+    monta sarjaa samalla painolla tehtiin (työsarjoissa on varaa, ei nollaa).
     """
+    # Montako suoritettua sarjaa kullakin painolla -> oletusvaraston pohja
+    counts: dict[float, int] = {}
+    for s in sets:
+        if not s.get("completed", True):
+            continue
+        reps = int(s.get("reps", 0))
+        weight = float(s.get("weight", 0))
+        if reps <= 0 or weight <= 0:
+            continue
+        counts[weight] = counts.get(weight, 0) + 1
+
     best = None
     for s in sets:
         if not s.get("completed", True):
@@ -947,13 +1000,20 @@ def best_1rm_from_sets(sets: list[dict]) -> dict | None:
         weight = float(s.get("weight", 0))
         if reps <= 0 or weight <= 0:
             continue
-        e = estimate_1rm(weight, reps, s.get("rir"))
+        rir = s.get("rir")
+        if rir is None:
+            rir = assumed_working_rir(counts.get(weight, 1))
+            assumed = True
+        else:
+            assumed = False
+        e = estimate_1rm(weight, reps, rir)
         if best is None or e > best["estimated_1rm"]:
             best = {
                 "estimated_1rm": round(e, 1),
                 "weight": weight,
                 "reps": reps,
                 "rir": s.get("rir"),
+                "assumed_rir": round(rir, 1) if assumed else None,
             }
     return best
 

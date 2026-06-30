@@ -173,8 +173,13 @@ def _training_profile(db: Session, profile_id: int, ref_date: date) -> tuple[int
         .all()
     )
     recent = [s for s in sessions if 0 <= (ref_date - s.session_date).days < 21]
-    per_week = round(len(recent) / 3) if recent else 3
-    per_week = max(1, min(7, per_week))
+    if recent:
+        # Toteutunut tiheys viim. 3 viikolta (voi olla matala jos on jätetty treenaamatta)
+        per_week = max(0, min(7, round(len(recent) / 3)))
+    elif sessions:
+        per_week = 0  # treenejä on historiassa, mutta ei viime aikoina -> tauolla
+    else:
+        per_week = 3  # ei dataa lainkaan -> oletetaan maltillinen treenitausta
     kcals = [s.kcal_burned for s in sessions
              if s.kcal_burned and 0 <= (ref_date - s.session_date).days < 30]
     kcal_avg = round(sum(kcals) / len(kcals)) if kcals else None
@@ -217,9 +222,16 @@ def diet_status(profile_id: int = Query(...), db: Session = Depends(get_db)):
     w_end = engine.weekly_average(points, ref_date, 7)
     weight_change = (w_end - w_start) if (w_start and w_end) else 0.0
 
+    # Treenitiheys (vaikuttaa kulutukseen) ja keskim. treenin kcal
+    training_days, workout_kcal_avg = _training_profile(db, profile_id, ref_date)
+
     tdee = engine.adaptive_tdee(avg_intake, weight_change, window_days) if avg_intake else None
     if not tdee:
-        tdee = round(week_avg * 33)  # karkea arvio kun syöntidataa ei vielä ole
+        # Ei syöntidataa vielä -> arvio painosta/pituudesta/iästä JA treenimäärästä
+        age = engine.age_from_birthdate(profile.birthdate, date.today()) if profile else None
+        tdee = engine.baseline_tdee(
+            week_avg, profile.height_cm if profile else None, age,
+            profile.sex if profile else None, training_days)
 
     low_carb = bool(next((m for m in DIET_MODELS
                           if phase and m["name"] == phase.model and m.get("low_carb")), None))
@@ -245,7 +257,6 @@ def diet_status(profile_id: int = Query(...), db: Session = Depends(get_db)):
         strength_note = f"Rauta kehittyy edelleen ({strength['change_pct']:+}%)."
 
     # Per-päivä-tavoitteet (treeni- vs lepopäivä) ja viikkoyhteenveto
-    training_days, workout_kcal_avg = _training_profile(db, profile_id, ref_date)
     day_targets = engine.day_targets(targets, training_days, workout_kcal_avg)
     review = engine.weekly_review(targets["kcal"], avg_intake, target_rate, trend)
 
@@ -297,7 +308,12 @@ def _current_targets(db: Session, profile_id: int) -> tuple[dict | None, bool]:
     weight_change = (w_end - w_start) if (w_start and w_end) else 0.0
     tdee = engine.adaptive_tdee(avg_intake, weight_change, 14) if avg_intake else None
     if not tdee:
-        tdee = round(week_avg * 33)
+        profile = db.get(models.Profile, profile_id)
+        age = engine.age_from_birthdate(profile.birthdate, date.today()) if profile else None
+        training_days, _ = _training_profile(db, profile_id, ref_date)
+        tdee = engine.baseline_tdee(
+            week_avg, profile.height_cm if profile else None, age,
+            profile.sex if profile else None, training_days)
     model = next((m for m in DIET_MODELS if phase and m["name"] == phase.model), None)
     low_carb = bool(model and model.get("low_carb"))
     fasting = bool(model and model["id"] == "cut_16_8")

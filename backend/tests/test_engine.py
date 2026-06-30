@@ -62,6 +62,26 @@ def test_best_1rm_ignores_empty():
     assert engine.best_1rm_from_sets([{"weight": 0, "reps": 0, "completed": True}]) is None
 
 
+def test_best_1rm_assumes_reserve_for_working_sets():
+    # 4x5 @ 100 ilman kirjattua varastoa: EI saa olettaa 5RM:ksi (varasto 0),
+    # vaan työsarjoissa on varaa -> 1RM korkeampi kuin pelkkä Epley reps=5.
+    four_sets = [{"weight": 100, "reps": 5, "completed": True} for _ in range(4)]
+    best = engine.best_1rm_from_sets(four_sets)
+    naive = engine.estimate_1rm(100, 5, 0)
+    assert best["estimated_1rm"] > naive  # oletettu varasto nostaa arviota
+    assert best["assumed_rir"] and best["assumed_rir"] >= 2.0
+    # Yksittäinen sarja tulkitaan maksimiyritykseksi (ei lisävarastoa)
+    single = engine.best_1rm_from_sets([{"weight": 100, "reps": 1, "completed": True}])
+    assert single["assumed_rir"] == 0.0
+
+
+def test_baseline_tdee_scales_with_training():
+    rest = engine.baseline_tdee(80, 180, 30, "mies", training_days_per_week=0)
+    active = engine.baseline_tdee(80, 180, 30, "mies", training_days_per_week=6)
+    assert rest is not None and active is not None
+    assert active > rest  # enemmän treenejä -> suurempi tarve
+
+
 def test_body_composition():
     c = engine.body_composition(100, 20, height_cm=180)
     assert c["fat_mass_kg"] == 20.0
@@ -346,7 +366,7 @@ def test_bodypart_level():
 
 def test_population_average():
     avg = engine.population_average("squat", 100, "mies")
-    assert avg == 90.0  # 0.9 * 100
+    assert avg == 70.0  # 0.7 * 100 (treenamaton aikuinen)
     assert engine.population_average("squat", 100, "nainen") < avg
     assert engine.population_average("curl", 100) is None
 

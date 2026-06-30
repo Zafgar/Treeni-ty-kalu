@@ -12,6 +12,7 @@ class ExerciseBase(BaseModel):
     is_main_lift: bool = False
     sport: str | None = None
     equipment: str | None = None
+    per_hand: bool = False
     default_sets: int = 3
     default_reps: int = 10
     unit: str = "kg"
@@ -30,6 +31,7 @@ class ExerciseUpdate(BaseModel):
     is_main_lift: bool | None = None
     sport: str | None = None
     equipment: str | None = None
+    per_hand: bool | None = None
     default_sets: int | None = None
     default_reps: int | None = None
     unit: str | None = None
@@ -75,6 +77,12 @@ class ProgramDayBase(BaseModel):
 
 class ProgramDayCreate(ProgramDayBase):
     exercises: list[ProgramExerciseCreate] = Field(default_factory=list)
+
+
+class ProgramDayUpdate(BaseModel):
+    order_index: int | None = None
+    day_type: str | None = None
+    label: str | None = None
 
 
 class ProgramDayOut(ProgramDayBase):

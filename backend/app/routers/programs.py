@@ -181,6 +181,19 @@ def add_day(program_id: int, payload: schemas.ProgramDayCreate, db: Session = De
     return day
 
 
+@router.patch("/days/{day_id}", response_model=schemas.ProgramDayOut)
+def update_day(day_id: int, payload: schemas.ProgramDayUpdate, db: Session = Depends(get_db)):
+    """Muokkaa ohjelman päivää (nimi, tyyppi, järjestys) jälkikäteen."""
+    day = db.get(models.ProgramDay, day_id)
+    if not day:
+        raise HTTPException(status_code=404, detail="Päivää ei löytynyt.")
+    for key, value in payload.model_dump(exclude_unset=True).items():
+        setattr(day, key, value)
+    db.commit()
+    db.refresh(day)
+    return day
+
+
 @router.delete("/days/{day_id}", status_code=204)
 def delete_day(day_id: int, db: Session = Depends(get_db)):
     day = db.get(models.ProgramDay, day_id)
