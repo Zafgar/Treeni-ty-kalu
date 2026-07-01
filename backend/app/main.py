@@ -25,6 +25,7 @@ from .database import (
 from .routers import (
     backup,
     body,
+    coach,
     diet,
     engine_api,
     exercises,
@@ -74,6 +75,7 @@ app.include_router(diet.router)
 app.include_router(recovery.router)
 app.include_router(backup.router)
 app.include_router(photos.router)
+app.include_router(coach.router)
 
 
 @app.get("/api/health")

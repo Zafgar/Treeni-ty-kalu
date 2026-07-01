@@ -939,7 +939,25 @@ function bindChartHover(canvas) {
 }
 
 // =================== YLEISNÄKYMÄ ===================
+async function loadCoachNotices() {
+  const card = document.getElementById("coach-card");
+  const div = document.getElementById("coach-notices");
+  if (!card) return;
+  const data = await api.get(pq("/api/coach/notices"));
+  if (!data.notices || !data.notices.length) { card.style.display = "none"; return; }
+  card.style.display = "";
+  div.innerHTML = "";
+  const tone = { alert: "#ef4444", warn: "#f59e0b", info: "var(--accent)" };
+  const icon = { alert: "🛑", warn: "⚠", info: "ℹ️" };
+  data.notices.forEach((n) => {
+    div.append(el("div", { class: "item", style: `border-left:3px solid ${tone[n.level] || "var(--accent)"}` },
+      el("strong", { style: `color:${tone[n.level] || "var(--accent)"}` }, `${icon[n.level] || ""} ${n.title}`),
+      el("div", { class: "muted", style: "margin-top:4px" }, n.message)));
+  });
+}
+
 async function loadOverview() {
+  loadCoachNotices();
   const o = await api.get(pq("/api/stats/overview"));
   const cards = document.getElementById("overview-cards");
   cards.innerHTML = "";
@@ -1461,7 +1479,7 @@ document.getElementById("generate-btn").addEventListener("click", async () => {
   if (panel.classList.contains("hidden")) return;
   panel.innerHTML = "";
   const plans = await api.get("/api/templates/plans");
-  const planNames = { bodaus: "Lihasmassa (bodaus)", voimanosto: "Voimanosto", olympia: "Olympianosto" };
+  const planNames = { aloittelija: "Aloittelija (ensikertalainen)", bodaus: "Lihasmassa (bodaus)", voimanosto: "Voimanosto", olympia: "Olympianosto" };
   const planSel = el("select", {});
   plans.forEach((p) => planSel.append(el("option", { value: p.id }, planNames[p.id] || p.id)));
   const daysSel = el("select", {});
@@ -1470,7 +1488,9 @@ document.getElementById("generate-btn").addEventListener("click", async () => {
     const p = plans.find((x) => x.id === planSel.value);
     daysSel.innerHTML = "";
     p.days_options.forEach((d) => daysSel.append(el("option", { value: d }, `${d}× viikossa`)));
-    info.textContent = p.guidance;
+    info.innerHTML = "";
+    info.append(el("div", {}, p.guidance));
+    if (p.next_phase) info.append(el("div", { style: "margin-top:6px;color:var(--accent-2)" }, "➜ " + p.next_phase));
   }
   planSel.addEventListener("change", refreshDays);
   panel.append(

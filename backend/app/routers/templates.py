@@ -211,7 +211,43 @@ _OL_SQUAT = {"label": "Kyykky & vedot", "items": [
     _M("takakyykky", 5, "4,4,3,3,2", "75,80,82,85,87"),
     _A("etukyykky", 4, 4), _A("tempausveto", 3, 3), _A("pohjenousu", 4, 15)]}
 
+# Aloittelija: vain liikkeet (ei kardiota), ~1 h, kevyt aloitus + tuplaprogressio.
+# Rep-pohjaiset (ei prosentteja), koska aloittelijalla ei ole vielä 1RM-dataa —
+# lähtöpaino kevyt ja nousee pikkuhiljaa.
+_BEG_FULL_A = {"label": "Koko keho A", "items": [
+    _A("takakyykky", 3, 8), _A("penkkipunnerrus", 3, 8), _A("tankosoutu", 3, 10),
+    _A("pystypunnerrus", 3, 10), _A("hauiskääntö", 2, 12), _A("vatsarutistus", 3, 15)]}
+_BEG_FULL_B = {"label": "Koko keho B", "items": [
+    _A("maastaveto", 3, 6), _A("vinopenkki", 3, 10), _A("ylätalja", 3, 10),
+    _A("jalkaprässi", 3, 12), _A("ranskalainen", 2, 12), _A("pohjenousu", 3, 15)]}
+_BEG_FULL_C = {"label": "Koko keho C", "items": [
+    _A("askelkyykky", 3, 10), _A("penkkipunnerrus käsipainoilla", 3, 10), _A("leuanveto", 3, 6),
+    _A("sivunostot", 3, 15), _A("romanialainen maastaveto", 3, 10), _A("vatsarutistus", 3, 15)]}
+_BEG_UPPER = {"label": "Yläkroppa", "items": [
+    _A("penkkipunnerrus", 3, 8), _A("tankosoutu", 3, 10), _A("pystypunnerrus", 3, 10),
+    _A("ylätalja", 3, 10), _A("hauiskääntö", 2, 12), _A("ranskalainen", 2, 12)]}
+_BEG_LOWER = {"label": "Alakroppa", "items": [
+    _A("takakyykky", 3, 8), _A("romanialainen maastaveto", 3, 10), _A("jalkaprässi", 3, 12),
+    _A("jalkojen koukistus", 3, 12), _A("pohjenousu", 3, 15), _A("vatsarutistus", 3, 15)]}
+
 PLAN_BLUEPRINTS = {
+    "aloittelija": {
+        "goal": "aloittelija",
+        "guidance": (
+            "ALOITTELIJALLE (ensikosketus saliin). Vain liikkeet, ei kardiota. Yksi treeni "
+            "~60 min. AIKATAULU: 3×/vk esim. ma–ke–pe (lepopäivä välissä), 4×/vk ma–ti–to–pe, "
+            "5×/vk ma–pe (viikonloppu lepoa). ALOITUS: valitse kevyt paino jolla tekniikka "
+            "pysyy siistinä (usein pelkkä tanko / kevyet käsipainot), ja lisää pieni määrä "
+            "(1.25–2.5 kg) kun kaikki sarjat menevät hyvin — laita ohjelmaan automaattinen "
+            "progressio päälle. Lämmittele 1–2 kevyellä sarjalla ennen työsarjoja. Palautus "
+            "isoissa liikkeissä ~2 min, pienissä ~1 min. SEURAAVA VAIHE: kun olet treenannut "
+            "johdonmukaisesti ~6–12 kk ja perustekniikka on hyvä, siirry Lihasmassa- tai "
+            "Voimanosto-ohjelmaan (enemmän kuormaa ja jakoa)."),
+        "next_phase": "Kun tekniikka ja rutiini ovat kunnossa (~6–12 kk): Lihasmassa- tai Voimanosto-ohjelma.",
+        "days": {3: [_BEG_FULL_A, _BEG_FULL_B, _BEG_FULL_C],
+                 4: [_BEG_UPPER, _BEG_LOWER, _BEG_UPPER, _BEG_LOWER],
+                 5: [_BEG_UPPER, _BEG_LOWER, _BEG_FULL_A, _BEG_UPPER, _BEG_LOWER]},
+    },
     "bodaus": {
         "goal": "hypertrofia",
         "guidance": ("Lihasmassaohjelma. Pääliikkeissä lähtöpaino lasketaan 1RM:stä; "
@@ -257,7 +293,7 @@ def list_plans():
     """Listaa generoitavat ohjelmatyypit ja niiden tuetut treenikerrat/viikko."""
     return [
         {"id": pid, "goal": b["goal"], "guidance": b["guidance"],
-         "days_options": sorted(b["days"].keys())}
+         "next_phase": b.get("next_phase"), "days_options": sorted(b["days"].keys())}
         for pid, b in PLAN_BLUEPRINTS.items()
     ]
 
@@ -273,7 +309,8 @@ def generate_program(payload: GenerateIn, db: Session = Depends(get_db)):
     days_n = min(options, key=lambda x: abs(x - payload.days_per_week))
     day_blueprints = bp["days"][days_n]
 
-    plan_names = {"bodaus": "Lihasmassa", "voimanosto": "Voimanosto", "olympia": "Olympianosto"}
+    plan_names = {"aloittelija": "Aloittelija", "bodaus": "Lihasmassa",
+                  "voimanosto": "Voimanosto", "olympia": "Olympianosto"}
     program = models.Program(
         name=payload.name or f"{plan_names.get(payload.plan, payload.plan)} {days_n}x/vk",
         profile_id=payload.profile_id, schedule_type="weekly",
