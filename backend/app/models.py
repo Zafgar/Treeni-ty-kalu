@@ -254,6 +254,28 @@ class BodyEntry(Base):
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
+class CardioSession(Base):
+    """Aerobinen / kunto-tapahtuma: juoksumatto, crosstrainer, pyöräily, kävely.
+
+    Seuraa aerobisen kunnon kehitystä (matka, aika, keskinopeus, keskisyke) ja
+    tuo poltetut kalorit mukaan päivän kokonaiskulutukseen. Kaikki kentät paitsi
+    laji ja kesto ovat vapaaehtoisia.
+    """
+
+    __tablename__ = "cardio_sessions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    profile_id: Mapped[int] = mapped_column(ForeignKey("profiles.id", ondelete="CASCADE"), index=True)
+    session_date: Mapped[date] = mapped_column(Date, default=date.today, index=True)
+    activity: Mapped[str] = mapped_column(String(40))  # juoksumatto/crosstrainer/pyöräily/kävely/muu
+    duration_min: Mapped[float | None] = mapped_column(Float, nullable=True)
+    kcal: Mapped[float | None] = mapped_column(Float, nullable=True)
+    avg_hr: Mapped[float | None] = mapped_column(Float, nullable=True)
+    distance_km: Mapped[float | None] = mapped_column(Float, nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class Measurement(Base):
     """Kehon ympärysmitta (cm) tietyltä kohdalta tiettynä päivänä.
 

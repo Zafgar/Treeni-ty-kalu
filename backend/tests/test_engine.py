@@ -75,6 +75,26 @@ def test_best_1rm_assumes_reserve_for_working_sets():
     assert single["assumed_rir"] == 0.0
 
 
+def test_readiness_flags_overtraining():
+    # HRV alhaalla, leposyke koholla, uni vähissä, kuormapiikki -> matala pisteet + varoitukset
+    r = engine.readiness(hrv_recent=38, hrv_base=48, rhr_recent=60, rhr_base=52,
+                         sleep_recent=6.0, acwr=1.8)
+    assert r["score"] < 60
+    assert "ylikuormitus" in r["status"]
+    assert len(r["warnings"]) >= 3
+    # Hyvä tilanne -> korkeat pisteet, ei varoituksia
+    good = engine.readiness(hrv_recent=50, hrv_base=48, rhr_recent=50, rhr_base=52,
+                            sleep_recent=8.0, acwr=1.0)
+    assert good["score"] >= 80 and not good["warnings"]
+
+
+def test_acwr_status():
+    assert engine.acwr_status(170, 100)["zone"] == "korkea"
+    assert engine.acwr_status(100, 100)["zone"] == "optimaalinen"
+    assert engine.acwr_status(50, 100)["zone"] == "matala"
+    assert engine.acwr_status(100, 0) is None
+
+
 def test_weight_class():
     assert engine.weight_class(82, "mies") == "-83 kg"
     assert engine.weight_class(83, "mies") == "-83 kg"

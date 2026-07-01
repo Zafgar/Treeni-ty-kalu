@@ -275,6 +275,27 @@ class BodyEntryOut(BodyEntryBase):
     profile_id: int
 
 
+# ---------- CardioSession ----------
+class CardioSessionBase(BaseModel):
+    session_date: date | None = None
+    activity: str = "juoksumatto"
+    duration_min: float | None = None
+    kcal: float | None = None
+    avg_hr: float | None = None
+    distance_km: float | None = None
+    notes: str | None = None
+
+
+class CardioSessionCreate(CardioSessionBase):
+    pass
+
+
+class CardioSessionOut(CardioSessionBase):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    profile_id: int
+
+
 # ---------- Measurement ----------
 class MeasurementBase(BaseModel):
     entry_date: date | None = None

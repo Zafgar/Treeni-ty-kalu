@@ -74,6 +74,44 @@
     <!-- PALAUTUMINEN -->
     <section id="tab-recovery" class="tab">
       <h2>Palautuminen & korrelaatiot</h2>
+
+      <div class="card" id="readiness-card" style="display:none">
+        <h3>Valmius & ylikuormitus</h3>
+        <p class="muted">Yhdistää HRV:n, leposykkeen, unen ja treenikuorman
+          (akuutti vs. krooninen). Varoittaa jos keho alkaa ylirasittua.</p>
+        <div id="readiness-content"></div>
+      </div>
+
+      <div class="card">
+        <h3>Kardio & kunto</h3>
+        <p class="muted">Kirjaa juoksumatto, crosstrainer, pyöräily, kävely tms.
+          Kesto ja laji riittävät; kcal arvioidaan jos et anna. Matka + aika kertovat
+          aerobisen kunnon kehityksen (keskinopeus). Kalorit menevät kulutukseen.</p>
+        <div class="grid">
+          <label>Päivä<input id="cardio-date" type="date" /></label>
+          <label>Laji
+            <select id="cardio-activity">
+              <option value="juoksumatto">Juoksumatto</option>
+              <option value="crosstrainer">Crosstrainer</option>
+              <option value="pyöräily">Pyöräily</option>
+              <option value="kävely">Kävely</option>
+              <option value="juoksu">Juoksu (ulkona)</option>
+              <option value="soutu">Soutu</option>
+              <option value="uinti">Uinti</option>
+              <option value="muu">Muu</option>
+            </select>
+          </label>
+          <label>Kesto (min)<input id="cardio-min" type="number" step="1" /></label>
+          <label title="Poltetut kalorit esim. kellosta. Jätä tyhjäksi niin arvioidaan.">kcal (valinnainen)<input id="cardio-kcal" type="number" /></label>
+          <label>Keskisyke (bpm)<input id="cardio-hr" type="number" /></label>
+          <label>Matka (km)<input id="cardio-km" type="number" step="0.1" /></label>
+        </div>
+        <button id="cardio-save" class="success">Lisää kardio</button>
+        <div id="cardio-summary" style="margin-top:10px"></div>
+        <canvas id="cardio-chart" width="840" height="260"></canvas>
+        <div id="cardio-list" class="list"></div>
+      </div>
+
       <div class="card">
         <h3>Uni & palautumisdata</h3>
         <p class="muted">Vapaaehtoista lisädataa jolla havaitaan treenikehityksen muutoksia.</p>

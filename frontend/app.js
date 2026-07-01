@@ -2065,7 +2065,97 @@ function normalize01to100(points) {
   return points.map((p) => ({ x: p.x, y: hi === lo ? 50 : ((p.y - lo) / (hi - lo)) * 100 }));
 }
 
+async function loadReadiness() {
+  const card = document.getElementById("readiness-card");
+  const div = document.getElementById("readiness-content");
+  const r = await api.get(pq("/api/recovery/readiness"));
+  if (!r.has_data) { card.style.display = "none"; return; }
+  card.style.display = "";
+  div.innerHTML = "";
+  const color = r.score >= 80 ? "var(--accent-2)" : r.score >= 60 ? "#f59e0b" : "#ef4444";
+  div.append(el("div", { class: "result-box" },
+    el("div", { class: "muted" }, "Valmiuspisteet"),
+    el("div", { class: "big", style: `color:${color}` }, `${r.score}/100`),
+    el("div", { style: `color:${color};font-weight:600` }, r.status)));
+  div.append(el("div", { class: "level-bar", style: "margin:8px 0" },
+    el("div", { class: "level-fill", style: `width:${r.score}%;background:${color}` })));
+  if (r.warnings.length) {
+    const w = el("div", { style: "margin-top:8px" });
+    r.warnings.forEach((msg) => w.append(el("div", { style: "color:#f59e0b;margin:3px 0" }, "⚠ " + msg)));
+    div.append(w);
+  } else {
+    div.append(el("div", { class: "muted", style: "margin-top:6px" }, "Ei varoituksia — keho vaikuttaa palautuneelta."));
+  }
+  // Tekijät
+  const tbl = el("table", { style: "margin-top:8px" });
+  tbl.append(el("tr", {}, el("th", {}, "Tekijä"), el("th", {}, "Nyt (7pv)"), el("th", {}, "Vertailu"), el("th", {}, "Muutos")));
+  r.factors.forEach((f) => tbl.append(el("tr", {},
+    el("td", {}, f.name), el("td", {}, String(f.recent)),
+    el("td", {}, String(f.baseline)),
+    el("td", {}, f.change_pct != null ? `${f.change_pct > 0 ? "+" : ""}${f.change_pct}%` : "—"))));
+  div.append(tbl);
+  if (r.acwr) {
+    div.append(el("div", { class: "muted", style: "margin-top:6px",
+      title: "Akuutti (tämä viikko) vs. krooninen (4 vk ka.) treenikuorma. 0.8–1.3 = optimaalinen, yli 1.5 = piikki." },
+      `Kuormasuhde ACWR ${r.acwr.acwr} (${r.acwr.zone})`));
+  }
+}
+
+async function loadCardio() {
+  const data = await api.get(pq("/api/recovery/cardio/trend"));
+  const list = await api.get(pq("/api/recovery/cardio"));
+  document.getElementById("cardio-summary").innerHTML = "";
+  document.getElementById("cardio-summary").append(el("div", { class: "muted" },
+    `Tällä viikolla: ${data.week_sessions} kertaa · ${data.week_minutes} min · ${data.week_kcal} kcal`));
+
+  // Aerobinen kehitys: keskinopeus (km/h) ajan yli, jos matka+aika kirjattu
+  const speedPts = data.points.filter((p) => p.speed_kmh != null)
+    .map((p) => ({ x: new Date(p.date).getTime(), y: p.speed_kmh }));
+  const hrPts = data.points.filter((p) => p.avg_hr != null)
+    .map((p) => ({ x: new Date(p.date).getTime(), y: p.avg_hr }));
+  const series = [];
+  if (speedPts.length >= 2) series.push({ points: speedPts, color: CHART_COLORS[1] });
+  if (hrPts.length >= 2) series.push({ points: normalize01to100(hrPts), color: CHART_COLORS[3] });
+  drawLineChart(document.getElementById("cardio-chart"), series, { unit: speedPts.length ? "km/h" : "" });
+
+  const ul = document.getElementById("cardio-list");
+  ul.innerHTML = "";
+  if (!list.length) ul.append(el("p", { class: "muted" }, "Ei kardiotapahtumia vielä."));
+  list.forEach((s) => {
+    const bits = [s.activity];
+    if (s.duration_min) bits.push(`${s.duration_min} min`);
+    if (s.distance_km) bits.push(`${s.distance_km} km`);
+    if (s.distance_km && s.duration_min) bits.push(`${(s.distance_km / (s.duration_min / 60)).toFixed(1)} km/h`);
+    if (s.avg_hr) bits.push(`syke ${s.avg_hr}`);
+    if (s.kcal) bits.push(`${Math.round(s.kcal)} kcal`);
+    ul.append(el("div", { class: "item" },
+      el("div", { class: "row-between" },
+        el("div", {}, el("strong", {}, s.session_date), el("span", { class: "muted" }, " · " + bits.join(" · "))),
+        el("button", { class: "small danger", onclick: async () => {
+          await api.del(`/api/recovery/cardio/${s.id}`); loadCardio(); loadReadiness();
+        } }, "Poista"))));
+  });
+}
+
+document.getElementById("cardio-save").addEventListener("click", async () => {
+  const v = (id) => document.getElementById(id).value;
+  if (!v("cardio-min") && !v("cardio-kcal")) return alert("Anna vähintään kesto tai kalorit.");
+  await api.post(`/api/recovery/cardio?profile_id=${currentProfileId}`, {
+    session_date: v("cardio-date") || null,
+    activity: v("cardio-activity"),
+    duration_min: v("cardio-min") ? +v("cardio-min") : null,
+    kcal: v("cardio-kcal") ? +v("cardio-kcal") : null,
+    avg_hr: v("cardio-hr") ? +v("cardio-hr") : null,
+    distance_km: v("cardio-km") ? +v("cardio-km") : null,
+  });
+  ["cardio-min", "cardio-kcal", "cardio-hr", "cardio-km"].forEach((id) => (document.getElementById(id).value = ""));
+  loadCardio(); loadReadiness();
+});
+
 async function loadRecovery() {
+  document.getElementById("cardio-date").value = new Date().toISOString().slice(0, 10);
+  await loadReadiness();
+  await loadCardio();
   const entries = await api.get(pq("/api/body/entries"));
   const fields = [
     ["sleep_score", "Unipisteet"], ["sleep_hours", "Uni (h)"],

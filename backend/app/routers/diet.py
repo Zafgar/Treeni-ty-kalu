@@ -94,6 +94,18 @@ def end_phase(phase_id: int, db: Session = Depends(get_db)):
         db.commit()
 
 
+def _avg_daily_cardio_kcal(db: Session, profile_id: int, ref_date: date, days: int) -> float:
+    """Keskimääräinen kardiosta poltettu kcal/pv viim. N päivältä (jaettuna
+    koko jaksolle, koska kardiota ei tehdä joka päivä)."""
+    start = ref_date - timedelta(days=days - 1)
+    sessions = (db.query(models.CardioSession)
+                .filter(models.CardioSession.profile_id == profile_id,
+                        models.CardioSession.session_date >= start,
+                        models.CardioSession.session_date <= ref_date).all())
+    total = sum(s.kcal or 0 for s in sessions)
+    return round(total / days)
+
+
 def _daily_kcal(db: Session, profile_id: int) -> dict[date, float]:
     out: dict[date, float] = {}
     for fl in db.query(models.FoodLog).filter(models.FoodLog.profile_id == profile_id).all():
@@ -232,6 +244,10 @@ def diet_status(profile_id: int = Query(...), db: Session = Depends(get_db)):
         tdee = engine.baseline_tdee(
             week_avg, profile.height_cm if profile else None, age,
             profile.sex if profile else None, training_days)
+        # Lisää keskimääräinen kardiokulutus/pv (adaptiivinen malli huomioi
+        # kardion jo automaattisesti painomuutoksen kautta).
+        if tdee:
+            tdee += _avg_daily_cardio_kcal(db, profile_id, ref_date, 14)
 
     low_carb = bool(next((m for m in DIET_MODELS
                           if phase and m["name"] == phase.model and m.get("low_carb")), None))
