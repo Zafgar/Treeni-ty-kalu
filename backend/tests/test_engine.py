@@ -75,6 +75,32 @@ def test_best_1rm_assumes_reserve_for_working_sets():
     assert single["assumed_rir"] == 0.0
 
 
+def test_backtest_learns_from_data():
+    from datetime import date, timedelta
+    base = date.today()
+
+    def mk(vals, step=30):
+        return [(base - timedelta(days=(len(vals) - 1 - i) * step), v) for i, v in enumerate(vals)]
+
+    # Plataa: malli yliarvioi -> rate_ratio < 1 (kaava oppii hidastumisen)
+    plateau = engine.backtest_forecast(mk([170, 175, 178, 179, 179.5, 180, 180, 180]))
+    assert plateau["rate_ratio"] < 1.0 and plateau["n"] >= 3
+
+    # Tasainen vahva vaste (geneettinen): malli osuu tai aliarvioi -> rate_ratio >= 1
+    responder = engine.backtest_forecast(mk([150, 152, 155, 157, 160, 162, 165, 168]))
+    assert responder["rate_ratio"] >= 1.0
+
+    # Johdonmukainen data -> pieni empiirinen virhe -> kapea haarukka
+    steady = mk([176, 177, 178, 179, 180, 181, 182, 183])
+    bt = engine.backtest_forecast(steady)
+    fc = engine.forecast_progress(steady, 52, ceiling=210, error_scale=bt["error_scale"],
+                                  rate_calibration=bt["rate_ratio"])
+    assert (fc[-1]["high"] - fc[-1]["low"]) < 20  # kapea kun data on tasaista
+
+    # Liian vähän dataa -> neutraali (ei opi)
+    assert engine.backtest_forecast(mk([100, 110]))["n"] == 0
+
+
 def test_forecast_tames_with_sparse_data():
     from datetime import date, timedelta
     base = date.today()

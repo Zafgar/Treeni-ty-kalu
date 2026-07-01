@@ -205,12 +205,17 @@ def exercise_history(
         history = [(p["date"], p["estimated_1rm"]) for p in valid_pts]
         # Kalibrointi aiemman osuvuuden mukaan
         calib = _calibration_for_key(db, profile_id, "lift", exercise_id, history)
+        # Walk-forward-taustatesti: opi tahti ja EMPIIRINEN haarukka omasta
+        # datasta (ennusta joka piste aiemmista ja mittaa virhe).
+        bt = engine.backtest_forecast(history)
+        calib = max(0.6, min(1.4, calib * bt["rate_ratio"]))
         # Lihasmuisti: aiempi huippu -> paluu siihen on nopeaa, ylitys haastavampaa
         best_ever = max(p["estimated_1rm"] for p in valid_pts)
         prior_best = best_ever if best_ever > valid_pts[-1]["estimated_1rm"] + 0.5 else None
         forecast_points = engine.forecast_progress(
             history, horizon_weeks, ceiling, bodyweight_trend_per_week=bw_trend,
-            confidence=conf, rate_calibration=calib, prior_best=prior_best)
+            confidence=conf, rate_calibration=calib, prior_best=prior_best,
+            error_scale=bt["error_scale"])
         _snapshot_forecast(db, profile_id, "lift", exercise_id, valid_pts[-1]["estimated_1rm"], forecast_points)
         conf_label = "korkea" if conf >= 0.7 else "kohtalainen" if conf >= 0.4 else "matala"
         calib_note = ""
@@ -218,6 +223,12 @@ def exercise_history(
             calib_note = "Aiemmat ennusteet aliarvioivat — tahtia nostettu. "
         elif calib < 0.95:
             calib_note = "Aiemmat ennusteet yliarvioivat — tahtia laskettu. "
+        if bt["n"] >= 3:
+            if bt["rate_ratio"] >= 1.15:
+                calib_note += "Kehityksesi on ollut poikkeuksellisen vahvaa (data ylitti mallin) — tahti pidetty korkeana. "
+            elif bt["rate_ratio"] <= 0.7:
+                calib_note += "Kehitys on tasaantunut mallin ennustamaa hitaammaksi — tahti laskettu. "
+            calib_note += "Haarukka perustuu omien ennustevirheidesi kokoon (kapenee kun data on tasaista). "
         forecast_meta = {
             "confidence": conf, "confidence_label": conf_label,
             "bodyweight_trend": bw_trend, "sessions": len(valid_pts), "calibration": calib,
@@ -362,9 +373,11 @@ def total(
         conf = engine.forecast_confidence(len(pts), span)
         best_ever = max(p["estimated_1rm"] for p in pts)
         prior_best = best_ever if best_ever > pts[-1]["estimated_1rm"] + 0.5 else None
-        fc = engine.forecast_progress([(p["date"], p["estimated_1rm"]) for p in pts],
-                                      horizon, ceiling, bodyweight_trend_per_week=bw_trend,
-                                      confidence=conf, prior_best=prior_best)
+        lift_hist = [(p["date"], p["estimated_1rm"]) for p in pts]
+        bt = engine.backtest_forecast(lift_hist)
+        fc = engine.forecast_progress(lift_hist, horizon, ceiling, bodyweight_trend_per_week=bw_trend,
+                                      confidence=conf, prior_best=prior_best,
+                                      rate_calibration=bt["rate_ratio"], error_scale=bt["error_scale"])
         if not fc:
             continue
         have_fc = True

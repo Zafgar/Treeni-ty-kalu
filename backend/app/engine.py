@@ -686,10 +686,67 @@ def forecast_confidence(n_points: int, span_days: int) -> float:
     return round(0.5 * by_count + 0.5 * by_span, 2)
 
 
+def _median(xs: list[float]) -> float:
+    s = sorted(xs)
+    n = len(s)
+    if n == 0:
+        return 0.0
+    return s[n // 2] if n % 2 else (s[n // 2 - 1] + s[n // 2]) / 2
+
+
+def backtest_forecast(history: list[tuple]) -> dict:
+    """Walk-forward-taustatesti: käy data läpi pisteestä pisteeseen, ennusta
+    joka kohdassa SEURAAVA piste vain siihenastisesta datasta ja mittaa osuiko.
+
+    Kokoaa kahdesta virhejoukosta:
+      - rate_ratio: kuinka lähelle mallin ennustama muutos osui todelliseen
+        (mediaani toteuma/ennuste). >1 = malli aliarvioi (esim. geneettinen
+        vaste), <1 = yliarvioi (plataa/hidas). Näin kaava oppii juuri tämän
+        henkilön kehityksen luonteen.
+      - error_scale: tyypillinen yhden askeleen ennustevirhe (kg per √viikko).
+        Antaa EMPIIRISEN haarukan tulevaan: pienet ja tasaiset virheet -> kapea
+        haarukka, iso hajonta -> leveä. Kapenee kun dataa on enemmän ja se on
+        johdonmukaista.
+
+    Vaatii vähintään ~4 pistettä ollakseen luotettava; muuten palauttaa neutraalin.
+    """
+    valid = sorted([(d, v) for d, v in history if v and v > 0], key=lambda p: p[0])
+    if len(valid) < 4:
+        return {"rate_ratio": 1.0, "error_scale": None, "n": 0}
+    base = valid[0][0]
+    pts = [((d - base).days, v) for d, v in valid]
+    ratios, norm_errors = [], []
+    for i in range(3, len(pts)):
+        hist = pts[:i]
+        last_day, last_v = hist[-1]
+        recent = [p for p in hist if p[0] >= last_day - 84] or hist
+        rate = max(0.0, _linear_rate(recent))  # per päivä, siihenastisesta datasta
+        adx, adv = pts[i]
+        dt = adx - last_day
+        if dt <= 0:
+            continue
+        pred = last_v + rate * dt
+        pg, ag = pred - last_v, adv - last_v
+        if abs(pg) > 0.5:
+            ratios.append(ag / pg)
+        # Virhe normalisoituna √aikaan (satunnaiskulku): vertailukelpoinen per √vk
+        norm_errors.append((adv - pred) / ((dt / 7.0) ** 0.5))
+    rate_ratio = 1.0
+    if len(ratios) >= 2:
+        rate_ratio = max(0.5, min(1.6, round(_median(ratios), 2)))
+    error_scale = None
+    if len(norm_errors) >= 3:
+        med = _median(norm_errors)
+        mad = _median([abs(e - med) for e in norm_errors])
+        error_scale = round(1.4826 * mad, 2) or round(_median([abs(e) for e in norm_errors]), 2)
+    return {"rate_ratio": rate_ratio, "error_scale": error_scale, "n": len(norm_errors)}
+
+
 def forecast_progress(
     history: list[tuple], horizon_weeks: int = 26, ceiling: float | None = None,
     bodyweight_trend_per_week: float = 0.0, confidence: float = 1.0,
     rate_calibration: float = 1.0, prior_best: float | None = None,
+    error_scale: float | None = None,
 ) -> list[dict]:
     """Ennusta kehitys realistisesti vähenevällä tuotolla (data + malli).
 
@@ -752,8 +809,14 @@ def forecast_progress(
             damp = max(0.1, 1 - (value / ceiling))
             value = min(ceiling, value + rate_per_week * damp)
         gain = value - current
-        # Epävarmuus kasvaa ajan myötä ja datan niukkuuden mukaan
-        spread = (max(0.5, 0.35 * gain) + 0.015 * current * (w ** 0.5)) * spread_mult
+        if error_scale is not None:
+            # EMPIIRINEN haarukka: taustatestin virheistä, kasvaa √ajan mukaan
+            # (satunnaiskulku). Pohja mittauskohinalle. Johdonmukainen data ->
+            # pieni error_scale -> kapea haarukka. Ei riipu heuristiikasta.
+            spread = max(error_scale * (w ** 0.5), 0.02 * current, 0.12 * gain)
+        else:
+            # Ilman riittävää taustadataa: heuristiikka + datan niukkuus
+            spread = (max(0.5, 0.35 * gain) + 0.015 * current * (w ** 0.5)) * spread_mult
         out.append({
             "date": (valid[-1][0] + timedelta(weeks=w)).isoformat(),
             "mid": round(value, 1),
