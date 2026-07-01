@@ -856,16 +856,19 @@ async function loadComeback() {
   card.style.display = "";
   div.innerHTML = "";
   data.comebacks.forEach((c) => {
-    const wk = Math.round(c.weeks_since);
+    // Ilmaise aika luonnollisesti: vuodet jos pitkä tauko, muuten viikot
+    const ago = c.years_since >= 1 ? `${c.years_since} v` : `${Math.round(c.weeks_since)} vk`;
+    const prYear = c.best_ever_date ? ` (${c.best_ever_date.slice(0, 4)})` : "";
+    const regain = c.regain_weeks >= 52 ? "~1 v" : (c.regain_weeks >= 8 ? `~${Math.round(c.regain_weeks / 4.3)} kk` : `~${c.regain_weeks} vk`);
     div.append(el("div", { class: "item" },
       el("div", { class: "row-between" },
         el("strong", {}, c.exercise_name),
-        el("span", { class: "tag" }, `ennätys ${c.best_ever_1rm} kg`)),
+        el("span", { class: "tag" }, `ennätys ${c.best_ever_1rm} kg${prYear}`)),
       el("div", { class: "muted" },
-        `Viimeksi tehty ${wk} vk sitten · arvioitu nyt ~${c.estimated_current_1rm} kg (−${c.lost_pct}%)`),
+        `Viimeksi tehty ${ago} sitten · arvioitu nyt ~${c.estimated_current_1rm} kg (−${c.lost_pct}%)`),
       el("div", { style: "margin-top:4px" },
         el("strong", { style: "color:var(--accent-2)" }, `Aloita ~${c.suggested_start_kg} kg`),
-        el("span", { class: "muted" }, ` · takaisin huippuun arviolta ~${c.regain_weeks} vk (lihasmuisti nopeuttaa)`))));
+        el("span", { class: "muted" }, ` · takaisin huippuun arviolta ${regain} (lihasmuisti nopeuttaa)`))));
   });
 }
 
@@ -1013,7 +1016,8 @@ document.getElementById("bf-save").addEventListener("click", async () => {
   });
   ["bf-weight", "bf-reps"].forEach((id) => (document.getElementById(id).value = ""));
   await loadLevels(); await drawProgressChart(); await loadLoadTimeline(); await loadRecordsTable();
-  alert("Tulos tallennettu.");
+  await loadComeback();
+  alert("Tulos tallennettu. Jos päivä on riittävän kaukana, näet paluusuunnitelman \"Paluu vanhoihin tuloksiin\" -kortissa.");
 });
 
 async function loadLoadTimeline() {

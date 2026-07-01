@@ -346,30 +346,39 @@ def detrained_1rm(best_ever_1rm: float, weeks_since: float) -> float:
     """Arvioi realistinen tämänhetkinen 1RM kun liikettä ei ole tehty hetkeen.
 
     Voima säilyy hyvin ~2 viikkoa, sitten laskee vähitellen. Lihasmuisti pitää
-    paljon tallessa, joten lasku ei ole rajaton (pohja ~60 % huipusta).
-      ~2 vk: 100 %, ~10 vk: ~90 %, ~26 vk (½ v): ~71 %, ~1 v+: ~60 %.
+    paljon tallessa, joten lasku ei ole rajaton — mutta hyvin pitkällä (vuosien)
+    tauolla pohja laskee edelleen maltillisesti.
+      ~2 vk: 100 %, ~10 vk: ~90 %, ~½ v: ~71 %, ~1 v: ~62 %, ~2 v: ~60 %,
+      ~5 v: ~52 %, ~9 v: ~45 % (pohja).
     """
     if not best_ever_1rm or best_ever_1rm <= 0:
         return 0.0
+    # Ensimmäinen vaihe: nopeahko lasku kohti ~60 % kahden vuoden aikana
     factor = max(0.6, min(1.0, 1.0 - 0.012 * max(0.0, weeks_since - 2)))
+    # Toinen vaihe: hyvin pitkä tauko (yli ~2 v) painaa pohjaa vielä alas, pohja 0.45
+    if weeks_since > 104:
+        factor = max(0.45, factor - 0.0005 * (weeks_since - 104))
     return round(best_ever_1rm * factor, 1)
 
 
 def comeback_plan(best_ever_1rm: float, weeks_since: float) -> dict | None:
     """Paluusuunnitelma vanhaan ennätykseen: realistinen lähtöpaino ja arvio
-    kuinka kauan huipun saavuttaminen uudelleen kestää (lihasmuisti nopeuttaa).
+    kuinka kauan huipun saavuttaminen uudelleen kestää (lihasmuisti nopeuttaa,
+    mutta mitä isompi menetys ja pidempi tauko, sitä pidempi paluu).
     """
     if not best_ever_1rm or best_ever_1rm <= 0:
         return None
     current = detrained_1rm(best_ever_1rm, weeks_since)
     # Aloita maltillisesti: ~5 toiston työpaino varastolla 3 (ei maksimeja heti)
     start = round_to_increment(weight_for_reps(current, 5, 3) * 0.97)
-    # Lihasmuisti: takaisin huippuun ~ kolmasosa poissaoloajasta, 3–20 vk
-    regain_weeks = int(max(3, min(20, round(weeks_since * 0.35))))
     lost_pct = round((1 - current / best_ever_1rm) * 100)
+    # Paluuaika: skaalautuu menetetyn osuuden mukaan (lihasmuisti nopeuttaa,
+    # mutta ison menetyksen takaisin saaminen vie kuukausia). 4–52 vk.
+    regain_weeks = int(max(4, min(52, round(lost_pct * 1.4))))
     return {
         "best_ever_1rm": round(best_ever_1rm, 1),
         "weeks_since": round(weeks_since, 1),
+        "years_since": round(weeks_since / 52.0, 1),
         "estimated_current_1rm": current,
         "lost_pct": lost_pct,
         "suggested_start_kg": start,

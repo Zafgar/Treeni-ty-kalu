@@ -133,7 +133,7 @@ def ensure_seed_exercises():
         ("Pohjenousu", "pohkeet", "pohje", "kone", 4, 15, False, None),
         ("Lantionnosto", "jalat", "pakara", "tanko", 3, 12, False, None),
         # Olkapäät
-        ("Pystypunnerrus", "olkapäät", "olkapää", "tanko", 5, 5, False, None),
+        ("Pystypunnerrus", "olkapäät", "olkapää", "tanko", 5, 5, True, None),
         ("Pystypunnerrus käsipainoilla", "olkapäät", "olkapää", "käsipainot", 4, 10, False, None),
         ("Sivunostot", "olkapäät", "sivuolkapää", "käsipainot", 3, 15, False, None),
         ("Etunostot", "olkapäät", "etuolkapää", "käsipainot", 3, 12, False, None),
@@ -402,6 +402,10 @@ def ensure_extra_exercises():
         conn.execute(text(
             "UPDATE exercises SET per_hand = 1 "
             "WHERE equipment = 'käsipainot' AND (per_hand IS NULL OR per_hand = 0)"))
+        # Pystypunnerrus (tanko) on kätevä voimaa mittaava pääliike (OHP) -> voimataso.
+        # Ei lajitotaliin (sport pysyy tyhjänä, ettei se sekoita voimanoston yhteistulosta).
+        conn.execute(text(
+            "UPDATE exercises SET is_main_lift = 1 WHERE name = 'Pystypunnerrus'"))
 
 
 EXERCISE_DESCRIPTIONS = {

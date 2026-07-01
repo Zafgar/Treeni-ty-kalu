@@ -306,12 +306,14 @@
       </div>
 
       <div class="card">
-        <h3>Lisää vanha tulos (taaksepäin)</h3>
-        <p class="muted">Merkitse aiempia tuloksia, niin graafi ja ennuste näyttävät
-          kehityksen suunnan alusta asti.</p>
+        <h3>Vanhat ennätykset & paluu niihin</h3>
+        <p class="muted">Merkitse aiempi tulos <strong>päivämäärineen (myös vuosien takaa)</strong> —
+          valitse liike, paino ja toistot ja aseta oikea päivä. Järjestelmä laskee siitä
+          realistisen tämänhetkisen arvion ja paluusuunnitelman (ks. "Paluu vanhoihin tuloksiin" alla).
+          Esim. maastaveto 300 kg × 1 vuonna 2017 → arvio nyt + paljonko ja kauanko paluu kestää.</p>
         <div class="btn-row">
           <span id="backfill-ex"></span>
-          <input id="bf-date" type="date" />
+          <input id="bf-date" type="date" title="Milloin tulos tehtiin — aseta oikea vuosi" />
           <input id="bf-weight" type="number" step="0.5" placeholder="paino" style="width:90px" />
           <input id="bf-reps" type="number" placeholder="toistot" style="width:80px" />
           <button id="bf-save" class="primary">Tallenna tulos</button>
