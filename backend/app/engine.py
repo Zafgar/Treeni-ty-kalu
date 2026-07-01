@@ -48,6 +48,34 @@ def weight_for_reps(
     return one_rm / (1.0 + eff / 30.0)
 
 
+def progression_increment(name: str | None = None, equipment: str | None = None,
+                          category: str | None = None, is_main_lift: bool = False,
+                          per_hand: bool = False) -> float:
+    """Realistinen korotusaskel liikkeelle. Isoissa moninivelisissä ~2.5 kg,
+    eristävissä ja pienissä liikkeissä ~1 kg — ei valtavia hyppyjä.
+
+    Käsipainoliikkeissä (paino per käsi) askel on pienempi, koska käsipainot
+    kasvavat usein 1–2 kg välein per käsi.
+    """
+    n = (name or "").lower()
+    ISOLATION = ("hauis", "kääntö", "curl", "ojentaja", "sivunosto", "vipunosto",
+                 "pohje", "pohkeet", "face", "prikaati", "drag", "flyes", "fly",
+                 "lähennys", "loitonnus", "reisiojennus", "takareisikoukistus",
+                 "kohotus", "puristus", "kyynärvarsi", "delt", "olkapää")
+    if per_hand:
+        return 1.0
+    if any(k in n for k in ISOLATION):
+        return 1.0
+    # Isot moniniveliset / pääliikkeet
+    if is_main_lift or any(k in n for k in ("kyykky", "penkki", "maasta", "mave",
+                                            "pystypunnerrus", "soutu", "prässi",
+                                            "jalkaprässi", "dippi", "leuanveto",
+                                            "tempaus", "rinnalleveto")):
+        return 2.5
+    # Muut (koneet, taljat, keskikokoiset) — maltillinen askel
+    return 1.25
+
+
 def round_to_increment(weight: float, increment: float = DEFAULT_INCREMENT) -> float:
     """Pyöristä lähimpään realistiseen painoon (oletus 2.5 kg)."""
     if increment <= 0:
@@ -193,6 +221,41 @@ STRENGTH_STANDARDS = {
 # Käytetään ennusteen kattona, jotta kehityskaari noudattaa luonnollista
 # nostajaa (lähestyy asymptoottisesti, ei lupaa eliittikertoimia).
 NATURAL_CEILINGS = {"squat": 2.4, "bench": 1.8, "deadlift": 2.8, "ohp": 1.15}
+
+
+def detrained_1rm(best_ever_1rm: float, weeks_since: float) -> float:
+    """Arvioi realistinen tämänhetkinen 1RM kun liikettä ei ole tehty hetkeen.
+
+    Voima säilyy hyvin ~2 viikkoa, sitten laskee vähitellen. Lihasmuisti pitää
+    paljon tallessa, joten lasku ei ole rajaton (pohja ~60 % huipusta).
+      ~2 vk: 100 %, ~10 vk: ~90 %, ~26 vk (½ v): ~71 %, ~1 v+: ~60 %.
+    """
+    if not best_ever_1rm or best_ever_1rm <= 0:
+        return 0.0
+    factor = max(0.6, min(1.0, 1.0 - 0.012 * max(0.0, weeks_since - 2)))
+    return round(best_ever_1rm * factor, 1)
+
+
+def comeback_plan(best_ever_1rm: float, weeks_since: float) -> dict | None:
+    """Paluusuunnitelma vanhaan ennätykseen: realistinen lähtöpaino ja arvio
+    kuinka kauan huipun saavuttaminen uudelleen kestää (lihasmuisti nopeuttaa).
+    """
+    if not best_ever_1rm or best_ever_1rm <= 0:
+        return None
+    current = detrained_1rm(best_ever_1rm, weeks_since)
+    # Aloita maltillisesti: ~5 toiston työpaino varastolla 3 (ei maksimeja heti)
+    start = round_to_increment(weight_for_reps(current, 5, 3) * 0.97)
+    # Lihasmuisti: takaisin huippuun ~ kolmasosa poissaoloajasta, 3–20 vk
+    regain_weeks = int(max(3, min(20, round(weeks_since * 0.35))))
+    lost_pct = round((1 - current / best_ever_1rm) * 100)
+    return {
+        "best_ever_1rm": round(best_ever_1rm, 1),
+        "weeks_since": round(weeks_since, 1),
+        "estimated_current_1rm": current,
+        "lost_pct": lost_pct,
+        "suggested_start_kg": start,
+        "regain_weeks": regain_weeks,
+    }
 
 
 def natural_ceiling(lift_key: str, bodyweight: float, sex: str | None = None) -> float | None:

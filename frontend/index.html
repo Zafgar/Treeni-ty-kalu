@@ -103,9 +103,9 @@
           <label>Paino (kg)<input id="b-weight" type="number" step="0.1" /></label>
           <label>Rasva-%<input id="b-bf" type="number" step="0.1" /></label>
           <label>Uni (h)<input id="b-sleep" type="number" step="0.1" /></label>
-          <label>Unipisteet<input id="b-sscore" type="number" /></label>
-          <label>HRV<input id="b-hrv" type="number" /></label>
-          <label>Leposyke<input id="b-rhr" type="number" /></label>
+          <label title="Unen laatupisteet esim. älykellosta (0–100). Vapaaehtoinen.">Unipisteet<input id="b-sscore" type="number" /></label>
+          <label title="HRV = sykevälivaihtelu (Heart Rate Variability), ms. Korkeampi = parempi palautuminen. Älykellosta.">HRV<input id="b-hrv" type="number" /></label>
+          <label title="Leposyke = syke levossa (bpm). Matalampi kertoo usein paremmasta kunnosta/palautumisesta.">Leposyke<input id="b-rhr" type="number" /></label>
           <label title="Päivän aikana syömäsi kokonaiskalorit. Käytetään dieettiohjauksessa ylläpitokalorien (TDEE) tarkentamiseen. Vapaaehtoinen.">Syödyt kalorit (kcal/pv)<input id="b-kcal" type="number" placeholder="koko päivän syönti" /></label>
         </div>
         <p class="muted" style="margin:6px 0 0">Kalorit = koko päivän <strong>syödyt</strong> kalorit (ei treenin
@@ -265,6 +265,15 @@
           <button id="bf-save" class="primary">Tallenna tulos</button>
         </div>
       </div>
+
+      <div class="card" id="comeback-card" style="display:none">
+        <h3>Paluu vanhoihin tuloksiin</h3>
+        <p class="muted">Liikkeet joissa sinulla on ennätys, mutta joita et ole tehnyt hetkeen.
+          Voima laskee tauolla vähitellen (lihasmuisti pitää paljon tallessa) — tässä realistinen
+          tämänhetkinen arvio ja maltillinen lähtöpaino, kun aloitat liikkeen uudelleen.</p>
+        <div id="comeback-content"></div>
+      </div>
+
       <div class="card">
         <h3>Lajitotal</h3>
         <div class="btn-row">
@@ -392,10 +401,10 @@
           <label>Nykyinen paino (kg)<input id="c-weight" type="number" value="100" step="0.5" /></label>
           <label>Nyk. sarjat<input id="c-sets" type="number" value="4" /></label>
           <label>Nyk. toistot<input id="c-reps" type="number" value="5" /></label>
-          <label>Nyk. varasto (RIR)<input id="c-rir" type="number" value="2" step="0.5" /></label>
+          <label title="RIR = Reps In Reserve (varasto): montako toistoa olisi jäänyt vielä jäljelle sarjan jälkeen. 0 = täysillä uupumukseen, 2 = kaksi olisi vielä irronnut.">Nyk. varasto (RIR)<input id="c-rir" type="number" value="2" step="0.5" /></label>
           <label>Tavoite sarjat<input id="c-tsets" type="number" value="4" /></label>
           <label>Tavoite toistot<input id="c-treps" type="number" value="8" /></label>
-          <label>Tavoite varasto<input id="c-trir" type="number" value="2" step="0.5" /></label>
+          <label title="RIR = varasto: montako toistoa jää jäljelle tavoitesarjassa.">Tavoite varasto<input id="c-trir" type="number" value="2" step="0.5" /></label>
           <label>Pyöristys (kg)<input id="c-inc" type="number" value="2.5" step="0.5" /></label>
         </div>
         <button id="calc-btn" class="primary">Laske</button>

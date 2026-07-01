@@ -820,9 +820,31 @@ async function loadProgress() {
   await loadForecastAccuracy();
   await loadVolume();
   await loadLevels();
+  await loadComeback();
   await loadSports();
   await loadLoadTimeline();
   await loadRecordsTable();
+}
+
+async function loadComeback() {
+  const card = document.getElementById("comeback-card");
+  const div = document.getElementById("comeback-content");
+  const data = await api.get(pq("/api/stats/comeback"));
+  if (!data.comebacks || !data.comebacks.length) { card.style.display = "none"; return; }
+  card.style.display = "";
+  div.innerHTML = "";
+  data.comebacks.forEach((c) => {
+    const wk = Math.round(c.weeks_since);
+    div.append(el("div", { class: "item" },
+      el("div", { class: "row-between" },
+        el("strong", {}, c.exercise_name),
+        el("span", { class: "tag" }, `ennätys ${c.best_ever_1rm} kg`)),
+      el("div", { class: "muted" },
+        `Viimeksi tehty ${wk} vk sitten · arvioitu nyt ~${c.estimated_current_1rm} kg (−${c.lost_pct}%)`),
+      el("div", { style: "margin-top:4px" },
+        el("strong", { style: "color:var(--accent-2)" }, `Aloita ~${c.suggested_start_kg} kg`),
+        el("span", { class: "muted" }, ` · takaisin huippuun arviolta ~${c.regain_weeks} vk (lihasmuisti nopeuttaa)`))));
+  });
 }
 
 async function loadForecastAccuracy() {
@@ -1476,68 +1498,84 @@ function renderBodyFigure(sites, height) {
       style: "max-width:100%;height:auto" });
     const grad = "url(#bodyGrad)";
     const defs = svgEl("defs", {});
-    const lg = svgEl("linearGradient", { id: "bodyGrad", x1: "0", y1: "0", x2: "0", y2: "1" });
-    lg.append(svgEl("stop", { offset: "0", "stop-color": "#4f8cff" }));
-    lg.append(svgEl("stop", { offset: "1", "stop-color": "#34d399" }));
-    defs.append(lg); svg.append(defs);
+    const lg = svgEl("linearGradient", { id: "bodyGrad", x1: "0", y1: "0", x2: "1", y2: "1" });
+    lg.append(svgEl("stop", { offset: "0", "stop-color": "#5b9dff" }));
+    lg.append(svgEl("stop", { offset: "0.55", "stop-color": "#3f8cff" }));
+    lg.append(svgEl("stop", { offset: "1", "stop-color": "#2fbf8f" }));
+    defs.append(lg);
+    // Pehmeä varjo syvyyden tuntuun
+    const filt = svgEl("filter", { id: "bodyShadow", x: "-20%", y: "-20%", width: "140%", height: "140%" });
+    const fe = svgEl("feDropShadow", { dx: "0", dy: "3", stdDeviation: "4", "flood-color": "#000", "flood-opacity": "0.35" });
+    filt.append(fe); defs.append(filt); svg.append(defs);
+
+    // Yhteinen ryhmä: yhtenäinen ääriviiva + varjo -> siistimpi kokonaisuus
+    const g = svgEl("g", { fill: grad, stroke: "rgba(10,20,40,0.55)", "stroke-width": "1.5",
+      "stroke-linejoin": "round", "stroke-linecap": "round", filter: "url(#bodyShadow)" });
 
     // Pystytasot (osuudet bodyPx:stä)
-    const headR = bodyPx * 0.058;
+    const headR = bodyPx * 0.062;
     const yHead = yTop + headR;
-    const yNeck = yHead + headR * 0.85;
-    const yShoulder = yTop + bodyPx * 0.165;
-    const yChest = yTop + bodyPx * 0.26;
+    const yShoulder = yTop + bodyPx * 0.175;
+    const yChest = yTop + bodyPx * 0.27;
     const yWaist = yTop + bodyPx * 0.46;
-    const yHip = yTop + bodyPx * 0.52;
+    const yHip = yTop + bodyPx * 0.525;
     const yKnee = yTop + bodyPx * 0.74;
-    const yCalf = yTop + bodyPx * 0.86;
+    const yCalf = yTop + bodyPx * 0.85;
     const yAnkle = yTop + bodyPx * 0.985;
 
     const shW = halfW(sh.c), chW = halfW(ch.c), waW = halfW(wa.c), hipW = halfW(hip.c);
+    const round1 = (n) => Math.round(n * 10) / 10;
+    const P = (x, y) => `${round1(x)},${round1(y)}`;
 
-    // --- Jalat (taperoituvat polygonit): reisi -> polvi -> pohje -> nilkka ---
-    const legGap = Math.max(2, hipW * 0.12);            // pieni rako haaroväliin
+    // --- Jalat: pehmeät taperoituvat muodot (reisi -> polvi -> pohje -> nilkka) ---
     const thD = dia(th.c), caD = dia(ca.c);
     [-1, 1].forEach((d) => {
-      const legCx = cx + d * (hipW * 0.5);              // jalan keskilinja
-      const wThigh = thD * 0.92, wKnee = thD * 0.6, wCalf = caD * 0.95, wAnkle = caD * 0.55;
-      const inner = cx + d * legGap;                    // sisäreuna lähellä keskustaa
-      const pts = [
-        [legCx - wThigh / 2, yHip], [legCx + wThigh / 2, yHip],
-        [legCx + wKnee / 2, yKnee], [legCx + wCalf / 2, yCalf], [legCx + wAnkle / 2, yAnkle],
-        [legCx - wAnkle / 2, yAnkle], [legCx - wCalf / 2, yCalf], [legCx - wKnee / 2, yKnee],
-      ].map((p) => p.join(",")).join(" ");
-      svg.append(svgEl("polygon", { points: pts, fill: grad }));
+      const legCx = cx + d * (hipW * 0.48);
+      const wThigh = thD * 0.98, wKnee = thD * 0.58, wCalf = caD, wAnkle = caD * 0.5;
+      // Bézier-reunat pehmentävät reisi->polvi->pohje-siirtymän
+      const dd = `M ${P(legCx - wThigh / 2, yHip)}
+        C ${P(legCx - wThigh / 2, yHip + 40)} ${P(legCx - wKnee / 2, yKnee - 30)} ${P(legCx - wKnee / 2, yKnee)}
+        C ${P(legCx - wCalf / 2, yKnee + 18)} ${P(legCx - wCalf / 2, yCalf)} ${P(legCx - wAnkle / 2, yAnkle)}
+        L ${P(legCx + wAnkle / 2, yAnkle)}
+        C ${P(legCx + wCalf / 2, yCalf)} ${P(legCx + wCalf / 2, yKnee + 18)} ${P(legCx + wKnee / 2, yKnee)}
+        C ${P(legCx + wKnee / 2, yKnee - 30)} ${P(legCx + wThigh / 2, yHip + 40)} ${P(legCx + wThigh / 2, yHip)} Z`;
+      g.append(svgEl("path", { d: dd.replace(/\s+/g, " ") }));
     });
 
-    // --- Vartalo: hartia -> rinta -> vyötärö -> lantio (peilattu polygoni) ---
-    const torso = [
-      [cx - shW, yShoulder], [cx + shW, yShoulder],
-      [cx + chW, yChest], [cx + waW, yWaist], [cx + hipW, yHip],
-      [cx - hipW, yHip], [cx - waW, yWaist], [cx - chW, yChest],
-    ].map((p) => p.join(",")).join(" ");
-    svg.append(svgEl("polygon", { points: torso, fill: grad }));
-
-    // --- Kädet (taperoituvat): olkavarsi hauiksesta, riippuvat sivuilla ---
+    // --- Kädet: pehmeät taperoituvat muodot, pieni rako vartaloon ---
     const armD = dia(arm.c);
-    const yWrist = yWaist + bodyPx * 0.04;
+    const yWrist = yWaist + bodyPx * 0.05;
+    const yElbow = (yShoulder + yWrist) / 2;
     [-1, 1].forEach((d) => {
-      const ax = cx + d * (shW + armD * 0.45);
-      const wTop = armD, wElbow = armD * 0.72, wWrist = armD * 0.5;
-      const yElbow = (yShoulder + yWrist) / 2;
-      const pts = [
-        [ax - wTop / 2, yShoulder], [ax + wTop / 2, yShoulder],
-        [ax + wElbow / 2, yElbow], [ax + wWrist / 2, yWrist],
-        [ax - wWrist / 2, yWrist], [ax - wElbow / 2, yElbow],
-      ].map((p) => p.join(",")).join(" ");
-      svg.append(svgEl("polygon", { points: pts, fill: grad }));
+      const ax = cx + d * (shW + armD * 0.55 + 2);
+      const wTop = armD, wElbow = armD * 0.7, wWrist = armD * 0.48;
+      const dd = `M ${P(ax - wTop / 2, yShoulder)}
+        C ${P(ax - wTop / 2, yElbow - 20)} ${P(ax - wElbow / 2, yElbow - 10)} ${P(ax - wElbow / 2, yElbow)}
+        C ${P(ax - wWrist / 2, yElbow + 20)} ${P(ax - wWrist / 2, yWrist)} ${P(ax - wWrist / 2, yWrist)}
+        L ${P(ax + wWrist / 2, yWrist)}
+        C ${P(ax + wWrist / 2, yElbow + 20)} ${P(ax + wElbow / 2, yElbow + 10)} ${P(ax + wElbow / 2, yElbow)}
+        C ${P(ax + wElbow / 2, yElbow - 10)} ${P(ax + wTop / 2, yElbow - 20)} ${P(ax + wTop / 2, yShoulder)} Z`;
+      g.append(svgEl("path", { d: dd.replace(/\s+/g, " "), rx: 6 }));
     });
 
-    // --- Kaula + pää (piirretään päälle) ---
-    svg.append(svgEl("rect", { x: cx - halfW(neck.c) * 0.7, y: yHead, width: halfW(neck.c) * 1.4,
-      height: yShoulder - yHead + 4, fill: grad, rx: 4 }));
-    svg.append(svgEl("circle", { cx, cy: yHead, r: headR, fill: grad }));
+    // --- Vartalo: pehmeä silhouette (hartia -> rinta -> vyötärö -> lantio) ---
+    const torso = `M ${P(cx - shW, yShoulder)}
+      C ${P(cx - shW, yShoulder + 6)} ${P(cx - chW, yChest - 10)} ${P(cx - chW, yChest)}
+      C ${P(cx - waW, yWaist - 20)} ${P(cx - waW, yWaist)} ${P(cx - waW, yWaist)}
+      C ${P(cx - hipW, yHip - 14)} ${P(cx - hipW, yHip)} ${P(cx - hipW, yHip)}
+      L ${P(cx + hipW, yHip)}
+      C ${P(cx + hipW, yHip - 14)} ${P(cx + waW, yWaist)} ${P(cx + waW, yWaist)}
+      C ${P(cx + waW, yWaist - 20)} ${P(cx + chW, yChest)} ${P(cx + chW, yChest)}
+      C ${P(cx + chW, yChest - 10)} ${P(cx + shW, yShoulder + 6)} ${P(cx + shW, yShoulder)} Z`;
+    g.append(svgEl("path", { d: torso.replace(/\s+/g, " ") }));
 
+    // --- Kaula + pää päälle ---
+    const neckW = halfW(neck.c) * 1.3;
+    g.append(svgEl("rect", { x: round1(cx - neckW / 2), y: round1(yHead + headR * 0.4),
+      width: round1(neckW), height: round1(yShoulder - yHead), rx: 5 }));
+    g.append(svgEl("circle", { cx, cy: round1(yHead), r: round1(headR) }));
+
+    svg.append(g);
     area.append(svg);
 
     // Mitat-listaus hahmon alle (oikeat vs. oletetut)
@@ -1556,15 +1594,31 @@ function renderBodyFigure(sites, height) {
     }
   }
 
+  // Näytä/piilota-kytkin (muistetaan valinta selaimeen)
+  const applyHidden = (hidden) => {
+    area.style.display = hidden ? "none" : "";
+    slideHost.style.display = hidden ? "none" : "";
+    toggle.textContent = hidden ? "Näytä hahmo" : "Piilota hahmo";
+  };
+  const toggle = el("button", { class: "small", style: "margin-bottom:8px" });
+  const slideHost = el("div");
+  toggle.addEventListener("click", () => {
+    const nowHidden = area.style.display !== "none" ? true : false;
+    localStorage.setItem("figureHidden", nowHidden ? "1" : "0");
+    applyHidden(nowHidden);
+  });
+  dateWrap.append(toggle, slideHost);
+
   // Aikajana jos useita päiviä
   if (dates.length > 1) {
     const slider = el("input", { type: "range", min: "0", max: String(dates.length - 1),
       value: String(dates.length - 1), style: "width:100%" });
     const lbl = el("div", { class: "muted", style: "text-align:center" }, dates[dates.length - 1]);
     slider.addEventListener("input", () => { lbl.textContent = dates[+slider.value]; draw(dates[+slider.value]); });
-    dateWrap.append(slider, lbl);
+    slideHost.append(slider, lbl);
   }
   draw(dates[dates.length - 1]);
+  applyHidden(localStorage.getItem("figureHidden") === "1");
 }
 
 async function loadBody() {

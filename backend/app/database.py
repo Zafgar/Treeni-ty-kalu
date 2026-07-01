@@ -374,6 +374,17 @@ def ensure_extra_exercises():
         ("Vatsarutistus (kone)", "keskivartalo", "vatsa", "kone", 3, 15, None, 0),
         ("Selän ojennus (kone/penkki)", "selkä", "alaselkä", "kone", 3, 15, None, 0),
         ("Hack-kyykky (kone)", "jalat", "etureidet", "kone", 4, 10, None, 0),
+        # Hauis- ja ojentajavariaatiot
+        ("Hauiskääntö vinopenkissä (käsipaino)", "kädet", "hauis (pitkä pää)", "käsipainot", 3, 12, None, 1),
+        ("Drag curl (tanko)", "kädet", "hauis", "tanko", 3, 10, None, 0),
+        ("Scott-kääntö (preacher)", "kädet", "hauis (lyhyt pää)", "tanko", 3, 12, None, 0),
+        ("Keskitetty hauiskääntö (concentration)", "kädet", "hauis huippu", "käsipainot", 3, 12, None, 1),
+        ("Spider curl", "kädet", "hauis", "käsipainot", 3, 12, None, 1),
+        ("Zottman-kääntö", "kädet", "hauis/kyynärvarsi", "käsipainot", 3, 12, None, 1),
+        ("Kapea penkkipunnerrus", "kädet", "ojentaja/rinta", "tanko", 4, 8, None, 0),
+        ("Ojentajaprässi otsalle (skull crusher)", "kädet", "ojentaja", "tanko", 3, 10, None, 0),
+        ("Ojentajapotku (kickback, käsipaino)", "kädet", "ojentaja", "käsipainot", 3, 14, None, 1),
+        ("Ranneväännöt (kyynärvarsi)", "kädet", "kyynärvarsi", "tanko", 3, 15, None, 0),
     ]
     with engine.begin() as conn:
         existing = {r[0] for r in conn.execute(text("SELECT name FROM exercises")).fetchall()}
@@ -424,6 +435,27 @@ EXERCISE_DESCRIPTIONS = {
         "tauko huipulla, laske kantapää hallitusti alas asti.",
     "Sivunostot": "Idea: olkapään sivuosa (leveys). Nosta käsipainot sivuille hartiatasoon, "
         "kevyt kyynärtaivutus, laske hallitusti — älä heilauta.",
+    "Hauiskääntö vinopenkissä (käsipaino)": "Idea: hauiksen pitkä pää venytettynä (huippu). Istu vinopenkille "
+        "taakse nojaten, kädet roikkuvat suorina takana. Käännä käsipainot ylös kyynärpäät paikallaan — "
+        "korostaa hauiksen alaosaa ja huippua. Paino = per käsipaino.",
+    "Drag curl (tanko)": "Idea: hauis ilman etuolkapään apua. Vedä tanko YLÖS vartaloa pitkin niin että "
+        "kyynärpäät menevät taakse ja tanko pysyy lähellä kehoa — ei eteen heilautusta. Hauis tekee työn.",
+    "Scott-kääntö (preacher)": "Idea: hauiksen lyhyt pää eristettynä. Olkavarret Scott-penkin tyynyllä, "
+        "käännä tanko ylös ja laske täyteen venytykseen hallitusti. Estää huijaamisen selällä.",
+    "Keskitetty hauiskääntö (concentration)": "Idea: hauiksen huippu ja erottelu. Istu, kyynärpää reiden "
+        "sisäpintaa vasten, käännä käsipaino ylös yhdellä kädellä keskittyen supistukseen. Paino = per käsi.",
+    "Kapea penkkipunnerrus": "Idea: ojentajapainotteinen penkki. Ote hartioita kapeampi, kyynärpäät "
+        "lähellä kylkiä, tanko alarintaan. Kehittää ojentajaa ja lukko-osan penkkivoimaa.",
+    "Ojentajaprässi otsalle (skull crusher)": "Idea: ojentajan pitkä pää. Selinmakuulla laske tanko otsan "
+        "taakse kyynärpäät paikallaan, ojenna ylös. Pidä liike hallittuna kyynärnivelten suojaamiseksi.",
+    "Reisiojennus (kone)": "Idea: etureiden eristävä liike. Ojenna polvet suoriksi hallitusti, tauko "
+        "huipulla, laske jarruttaen. Hyvä etureiden lämmittelyyn ja loppurutistukseen.",
+    "Takareisikoukistus (kone)": "Idea: takareiden eristävä liike. Koukista kantapäät pakaroita kohti "
+        "hallitusti, purista huipulla, laske jarruttaen. Tasapainottaa etureisivoimaa.",
+    "Alatalja soutu (leveä)": "Idea: yläselän leveys ja takaolkapää. Leveä ote, vedä kahva rintakehän "
+        "yläosaan kyynärpäät ulos, purista lapoja yhteen. Selkä suorana, ei kiskomista alaselällä.",
+    "Ylätalja leveä": "Idea: selän leveys (V-malli). Leveä ote, vedä tanko rintaan lapaa alas ja taakse "
+        "vetäen, kyynärpäät alas. Palauta täyteen venytykseen hallitusti.",
 }
 
 

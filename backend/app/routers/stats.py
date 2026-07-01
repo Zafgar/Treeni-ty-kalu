@@ -406,8 +406,13 @@ def exercise_last(
     last = max(valid, key=lambda p: p["date"])
     bs = last["best_set"]
     one_rm = engine.estimate_1rm(bs["weight"], bs["reps"], bs.get("rir"))
+    ex = db.get(models.Exercise, exercise_id)
+    inc = engine.progression_increment(
+        ex.name if ex else None, ex.equipment if ex else None,
+        ex.category if ex else None, ex.is_main_lift if ex else False,
+        ex.per_hand if ex else False)
     suggestions = {
-        str(r): engine.round_to_increment(engine.weight_for_reps(one_rm, r, bs.get("rir")))
+        str(r): engine.round_to_increment(engine.weight_for_reps(one_rm, r, bs.get("rir")), inc)
         for r in (1, 3, 5, 8, 10, 12)
     }
     return {
@@ -418,6 +423,44 @@ def exercise_last(
         },
         "suggestions": suggestions,
     }
+
+
+@router.get("/comeback")
+def comeback(profile_id: int | None = Query(None), db: Session = Depends(get_db)):
+    """Paluu vanhoihin tuloksiin: liikkeet joissa on ennätys mutta joita ei ole
+    tehty hetkeen. Näyttää ennätyksen, ajan siitä, realistisen tämänhetkisen
+    arvion (detraining) ja maltillisen lähtöpainon uudelleen aloittamiseen."""
+    today = date.today()
+    result = []
+    # Käydään läpi liikkeet, joissa on lokitettua dataa
+    ex_ids = [row[0] for row in (
+        db.query(models.WorkoutExercise.exercise_id)
+        .join(models.WorkoutSession, models.WorkoutExercise.session_id == models.WorkoutSession.id)
+        .filter(*( [models.WorkoutSession.profile_id == profile_id] if profile_id is not None else [] ))
+        .distinct().all())]
+    for ex_id in ex_ids:
+        ex = db.get(models.Exercise, ex_id)
+        if not ex:
+            continue
+        points = _exercise_session_points(db, ex_id, profile_id)
+        rec = _records_for_exercise(points, DEFAULT_WINDOW_DAYS)
+        if not rec:
+            continue
+        weeks_since = (today - rec["last_trained"]).days / 7.0
+        # "Paluu" koskee liikkeitä joita ei ole tehty ~3 viikkoon
+        if weeks_since < 3:
+            continue
+        plan = engine.comeback_plan(rec["best_ever_1rm"], weeks_since)
+        if not plan:
+            continue
+        result.append({
+            "exercise_id": ex_id, "exercise_name": ex.name,
+            "last_trained": rec["last_trained"].isoformat(),
+            "best_ever_date": rec["best_ever_date"].isoformat() if rec["best_ever_date"] else None,
+            **plan,
+        })
+    result.sort(key=lambda r: r["best_ever_1rm"], reverse=True)
+    return {"comebacks": result}
 
 
 @router.get("/exercises/{exercise_id}/suggest")
@@ -443,16 +486,28 @@ def exercise_suggest(
     bs = last["best_set"]
     one_rm = engine.estimate_1rm(bs["weight"], bs["reps"], bs.get("rir"))
     rir = target_rir if target_rir is not None else bs.get("rir")
-    base = engine.weight_for_reps(one_rm, target_reps, rir)
-    if increase:
-        base *= 1.025  # ~2.5 % nosto kun aikoo korottaa
-    suggested = engine.round_to_increment(base)
+
+    # Realistinen korotusaskel liikkeen mukaan (2.5 kg isot, 1 kg eristävät)
+    ex = db.get(models.Exercise, exercise_id)
+    inc = engine.progression_increment(
+        ex.name if ex else None, ex.equipment if ex else None,
+        ex.category if ex else None, ex.is_main_lift if ex else False,
+        ex.per_hand if ex else False)
+
+    if target_reps == bs["reps"]:
+        # Sama toistotavoite kuin viimeksi: korotus = TASAN yksi askel edellisestä
+        base = bs["weight"] + (inc if increase else 0.0)
+    else:
+        # Eri toistotavoite: laske sitä vastaava paino, ja lisää yksi askel jos korotetaan
+        base = engine.weight_for_reps(one_rm, target_reps, rir) + (inc if increase else 0.0)
+    suggested = engine.round_to_increment(base, inc)
     return {
         "suggested_weight": suggested,
+        "increment": inc,
         "from": {"weight": bs["weight"], "reps": bs["reps"], "date": last["date"].isoformat()},
         "note": (
             f"Edellinen paras: {bs['weight']} kg × {bs['reps']}. "
-            f"Ehdotus {target_reps} toistolle" + (" (korotettu)" if increase else "") + f": {suggested} kg."
+            f"Ehdotus {target_reps} toistolle" + (f" (+{inc} kg)" if increase else "") + f": {suggested} kg."
         ),
     }
 
