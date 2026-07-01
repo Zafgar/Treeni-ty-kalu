@@ -205,9 +205,12 @@ def exercise_history(
         history = [(p["date"], p["estimated_1rm"]) for p in valid_pts]
         # Kalibrointi aiemman osuvuuden mukaan
         calib = _calibration_for_key(db, profile_id, "lift", exercise_id, history)
+        # Lihasmuisti: aiempi huippu -> paluu siihen on nopeaa, ylitys haastavampaa
+        best_ever = max(p["estimated_1rm"] for p in valid_pts)
+        prior_best = best_ever if best_ever > valid_pts[-1]["estimated_1rm"] + 0.5 else None
         forecast_points = engine.forecast_progress(
             history, horizon_weeks, ceiling, bodyweight_trend_per_week=bw_trend,
-            confidence=conf, rate_calibration=calib)
+            confidence=conf, rate_calibration=calib, prior_best=prior_best)
         _snapshot_forecast(db, profile_id, "lift", exercise_id, valid_pts[-1]["estimated_1rm"], forecast_points)
         conf_label = "korkea" if conf >= 0.7 else "kohtalainen" if conf >= 0.4 else "matala"
         calib_note = ""

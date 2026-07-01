@@ -689,7 +689,7 @@ def forecast_confidence(n_points: int, span_days: int) -> float:
 def forecast_progress(
     history: list[tuple], horizon_weeks: int = 26, ceiling: float | None = None,
     bodyweight_trend_per_week: float = 0.0, confidence: float = 1.0,
-    rate_calibration: float = 1.0,
+    rate_calibration: float = 1.0, prior_best: float | None = None,
 ) -> list[dict]:
     """Ennusta kehitys realistisesti vähenevällä tuotolla (data + malli).
 
@@ -697,6 +697,10 @@ def forecast_progress(
     viikkotahti (DATA), jota vaimennetaan kun arvo lähestyy fysiologista kattoa
     (MALLI/tutkimus). Painon lasku hidastaa tahtia ja laskee kattoa (max
     potentiaali skaalautuu painon mukaan). Pienempi data -> leveämpi haarukka.
+
+    prior_best: aiempi henkilökohtainen huippu. Jos nykyinen on sen alle
+    (paluu tauolta), paluu vanhaan huippuun on NOPEAA (lihasmuisti) ja vasta
+    huipun ylityksen jälkeen haaste kasvaa (vähenevä tuotto kohti kattoa).
     """
     valid = [(d, v) for d, v in history if v and v > 0]
     if len(valid) < 2:
@@ -730,9 +734,14 @@ def forecast_progress(
     out = []
     value = current
     for w in range(1, horizon_weeks + 1):
-        # Vähenevä tuotto: tahti hidastuu kattoa lähestyttäessä
-        damp = max(0.1, 1 - (value / ceiling))
-        value = min(ceiling, value + rate_per_week * damp)
+        if prior_best and value < prior_best:
+            # Lihasmuisti: paluu vanhaan huippuun on nopeaa (vain lievä vaimennus)
+            step = rate_per_week * max(0.7, 1 - value / (prior_best * 1.15))
+            value = min(prior_best, value + step)
+        else:
+            # Huipun ylityksen jälkeen: vähenevä tuotto kohti fysiologista kattoa
+            damp = max(0.1, 1 - (value / ceiling))
+            value = min(ceiling, value + rate_per_week * damp)
         gain = value - current
         # Epävarmuus kasvaa ajan myötä ja datan niukkuuden mukaan
         spread = (max(0.5, 0.35 * gain) + 0.015 * current * (w ** 0.5)) * spread_mult
