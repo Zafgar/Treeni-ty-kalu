@@ -106,6 +106,17 @@ def test_readiness_feeling_and_nutrition():
     assert any("ravinto" in w.lower() for w in r["warnings"])
 
 
+def test_body_fat_navy():
+    # Mies: kaula 40, vyötärö 88, pituus 180 -> järkevä rasva-% (10–25 %)
+    bf = engine.body_fat_navy("mies", 180, 40, 88)
+    assert bf is not None and 8 < bf < 30
+    # Puuttuva mitta -> None
+    assert engine.body_fat_navy("mies", 180, None, 88) is None
+    # Nainen vaatii myös lantion
+    assert engine.body_fat_navy("nainen", 168, 32, 70) is None
+    assert engine.body_fat_navy("nainen", 168, 32, 70, hip_cm=95) is not None
+
+
 def test_acwr_status():
     assert engine.acwr_status(170, 100)["zone"] == "korkea"
     assert engine.acwr_status(100, 100)["zone"] == "optimaalinen"

@@ -23,6 +23,7 @@ from .database import (
     ensure_seed_foods,
 )
 from .routers import (
+    backup,
     body,
     diet,
     engine_api,
@@ -70,6 +71,7 @@ app.include_router(body.router)
 app.include_router(nutrition.router)
 app.include_router(diet.router)
 app.include_router(recovery.router)
+app.include_router(backup.router)
 
 
 @app.get("/api/health")

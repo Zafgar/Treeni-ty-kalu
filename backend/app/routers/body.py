@@ -111,15 +111,33 @@ def body_summary(profile_id: int = Query(...), db: Session = Depends(get_db)):
     latest_w = next((e for e in reversed(entries) if e.bodyweight is not None), None)
     latest_bf = next((e for e in reversed(entries) if e.body_fat_pct is not None), None)
     physique = None
-    if latest_w and latest_bf:
-        height = profile.height_cm if profile else None
-        creatine = bool(profile.creatine) if profile else False
-        composition = engine.body_composition(latest_w.bodyweight, latest_bf.body_fat_pct, height, creatine=creatine)
+    height = profile.height_cm if profile else None
+    creatine = bool(profile.creatine) if profile else False
+    sex = profile.sex if profile else None
+
+    # Jos mitattua rasva-%:a ei ole, arvioi se ympärysmitoista (Navy-kaava)
+    bf_pct = latest_bf.body_fat_pct if latest_bf else None
+    bf_estimated = False
+    if bf_pct is None:
+        def _latest_site(site):
+            m = (db.query(models.Measurement)
+                 .filter(models.Measurement.profile_id == profile_id, models.Measurement.site == site)
+                 .order_by(models.Measurement.entry_date.desc()).first())
+            return m.value_cm if m else None
+        est = engine.body_fat_navy(sex, height, _latest_site("kaula"),
+                                   _latest_site("vyötärö"), _latest_site("lantio"))
+        if est is not None:
+            bf_pct = est
+            bf_estimated = True
+
+    if latest_w and bf_pct is not None:
+        composition = engine.body_composition(latest_w.bodyweight, bf_pct, height, creatine=creatine)
         composition["bodyweight"] = latest_w.bodyweight
-        composition["body_fat_pct"] = latest_bf.body_fat_pct
+        composition["body_fat_pct"] = bf_pct
+        composition["body_fat_estimated"] = bf_estimated
         composition["creatine"] = creatine
         # Fysiikkataso (aloittelija → IFBB Pro) FFMI:stä
-        physique = engine.physique_level(composition.get("ffmi"), profile.sex if profile else None)
+        physique = engine.physique_level(composition.get("ffmi"), sex)
 
     # Mitta-aikasarjat kohdittain
     measurements = (

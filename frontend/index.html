@@ -259,6 +259,19 @@
           selaimessa tämä osoite. Voit lisätä sivun aloitusnäyttöön (PWA).</p>
         <div id="network-info" class="muted">Haetaan osoitetta…</div>
       </div>
+
+      <div class="card">
+        <h3>💾 Varmuuskopio</h3>
+        <p class="muted">Lataa koko datasi (kaikki profiilit, treenit, ohjelmat, keho, ruoka,
+          kardio) yhteen tiedostoon talteen tai toiselle koneelle siirtoa varten. Palautus
+          <strong>korvaa</strong> nykyisen datan tiedostosta.</p>
+        <div class="btn-row">
+          <button id="backup-download" class="primary">Lataa varmuuskopio</button>
+          <button id="backup-restore-btn">Palauta tiedostosta</button>
+          <input id="backup-file" type="file" accept="application/json,.json" style="display:none" />
+        </div>
+        <div id="backup-status" class="muted" style="margin-top:8px"></div>
+      </div>
     </section>
 
     <!-- KEHITYS -->

@@ -1421,6 +1421,46 @@ function openProfileForm(existing) {
 
 document.getElementById("new-profile-btn").addEventListener("click", () => openProfileForm(null));
 
+// ---- Varmuuskopio: lataus ja palautus ----
+document.getElementById("backup-download").addEventListener("click", async () => {
+  const status = document.getElementById("backup-status");
+  status.textContent = "Kootaan varmuuskopiota…";
+  try {
+    const data = await api.get("/api/backup/export");
+    const blob = new Blob([JSON.stringify(data)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const stamp = new Date().toISOString().slice(0, 10);
+    a.href = url; a.download = `treeni-varmuuskopio-${stamp}.json`;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+    status.textContent = "Varmuuskopio ladattu. Säilytä tiedosto turvassa.";
+  } catch (e) { status.textContent = "Lataus epäonnistui: " + e.message; }
+});
+
+document.getElementById("backup-restore-btn").addEventListener("click", () => {
+  document.getElementById("backup-file").click();
+});
+
+document.getElementById("backup-file").addEventListener("change", async (ev) => {
+  const file = ev.target.files[0];
+  if (!file) return;
+  const status = document.getElementById("backup-status");
+  if (!confirm("Palautus KORVAA kaikki nykyisen datan varmuuskopiolla. Jatketaanko?")) {
+    ev.target.value = ""; return;
+  }
+  status.textContent = "Palautetaan…";
+  try {
+    const text = await file.text();
+    const payload = JSON.parse(text);
+    const res = await api.post("/api/backup/import", payload);
+    const total = Object.values(res.restored || {}).reduce((a, b) => a + b, 0);
+    status.textContent = `Palautettu (${total} riviä). Ladataan sovellus uudelleen…`;
+    setTimeout(() => window.location.reload(), 1200);
+  } catch (e) { status.textContent = "Palautus epäonnistui: " + e.message; }
+  ev.target.value = "";
+});
+
 // =================== KEHO ===================
 async function renderBodyScore() {
   const div = document.getElementById("body-score");
@@ -1673,7 +1713,8 @@ async function loadBody() {
   if (s.composition) {
     const c = s.composition;
     comp.append(el("div", { class: "result-box" },
-      el("div", {}, `Paino ${c.bodyweight} kg · rasva ${c.body_fat_pct}%`),
+      el("div", {}, `Paino ${c.bodyweight} kg · rasva ${c.body_fat_pct}%` +
+        (c.body_fat_estimated ? " (arvioitu mitoista)" : "")),
       el("div", { class: "big" }, `Lihasmassa ~${c.lean_mass_kg} kg`),
       el("div", { class: "muted" },
         `Rasvamassa ~${c.fat_mass_kg} kg` +

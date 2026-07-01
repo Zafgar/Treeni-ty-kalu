@@ -141,6 +141,34 @@ def convert_scheme(
     )
 
 
+def body_fat_navy(sex: str | None, height_cm: float | None, neck_cm: float | None,
+                  waist_cm: float | None, hip_cm: float | None = None) -> float | None:
+    """Arvioi rasva-% ympärysmitoista (U.S. Navy -kaava). Käytetään kun mitattua
+    rasva-%:a ei ole annettu. Miehillä tarvitaan kaula + vyötärö + pituus,
+    naisilla lisäksi lantio.
+    """
+    import math
+    if not height_cm or not neck_cm or not waist_cm:
+        return None
+    female = (sex or "").lower().startswith("nain")
+    try:
+        if female:
+            if not hip_cm:
+                return None
+            val = (495 / (1.29579 - 0.35004 * math.log10(waist_cm + hip_cm - neck_cm)
+                          + 0.22100 * math.log10(height_cm)) - 450)
+        else:
+            if waist_cm <= neck_cm:
+                return None
+            val = (495 / (1.0324 - 0.19077 * math.log10(waist_cm - neck_cm)
+                          + 0.15456 * math.log10(height_cm)) - 450)
+    except (ValueError, ZeroDivisionError):
+        return None
+    if val <= 0 or val > 70:
+        return None
+    return round(val, 1)
+
+
 def creatine_water_kg(bodyweight: float) -> float:
     """Kreatiinin sitoman lihasveden arvio (kg). ~1.1 % kehonpainosta, rajattu
     0.7–1.6 kg. Tämä on vettä lihaksissa — EI rasvaa — joten se kuuluu
