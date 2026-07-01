@@ -846,6 +846,55 @@ def _major_group(category: str | None, muscle_group: str | None, name: str | Non
     return None
 
 
+@router.get("/program-load")
+def program_load(profile_id: int | None = Query(None), db: Session = Depends(get_db)):
+    """Kokonaiskuorma OHJELMAKIERROITTAIN: kun ohjelman kaikki treenipäivät on
+    tehty kerran (yksi kierto), summataan niiden kg ja merkitään piste kierron
+    viimeisen treenin päivälle. Näyttää suunnan selkeämmin kuin per-treeni.
+    """
+    q = db.query(models.Program)
+    if profile_id is not None:
+        q = q.filter(models.Program.profile_id == profile_id)
+    programs = q.all()
+    result = []
+    for prog in programs:
+        train_day_ids = [d.id for d in prog.days if d.day_type == "train"]
+        if not train_day_ids:
+            continue
+        need = set(train_day_ids)
+        sessions = (db.query(models.WorkoutSession)
+                    .filter(models.WorkoutSession.program_day_id.in_(train_day_ids),
+                            models.WorkoutSession.status == "completed")
+                    .order_by(models.WorkoutSession.session_date, models.WorkoutSession.id).all())
+        cycles = []
+        seen, load, last_date, cnt = set(), 0.0, None, 0
+        for s in sessions:
+            load += _session_tonnage_val(s)
+            cnt += 1
+            seen.add(s.program_day_id)
+            last_date = s.session_date
+            if need.issubset(seen):
+                cycles.append({"date": last_date.isoformat(), "total_kg": round(load, 1), "workouts": cnt})
+                seen, load, cnt = set(), 0.0, 0
+        if cycles:
+            result.append({"program_id": prog.id, "program_name": prog.name,
+                           "is_active": prog.is_active, "cycles": cycles,
+                           "open_partial": {"workouts": cnt, "total_kg": round(load, 1)} if cnt else None})
+    # Aktiivinen ensin
+    result.sort(key=lambda r: (0 if r["is_active"] else 1))
+    return {"programs": result}
+
+
+def _session_tonnage_val(s: models.WorkoutSession) -> float:
+    tonnage = 0.0
+    for we in s.exercises:
+        top_w = max((st.weight for st in we.sets if st.completed), default=0.0)
+        tonnage += sum(st.weight * st.reps for st in we.sets if st.completed)
+        if we.missed_reps:
+            tonnage = max(0.0, tonnage - we.missed_reps * top_w)
+    return tonnage
+
+
 @router.get("/coverage")
 def coverage(profile_id: int = Query(...), db: Session = Depends(get_db)):
     """Koko kehon treenaustahti: näyttää KAIKKI päälihasryhmät (myös ne joita ei

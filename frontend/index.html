@@ -379,8 +379,13 @@
       </div>
       <div class="card">
         <h3>Kokonaiskuormitus (siirretty rauta)</h3>
-        <p class="muted">Kaikkien liikkeiden yhteenlaskettu kg per treeni — tärkeä
-          kokonaiskuvan mittari. Vertaa painon ja voimatason kehitykseen.</p>
+        <p class="muted">Yhteenlaskettu kg. Valitse näytetäänkö per ohjelmakierto
+          (koko ohjelman treenit summattuna, piste kierron viimeiselle päivälle —
+          selkeämpi suunta) vai per yksittäinen treeni.</p>
+        <div class="btn-row" style="margin-bottom:6px">
+          <button class="small load-mode-btn active" data-mode="program">Per ohjelmakierto</button>
+          <button class="small load-mode-btn" data-mode="workout">Per treeni</button>
+        </div>
         <div id="load-summary"></div>
         <canvas id="load-chart" width="840" height="280"></canvas>
       </div>

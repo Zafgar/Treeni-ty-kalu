@@ -1157,22 +1157,50 @@ document.getElementById("bf-save").addEventListener("click", async () => {
   alert("Tulos tallennettu. Jos päivä on riittävän kaukana, näet paluusuunnitelman \"Paluu vanhoihin tuloksiin\" -kortissa.");
 });
 
+let loadMode = "program";
+
 async function loadLoadTimeline() {
-  const data = await api.get(pq("/api/stats/load-timeline"));
   const sum = document.getElementById("load-summary");
   sum.innerHTML = "";
-  if (data.length) {
-    const latest = data[data.length - 1];
-    const totalAll = data.reduce((a, d) => a + d.total_kg, 0);
-    sum.append(el("div", { class: "muted" },
-      `Viimeisin treeni: ${Math.round(latest.total_kg)} kg · ${latest.reps} toistoa · ${latest.sets} sarjaa` +
-      (latest.duration_min ? ` · ${latest.duration_min} min` : "") +
-      (latest.kcal_burned ? ` · ${latest.kcal_burned} kcal poltettu` : "") +
-      ` · kaikkiaan siirretty ${Math.round(totalAll).toLocaleString("fi-FI")} kg`));
+  if (loadMode === "program") {
+    const data = await api.get(pq("/api/stats/program-load"));
+    const series = [];
+    let idx = 0;
+    (data.programs || []).forEach((prog) => {
+      const color = CHART_COLORS[idx % CHART_COLORS.length];
+      series.push({ points: prog.cycles.map((c) => ({ x: new Date(c.date).getTime(), y: c.total_kg })), color });
+      idx++;
+      const last = prog.cycles[prog.cycles.length - 1];
+      sum.append(el("div", { class: "muted" },
+        `${prog.program_name}${prog.is_active ? " (aktiivinen)" : ""}: ${prog.cycles.length} kierrosta · ` +
+        `viimeisin kierto ${Math.round(last.total_kg).toLocaleString("fi-FI")} kg (${last.workouts} treeniä)` +
+        (prog.open_partial ? ` · kesken oleva kierto ${prog.open_partial.workouts} treeniä tehty` : "")));
+    });
+    if (!series.length) {
+      sum.append(el("p", { class: "muted" }, "Kun ohjelman kaikki treenit on tehty kerran, näet kierron kokonaiskuorman tässä. (Aktivoi ohjelma ja tee sen treenit.)"));
+    }
+    drawLineChart(document.getElementById("load-chart"), series, { unit: "kg", timeGrid: "month" });
+  } else {
+    const data = await api.get(pq("/api/stats/load-timeline"));
+    if (data.length) {
+      const latest = data[data.length - 1];
+      const totalAll = data.reduce((a, d) => a + d.total_kg, 0);
+      sum.append(el("div", { class: "muted" },
+        `Viimeisin treeni: ${Math.round(latest.total_kg)} kg · ${latest.reps} toistoa · ${latest.sets} sarjaa` +
+        (latest.duration_min ? ` · ${latest.duration_min} min` : "") +
+        (latest.kcal_burned ? ` · ${latest.kcal_burned} kcal poltettu` : "") +
+        ` · kaikkiaan siirretty ${Math.round(totalAll).toLocaleString("fi-FI")} kg`));
+    }
+    drawLineChart(document.getElementById("load-chart"),
+      [{ points: data.map((d) => ({ x: new Date(d.date).getTime(), y: d.total_kg })) }], { unit: "kg" });
   }
-  drawLineChart(document.getElementById("load-chart"),
-    [{ points: data.map((d) => ({ x: new Date(d.date).getTime(), y: d.total_kg })) }], { unit: "kg" });
 }
+
+document.querySelectorAll(".load-mode-btn").forEach((b) => b.addEventListener("click", () => {
+  loadMode = b.dataset.mode;
+  document.querySelectorAll(".load-mode-btn").forEach((x) => x.classList.toggle("active", x === b));
+  loadLoadTimeline();
+}));
 
 function renderProgressChips() {
   const search = document.getElementById("progress-search").value.toLowerCase();
