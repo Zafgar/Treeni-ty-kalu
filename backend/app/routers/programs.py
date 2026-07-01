@@ -29,6 +29,7 @@ def create_program(payload: schemas.ProgramCreate, db: Session = Depends(get_db)
         description=payload.description,
         goal=payload.goal,
         is_active=payload.is_active,
+        auto_progress=payload.auto_progress,
     )
     for day_in in payload.days:
         day = models.ProgramDay(

@@ -83,6 +83,27 @@ def last_working_weight(db: Session, exercise_id: int, profile_id: int | None) -
     return max(weights) if weights else None
 
 
+def last_top_set(db: Session, exercise_id: int, profile_id: int | None) -> dict | None:
+    """Viimeisimmän treenin raskain suoritettu sarja (paino + toistot).
+    Käytetään tuplaprogressiossa: nostetaanko painoa vai toistetaanko."""
+    q = (
+        db.query(models.SetLog, models.WorkoutSession.session_date)
+        .join(models.WorkoutExercise, models.SetLog.workout_exercise_id == models.WorkoutExercise.id)
+        .join(models.WorkoutSession, models.WorkoutExercise.session_id == models.WorkoutSession.id)
+        .filter(models.WorkoutExercise.exercise_id == exercise_id,
+                models.SetLog.completed.is_(True), models.SetLog.weight > 0,
+                models.WorkoutSession.status != "skipped")
+    )
+    if profile_id is not None:
+        q = q.filter(models.WorkoutSession.profile_id == profile_id)
+    rows = q.order_by(models.WorkoutSession.session_date.desc()).all()
+    if not rows:
+        return None
+    newest = rows[0][1]
+    top = max((s for s, d in rows if d == newest), key=lambda s: s.weight)
+    return {"weight": top.weight, "reps": top.reps}
+
+
 def build_planned_session(day: models.ProgramDay, db: Session) -> models.WorkoutSession:
     """Rakenna suunniteltu treeni ohjelman päivän tavoitearvoista (esitäytetyt
     sarjat). Ei lisää tietokantaan — kutsuja vastaa add/commit-vaiheesta."""
@@ -110,11 +131,24 @@ def build_planned_session(day: models.ProgramDay, db: Session) -> models.Workout
             current_1rm = rec["current_1rm"] if rec else None
 
         # Painon lähde: 1) prosenttimalli, 2) ohjelmaan asetettu tavoitepaino,
-        # 3) viimeksi tällä liikkeellä käytetty paino (arkistosta).
+        # 3) viimeksi tällä liikkeellä käytetty paino (arkistosta) +
+        #    automaattinen progressio jos ohjelmassa päällä (tuplaprogressio).
         prof_id = day.program.profile_id if day.program else None
         recalled = None
         if not (percents and current_1rm) and not pe.target_weight:
             recalled = last_working_weight(db, pe.exercise_id, prof_id)
+            auto = day.program.auto_progress if day.program else False
+            if auto and recalled:
+                lp = last_top_set(db, pe.exercise_id, prof_id)
+                target_reps = int(max(reps_per_set)) if reps_per_set else pe.target_reps
+                if lp and lp["reps"] >= target_reps:
+                    # Edellinen kerta meni täysillä -> nosta yksi realistinen askel
+                    ex_obj = pe.exercise
+                    inc = engine.progression_increment(
+                        ex_obj.name if ex_obj else None, ex_obj.equipment if ex_obj else None,
+                        ex_obj.category if ex_obj else None, ex_obj.is_main_lift if ex_obj else False,
+                        ex_obj.per_hand if ex_obj else False)
+                    recalled = engine.round_to_increment(recalled + inc, inc)
 
         for s in range(len(reps_per_set)):
             if percents and current_1rm:

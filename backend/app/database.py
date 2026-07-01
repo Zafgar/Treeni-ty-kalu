@@ -66,6 +66,7 @@ def ensure_columns():
         ("programs", "end_date", "DATE"),
         ("exercises", "per_hand", "BOOLEAN DEFAULT 0"),
         ("profiles", "creatine", "BOOLEAN DEFAULT 0"),
+        ("programs", "auto_progress", "BOOLEAN DEFAULT 0"),
     ]
     inspector = inspect(engine)
     existing_tables = set(inspector.get_table_names())

@@ -263,14 +263,20 @@ async function openProgramEditor(programId) {
 
     const name = el("input", { value: p.name, placeholder: "Ohjelman nimi" });
     const goal = el("input", { value: p.goal || "", placeholder: "Tavoite" });
-    const saveHead = async () => { await api.patch(`/api/programs/${programId}`, { name: name.value.trim() || p.name, goal: goal.value.trim() || null }); };
+    const autoProg = el("input", { type: "checkbox" });
+    autoProg.checked = !!p.auto_progress;
+    const saveHead = async () => { await api.patch(`/api/programs/${programId}`, { name: name.value.trim() || p.name, goal: goal.value.trim() || null, auto_progress: autoProg.checked }); };
     name.addEventListener("change", saveHead);
     goal.addEventListener("change", saveHead);
+    autoProg.addEventListener("change", saveHead);
 
     editor.append(
       el("div", { class: "row-between" }, el("h3", { style: "margin:0" }, "Muokkaa ohjelmaa"),
         el("button", { class: "small success", onclick: () => { editor.classList.add("hidden"); loadPrograms(); } }, "Valmis")),
-      el("div", { class: "grid" }, el("label", {}, "Nimi", name), el("label", {}, "Tavoite", goal)));
+      el("div", { class: "grid" }, el("label", {}, "Nimi", name), el("label", {}, "Tavoite", goal)),
+      el("label", { class: "btn-row", style: "align-items:center;gap:8px;margin-top:6px",
+        title: "Kun päällä: uutta treeniä ohjelmasta luotaessa nostetaan tavoitepainoa yksi askel jos edellinen kerta meni täysillä (tuplaprogressio)." },
+        autoProg, el("span", {}, "Automaattinen progressio (nosta painoa kun edellinen meni täysillä)")));
 
     for (const day of p.days) {
       const block = el("div", { class: "day-block " + (day.day_type === "rest" ? "rest" : "") });
@@ -2223,6 +2229,11 @@ async function loadReadiness() {
   if (r.thin_data) {
     div.append(el("div", { class: "muted", style: "margin-top:6px" },
       "Osasta mittareista on vielä vähän dataa — hälytykset annetaan vasta kun pitkän ajan vertailu on luotettava. Kirjaa unta/HRV:tä/sykettä säännöllisesti."));
+  }
+  if (r.deload_recommended) {
+    div.append(el("div", { style: "margin-top:10px;padding:10px;border-radius:10px;background:rgba(239,68,68,0.12);border:1px solid #ef4444" },
+      el("strong", { style: "color:#ef4444" }, "🛑 Kevennysviikko suositeltu"),
+      el("div", { class: "muted", style: "margin-top:4px" }, r.deload_message)));
   }
   // Tekijät
   const tbl = el("table", { style: "margin-top:8px" });

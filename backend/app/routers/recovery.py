@@ -172,6 +172,18 @@ def readiness(profile_id: int = Query(...), db: Session = Depends(get_db)):
         nutrition_deficit_pct=nutrition_deficit, nutrition_n=nutrition_n)
     result["acwr"] = acwr_info
     result["has_data"] = bool(result["factors"])
+
+    # Deload-suositus: matalat valmiuspisteet TAI selvä kuormapiikki
+    spike = acwr is not None and acwr > 1.5
+    low = result["has_data"] and result["score"] < 55
+    if spike or low:
+        reason = ("kuormapiikki (ACWR " + str(acwr) + ")") if spike else "matalat palautumismittarit"
+        result["deload_recommended"] = True
+        result["deload_message"] = (
+            f"Harkitse kevennysviikkoa — {reason}. Pudota kuormaa ~40–50 % tai sarjoja "
+            "puoleen 5–7 päiväksi, pidä liikkeet samoina. Keho palautuu ja tulokset usein hyppäävät kevennyksen jälkeen.")
+    else:
+        result["deload_recommended"] = False
     return result
 
 

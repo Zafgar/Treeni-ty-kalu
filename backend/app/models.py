@@ -93,6 +93,9 @@ class Program(Base):
     # Mihin ohjelma tähtää, esim. "voima", "hypertrofia", "voimanostototal"
     goal: Mapped[str | None] = mapped_column(String(80), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Automaattinen progressio: nostaa tavoitepainoa kun edellinen kerta meni
+    # täysillä (tuplaprogressio) treeniä ohjelmasta luotaessa.
+    auto_progress: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     # Aktivoinnin aloitus ja lopetus (paljonko ohjelma kesti)
     start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     end_date: Mapped[date | None] = mapped_column(Date, nullable=True)

@@ -99,6 +99,7 @@ class ProgramBase(BaseModel):
     description: str | None = None
     goal: str | None = None
     is_active: bool = True
+    auto_progress: bool = False
     start_date: date | None = None
     end_date: date | None = None
 
@@ -113,6 +114,7 @@ class ProgramUpdate(BaseModel):
     description: str | None = None
     goal: str | None = None
     is_active: bool | None = None
+    auto_progress: bool | None = None
 
 
 class ProgramOut(ProgramBase):
