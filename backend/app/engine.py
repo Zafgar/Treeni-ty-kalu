@@ -587,8 +587,11 @@ def strength_level(lift_key: str, one_rm: float, bodyweight: float, sex: str | N
 PHYSIQUE_LEVELS = [
     "Aloittelija", "Harrastaja", "Keskitaso", "Edistynyt",
     "Kokenut", "Eliitti (natural-huippu)", "Kilpataso", "IFBB Pro -luokka",
+    "Mr. Olympia -taso",
 ]
-FFMI_THRESHOLDS = [18.0, 20.0, 22.0, 23.5, 25.0, 26.5, 28.0]  # 7 kynnystä -> 8 tasoa
+# 8 kynnystä -> 9 tasoa. Viimeinen (Mr. Olympia) on huvin vuoksi lähes
+# saavuttamaton naturaalisti — FFMI ~30+ nähdään vain lajin huipulla.
+FFMI_THRESHOLDS = [18.0, 20.0, 22.0, 23.5, 25.0, 26.5, 28.0, 30.5]
 FEMALE_FFMI_OFFSET = 3.5
 
 
@@ -854,11 +857,38 @@ BODYPART_STANDARDS = {  # kasvukohdat: pituuskerroin nousevasti
 }
 WAIST_STANDARD = [0.52, 0.50, 0.48, 0.46, 0.44, 0.42, 0.40]  # vyötärö: pienempi parempi
 
+# Kuinka herkästi ympärysmitta paisuu rasvasta (0–1). Vyötärö/lantio eniten,
+# raajat vähemmän. Käytetään "rasvakorjattu mitta" -arvioon.
+SITE_FAT_SENS = {
+    "hauis": 0.32, "rintakehä": 0.55, "reisi": 0.5, "pohje": 0.28,
+    "hartia": 0.45, "kyynärvarsi": 0.22, "forkku": 0.22, "lantio": 0.7,
+}
+LEAN_REF_BF = {"m": 12.0, "f": 20.0}   # vertailurasva-% jolla mitta on "lihasta"
+
+
+def fat_inflation_cm(site: str, value_cm: float, body_fat_pct: float | None,
+                     sex: str | None = None) -> float:
+    """Arvio kuinka monta cm ympärysmitasta on YLIMÄÄRÄISTÄ rasvaa (yli lean-
+    viitearvon). Karkea anthropometrinen arvio — ei korvaa mittausta."""
+    if not body_fat_pct or not value_cm:
+        return 0.0
+    female = (sex or "").lower().startswith("nain")
+    ref = LEAN_REF_BF["f"] if female else LEAN_REF_BF["m"]
+    sens = SITE_FAT_SENS.get((site or "").lower())
+    if sens is None:
+        return 0.0
+    excess = max(0.0, body_fat_pct - ref)
+    return round(value_cm * sens * (excess / 100.0), 1)
+
 
 def bodypart_level(site: str, value_cm: float, height_cm: float | None,
-                   sex: str | None = None) -> dict | None:
+                   sex: str | None = None, body_fat_pct: float | None = None) -> dict | None:
     """Luokittele kehon osa väestön keskiarvosta IFBB Pro -luokkaan pituuteen
-    suhteutettuna. Vyötärö käänteisesti (pienempi vyötärö = korkeampi taso)."""
+    suhteutettuna. Vyötärö käänteisesti (pienempi vyötärö = korkeampi taso).
+
+    body_fat_pct: jos annettu, arvioidaan kuinka paljon mitasta on rasvaa ja
+    lasketaan "rasvakorjattu" taso — koska korkealla rasva-%:lla iso mitta ei
+    tarkoita yhtä paljon lihasta (esim. leveä hartia/rinta voi olla rasvaa)."""
     if not height_cm or height_cm <= 0 or not value_cm:
         return None
     s = (site or "").lower()
@@ -889,7 +919,7 @@ def bodypart_level(site: str, value_cm: float, height_cm: float | None,
     else:
         return None
 
-    return {
+    out = {
         "site": site,
         "value_cm": value_cm,
         "level_index": idx if reached else -1,
@@ -900,6 +930,26 @@ def bodypart_level(site: str, value_cm: float, height_cm: float | None,
         "levels": BODYPART_LEVELS,
         "reversed": s == "vyötärö",
     }
+
+    # Rasvakorjaus kasvukohdille: paljonko mitasta on rasvaa ja mikä taso olisi
+    # rasvakorjatulla mitalla (rehellisempi lihasmäärän kuva korkealla rasva-%:lla)
+    if s in BODYPART_STANDARDS and body_fat_pct:
+        fat_cm = fat_inflation_cm(site, value_cm, body_fat_pct, sex)
+        if fat_cm >= 0.2:
+            lean_val = value_cm - fat_cm
+            lean_ratio = lean_val / height_cm
+            lidx = -1
+            for i, t in enumerate(thresholds):
+                if lean_ratio >= t:
+                    lidx = i
+            out["fat_inflation_cm"] = fat_cm
+            out["lean_adjusted_cm"] = round(lean_val, 1)
+            out["lean_level_index"] = lidx
+            out["lean_level"] = BODYPART_LEVELS[lidx] if lidx >= 0 else "Alle keskiarvon"
+            out["fat_note"] = (f"Rasva-% ({round(body_fat_pct)} %) nostaa mittaa ~{fat_cm} cm. "
+                               f"Rasvakorjattu ~{round(lean_val,1)} cm → lihaksellinen taso: "
+                               f"{out['lean_level']}.")
+    return out
 
 
 def measurement_ceiling(site: str, height_cm: float | None, sex: str | None = None) -> float | None:
@@ -938,14 +988,18 @@ def recent_rate_per_week(history: list[tuple], window_days: int = 84) -> float |
 
 def forecast_measurement(history: list[tuple], horizon_weeks: int = 26,
                          confidence: float = 1.0, ceiling: float | None = None,
-                         floor: float | None = None, rate_calibration: float = 1.0) -> list[dict]:
+                         floor: float | None = None, rate_calibration: float = 1.0,
+                         bodyweight_trend_per_week: float = 0.0, bodyweight: float | None = None,
+                         body_fat_pct: float | None = None, site: str | None = None) -> list[dict]:
     """Ennusta ympärysmitan kehitys datavetoisesti (kasvu JA lasku).
 
-    Perustuu ENSISIJAISESTI omaan lähitrendiin (adaptoituu: jos esim. reisi
-    kasvaa odotettua nopeammin, ennuste seuraa sitä; jos hidastuu, mitoittuu
-    uudelleen seuraavalla kerralla). Kasvu tasaantuu pehmeästi kohti
-    pituuspohjaista luonnollista kattoa, lasku kohti pohjaa. Aineet/genetiikka:
-    jos data jo ylittää mallinnetun katon, katto nostetaan datan mukaan.
+    Perustuu ENSISIJAISESTI omaan lähitrendiin (adaptoituu). Kasvu tasaantuu
+    pehmeästi kohti pituuspohjaista kattoa, lasku kohti pohjaa.
+
+    LISÄKSI painon muutos kytketään mukaan: jos rasva-% on korkea ja paino
+    laskee, ympärysmitat (etenkin vyötärö, mutta myös reisi/rinta) pienenevät
+    osittain rasvan mukana — ennuste näkee tämän. Jos paino pysyy vakiona,
+    lisätermi on ~0 ja ennuste seuraa omaa trendiä (odotus: pysyy samana).
     """
     valid = [(d, v) for d, v in history if v and v > 0]
     if len(valid) < 3:  # mitalle tarvitaan hieman enemmän dataa
@@ -959,6 +1013,16 @@ def forecast_measurement(history: list[tuple], horizon_weeks: int = 26,
     current = valid[-1][1]
     spread_mult = 1.6 - 0.6 * max(0.0, min(1.0, confidence))
 
+    # Rasvavetoinen lisämuutos/vk: paino muuttuu -> osa mitasta seuraa (enemmän
+    # rasvaa & herkempi kohta -> suurempi vaikutus). Vyötärölle korkein herkkyys.
+    fat_step_week = 0.0
+    if bodyweight and bodyweight > 0 and body_fat_pct and bodyweight_trend_per_week:
+        s = (site or "").lower()
+        sens = 0.9 if s == "vyötärö" else SITE_FAT_SENS.get(s, 0.4)
+        fat_factor = max(0.0, min(1.4, (body_fat_pct - 8) / 25.0))
+        frac = bodyweight_trend_per_week / bodyweight
+        fat_step_week = current * frac * sens * fat_factor  # sama etumerkki kuin painomuutos
+
     # Pehmeä katto: ei rajoita jos data jo ylittää sen (huomioi geneettisesti
     # lahjakkaat / aineet). Pieni puskuri jotta ennuste ei jää heti seinään.
     if ceiling is not None:
@@ -968,7 +1032,8 @@ def forecast_measurement(history: list[tuple], horizon_weeks: int = 26,
     out = []
     value = current
     for w in range(1, horizon_weeks + 1):
-        step = rate_per_week * (0.96 ** w)  # tasaantuu ajan myötä
+        # Oma trendi + rasvavetoinen osa (molemmat tasaantuvat ajan myötä)
+        step = (rate_per_week + fat_step_week * 0.7) * (0.96 ** w)
         if step > 0 and ceiling:
             # Kasvu hidastuu lähestyttäessä kattoa (vähenevä tuotto)
             room = max(0.0, ceiling - value)

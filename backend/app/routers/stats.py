@@ -699,7 +699,7 @@ def body_score(profile_id: int = Query(...), db: Session = Depends(get_db)):
     if proportion:
         parts.append(proportion["score"])
     if physique:
-        parts.append(min(100, round(physique["level_index"] / 7 * 100)))
+        parts.append(min(100, round(physique["level_index"] / (len(physique["levels"]) - 1) * 100)))
     if strength_score is not None:
         parts.append(strength_score)
     overall = round(sum(parts) / len(parts)) if parts else None
@@ -727,9 +727,14 @@ def bodypart_levels(profile_id: int = Query(...), db: Session = Depends(get_db))
               .filter(models.Measurement.profile_id == profile_id)
               .order_by(models.Measurement.entry_date).all()):
         latest[m.site] = m.value_cm
+    # Rasva-% rasvakorjausta varten (mitattu tai arvioitu mitoista)
+    bf_e = (db.query(models.BodyEntry).filter(models.BodyEntry.profile_id == profile_id,
+            models.BodyEntry.body_fat_pct.isnot(None)).order_by(models.BodyEntry.entry_date.desc()).first())
+    bf_pct = bf_e.body_fat_pct if bf_e else engine.body_fat_navy(
+        sex, height, latest.get("kaula"), latest.get("vyötärö"), latest.get("lantio"))
     parts = []
     for site, val in latest.items():
-        lvl = engine.bodypart_level(site, val, height, sex)
+        lvl = engine.bodypart_level(site, val, height, sex, body_fat_pct=bf_pct)
         if lvl:
             vs = round(val / lvl["population_avg_cm"], 2) if lvl["population_avg_cm"] else None
             parts.append({**lvl, "vs_population": vs})

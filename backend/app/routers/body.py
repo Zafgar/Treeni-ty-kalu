@@ -165,12 +165,16 @@ def body_summary(profile_id: int = Query(...), db: Session = Depends(get_db)):
     from .stats import _calibration_for_key, _snapshot_forecast
     measurement_forecasts: dict[str, list] = {}
     measurement_insights: dict[str, dict] = {}
+    cur_weight = latest_w.bodyweight if latest_w else None
     for site, hist in raw_by_site.items():
         conf = engine.forecast_confidence(len(hist), (hist[-1][0] - hist[0][0]).days)
         ceiling = engine.measurement_ceiling(site, height, sex)
         floor = engine.measurement_floor(site, height)
         calib = _calibration_for_key(db, profile_id, "measurement", site, hist)
-        fc = engine.forecast_measurement(hist, 52, conf, ceiling=ceiling, floor=floor, rate_calibration=calib)
+        fc = engine.forecast_measurement(
+            hist, 52, conf, ceiling=ceiling, floor=floor, rate_calibration=calib,
+            bodyweight_trend_per_week=bw_trend or 0.0, bodyweight=cur_weight,
+            body_fat_pct=bf_pct, site=site)
         if fc:
             measurement_forecasts[site] = fc
             _snapshot_forecast(db, profile_id, "measurement", site, hist[-1][1], fc)

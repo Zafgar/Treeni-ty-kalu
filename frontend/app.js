@@ -1782,12 +1782,17 @@ async function renderBodypartLevels() {
     const ref = p.reversed
       ? `keskiarvo ~${p.population_avg_cm} cm · huippu(ohut) ~${p.elite_cm} cm`
       : `keskiarvo ~${p.population_avg_cm} cm · huippu ~${p.elite_cm} cm`;
-    div.append(el("div", { class: "item" },
+    const item = el("div", { class: "item" },
       el("div", { class: "row-between" },
         el("strong", { style: "text-transform:capitalize" }, p.site),
         el("span", { class: "tag main" }, `${p.level} (${p.value_cm} cm)`)),
       el("div", { class: "level-bar" }, el("div", { class: "level-fill", style: `width:${pct}%` })),
-      el("div", { class: "muted" }, `${ref} · sinä ${p.vs_population}× keskiarvo`)));
+      el("div", { class: "muted" }, `${ref} · sinä ${p.vs_population}× keskiarvo`));
+    // Rasvakorjaus: kertoo jos osa mitasta on rasvaa (rehellisempi lihaskuva)
+    if (p.fat_note) {
+      item.append(el("div", { class: "muted", style: "margin-top:3px;color:#f59e0b" }, "⚑ " + p.fat_note));
+    }
+    div.append(item);
   });
 }
 

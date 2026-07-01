@@ -149,6 +149,35 @@ def test_readiness_feeling_and_nutrition():
     assert any("ravinto" in w.lower() for w in r["warnings"])
 
 
+def test_mr_olympia_tier():
+    lv = engine.physique_level(31, "mies")
+    assert lv["level"] == "Mr. Olympia -taso"
+    assert len(lv["levels"]) == 9
+
+
+def test_bodypart_fat_adjustment():
+    # Korkealla rasva-%:lla iso mitta ei ole yhtä paljon lihasta
+    high = engine.bodypart_level("hauis", 42, 180, "mies", body_fat_pct=28)
+    assert high.get("fat_inflation_cm", 0) > 0
+    assert high["lean_adjusted_cm"] < 42
+    assert high["lean_level_index"] <= high["level_index"]
+    # Lean-tasolla ei korjausta
+    lean = engine.bodypart_level("hauis", 42, 180, "mies", body_fat_pct=12)
+    assert "fat_inflation_cm" not in lean
+
+
+def test_measurement_forecast_weight_coupling():
+    from datetime import date, timedelta
+    b = date.today()
+    hist = [(b - timedelta(days=(3 - i) * 30), 62) for i in range(4)]  # reisi tasainen
+    losing = engine.forecast_measurement(hist, 26, site="reisi", bodyweight=100,
+                                         body_fat_pct=30, bodyweight_trend_per_week=-0.5)
+    stable = engine.forecast_measurement(hist, 26, site="reisi", bodyweight=100,
+                                         body_fat_pct=30, bodyweight_trend_per_week=0.0)
+    assert losing[-1]["mid"] < stable[-1]["mid"]   # painonpudotus pienentää reittä
+    assert abs(stable[-1]["mid"] - 62) < 0.5       # vakiopaino -> pysyy samana
+
+
 def test_body_fat_navy():
     # Mies: kaula 40, vyötärö 88, pituus 180 -> järkevä rasva-% (10–25 %)
     bf = engine.body_fat_navy("mies", 180, 40, 88)
