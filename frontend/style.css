@@ -196,6 +196,22 @@ td input.notes { width: 100%; }
 .seg-label.on { color: var(--text); }
 .seg-label.current { color: var(--accent-2); font-weight: 700; }
 
+/* Ennätysjuhla + konfetti */
+.pr-celebrate { position: fixed; inset: 0; z-index: 999; display: flex; align-items: center;
+  justify-content: center; background: rgba(0,0,0,0.55); overflow: hidden; }
+.pr-card { background: var(--surface); border: 1px solid var(--accent-2); border-radius: 16px;
+  padding: 24px 28px; text-align: center; max-width: 90vw; box-shadow: 0 12px 40px rgba(0,0,0,0.5);
+  animation: fadeInUp 0.4s ease; }
+.confetti { position: absolute; top: -12px; width: 9px; height: 14px; border-radius: 2px;
+  animation: confettiFall 2.6s linear forwards; }
+@keyframes confettiFall {
+  0% { transform: translateY(-20px) rotate(0deg); opacity: 1; }
+  100% { transform: translateY(105vh) rotate(720deg); opacity: 0.9; }
+}
+.rest-timer.rest-done { animation: growBar 0.4s ease; }
+.rest-timer.rest-done span { color: var(--accent-2); }
+@media (prefers-reduced-motion: reduce) { .confetti { display: none; } }
+
 .btn-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
 
 #calc-result { margin-top: 14px; font-size: 0.95rem; }

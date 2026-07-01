@@ -51,8 +51,11 @@ def test_workout_complete_and_skip(client):
     assert w["status"] == "planned"
     done = client.post(f"/api/workouts/{w['id']}/complete").json()
     assert done["status"] == "completed"
-    assert done["exercises"][0]["sets"][0]["completed"] is True
-    assert done["exercises"][0]["done"] is True
+    assert "new_prs" in done  # kuittaus palauttaa myös uudet ennätykset
+    # Varmista että sarjat ja liike merkittiin tehdyiksi
+    full = client.get(f"/api/workouts/{w['id']}").json()
+    assert full["exercises"][0]["sets"][0]["completed"] is True
+    assert full["exercises"][0]["done"] is True
 
     w2 = client.post("/api/workouts", json={"profile_id": 1, "exercises": []}).json()
     skipped = client.post(f"/api/workouts/{w2['id']}/skip").json()

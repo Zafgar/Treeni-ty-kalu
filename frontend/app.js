@@ -436,6 +436,57 @@ function renderWorkoutItem(w, opts = {}) {
   );
 }
 
+// Ennätysjuhla: banneri + kevyt konfetti kun treeni rikkoo aiemman parhaan
+function celebratePR(lines) {
+  const overlay = el("div", { class: "pr-celebrate" },
+    el("div", { class: "pr-card" },
+      el("div", { style: "font-size:2.4em" }, "🏆"),
+      el("h3", { style: "margin:6px 0" }, "Uusi ennätys!"),
+      ...lines.map((l) => el("div", { style: "margin:4px 0" }, l)),
+      el("button", { class: "primary", style: "margin-top:10px", onclick: () => overlay.remove() }, "Hienoa!")));
+  document.body.append(overlay);
+  // Konfetti
+  for (let i = 0; i < 60; i++) {
+    const c = el("div", { class: "confetti" });
+    c.style.left = Math.random() * 100 + "vw";
+    c.style.background = CHART_COLORS[i % CHART_COLORS.length];
+    c.style.animationDelay = (Math.random() * 0.6) + "s";
+    overlay.append(c);
+  }
+  setTimeout(() => { if (overlay.isConnected) overlay.remove(); }, 8000);
+}
+
+// Palautusajastin: yksi widget, esiasetetut ajat + laskuri
+let restTimerId = null;
+function renderRestTimer() {
+  const wrap = el("div", { class: "rest-timer btn-row", style: "align-items:center;margin:8px 0" });
+  const display = el("span", { style: "font-weight:700;min-width:52px;font-size:1.1em" }, "–");
+  let remaining = 0;
+  function tick() {
+    remaining--;
+    const m = Math.floor(remaining / 60), s = remaining % 60;
+    display.textContent = `${m}:${String(s).padStart(2, "0")}`;
+    if (remaining <= 0) {
+      clearInterval(restTimerId); restTimerId = null;
+      display.textContent = "Valmis!";
+      try { navigator.vibrate && navigator.vibrate([200, 100, 200]); } catch (e) {}
+      wrap.classList.add("rest-done");
+      setTimeout(() => wrap.classList.remove("rest-done"), 2000);
+    }
+  }
+  function start(sec) {
+    if (restTimerId) clearInterval(restTimerId);
+    remaining = sec + 1; tick();
+    restTimerId = setInterval(tick, 1000);
+  }
+  wrap.append(el("span", { class: "muted" }, "Palautus:"));
+  [60, 90, 120, 180].forEach((sec) => wrap.append(
+    el("button", { class: "small", onclick: () => start(sec) }, `${sec}s`)));
+  wrap.append(display,
+    el("button", { class: "small", onclick: () => { if (restTimerId) { clearInterval(restTimerId); restTimerId = null; } display.textContent = "–"; } }, "Stop"));
+  return wrap;
+}
+
 async function loadWorkouts() {
   const workouts = await api.get(pq("/api/workouts"));
   const list = document.getElementById("workout-list");
@@ -511,7 +562,12 @@ async function openWorkoutEditor(id) {
     el("div", { class: "btn-row" },
       el("span", { class: "tag" }, statusLabel),
       el("button", { class: "small success", onclick: async () => {
-        await api.post(`/api/workouts/${id}/complete`); loadWorkouts(); openWorkoutEditor(id);
+        const res = await api.post(`/api/workouts/${id}/complete`);
+        if (res && res.new_prs && res.new_prs.length) {
+          const lines = res.new_prs.map((p) => `🏆 ${p.exercise_name}: uusi ennätys ~${p.new_1rm} kg (aiempi ${p.previous_best}, +${p.improvement} kg)`);
+          celebratePR(lines);
+        }
+        loadWorkouts(); openWorkoutEditor(id);
       } }, "✓ Kuittaa valmiiksi"),
       el("button", { class: "small", onclick: async () => {
         if (confirm("Skipataanko tämä treeni? Sitä ei lasketa kehitykseen.")) {
@@ -524,6 +580,9 @@ async function openWorkoutEditor(id) {
     el("label", {}, "Kehon paino", bw), el("label", {}, "Kesto (min)", dur),
     el("label", {}, "Poltetut kcal", kcal), el("label", {}, "Fiilis", feeling),
     el("label", {}, "Fiilis-huomio", feelingNote), el("label", {}, "Huomiot", notes)));
+
+  // Palautusajastin (esiasetetut ajat)
+  editor.append(renderRestTimer());
 
   // Edistymislaskuri (montako liikettä tehty)
   const doneCount = w.exercises.filter((we) => we.done).length;
@@ -588,12 +647,14 @@ function renderWorkoutExercise(workoutId, we) {
   const table = el("table", {});
   table.append(el("tr", {},
     el("th", {}, "Sarja"), el("th", {}, "Toistot"), el("th", {}, "Paino"),
-    el("th", {}, "RIR"), el("th", {}, "OK"), el("th", {}, "Huomio"), el("th", {}, "")));
+    el("th", { title: "RIR = varasto: montako toistoa olisi jäänyt vielä jäljelle. 0 = täysillä, 2 = kaksi jäi. Kirjaa se → 1RM-arvio ja ennuste tarkentuvat huomattavasti." }, "RIR ⓘ"),
+    el("th", {}, "OK"), el("th", {}, "Huomio"), el("th", {}, "")));
 
   we.sets.forEach((set) => {
     const reps = el("input", { type: "number", value: set.reps });
     const weight = el("input", { type: "number", step: "0.5", value: set.weight });
-    const rir = el("input", { type: "number", step: "0.5", value: set.rir ?? "" });
+    const rir = el("input", { type: "number", step: "0.5", value: set.rir ?? "", placeholder: "varasto",
+      title: "Montako toistoa olisi jäänyt jäljelle (0 = täysillä). Vapaaehtoinen mutta tarkentaa arviot." });
     const done = el("input", { type: "checkbox" });
     done.checked = set.completed;
     const note = el("input", { class: "notes", value: set.notes || "" });

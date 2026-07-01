@@ -185,9 +185,10 @@ def delete_workout(workout_id: int, db: Session = Depends(get_db)):
     db.commit()
 
 
-@router.post("/{workout_id}/complete", response_model=schemas.WorkoutSessionOut)
+@router.post("/{workout_id}/complete")
 def complete_workout(workout_id: int, db: Session = Depends(get_db)):
-    """Kuittaa treeni suoritetuksi: merkitsee kaikki liikkeet ja sarjat tehdyiksi."""
+    """Kuittaa treeni suoritetuksi: merkitsee kaikki liikkeet ja sarjat tehdyiksi.
+    Palauttaa myös uudet ennätykset (jos jokin liike ylitti aiemman parhaan)."""
     session = db.get(models.WorkoutSession, workout_id)
     if not session:
         raise HTTPException(status_code=404, detail="Treeniä ei löytynyt.")
@@ -198,7 +199,23 @@ def complete_workout(workout_id: int, db: Session = Depends(get_db)):
             s.completed = True
     db.commit()
     db.refresh(session)
-    return session
+
+    # Tunnista uudet ennätykset: tämän treenin arvioitu 1RM vs. aiempi paras
+    new_prs = []
+    ex_ids = {we.exercise_id for we in session.exercises}
+    for ex_id in ex_ids:
+        points = _exercise_session_points(db, ex_id, session.profile_id)
+        this_val = max((p["estimated_1rm"] for p in points if p["date"] == session.session_date), default=0.0)
+        prev_best = max((p["estimated_1rm"] for p in points if p["date"] < session.session_date), default=0.0)
+        if this_val > 0 and prev_best > 0 and this_val > prev_best + 0.4:
+            ex = db.get(models.Exercise, ex_id)
+            new_prs.append({
+                "exercise_name": ex.name if ex else str(ex_id),
+                "new_1rm": round(this_val, 1),
+                "previous_best": round(prev_best, 1),
+                "improvement": round(this_val - prev_best, 1),
+            })
+    return {"id": session.id, "status": session.status, "new_prs": new_prs}
 
 
 @router.post("/{workout_id}/skip", response_model=schemas.WorkoutSessionOut)
