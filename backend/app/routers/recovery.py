@@ -18,6 +18,8 @@ router = APIRouter(prefix="/api/recovery", tags=["recovery"])
 CARDIO_MET = {
     "juoksumatto": 9.0, "juoksu": 9.5, "crosstrainer": 7.0, "pyöräily": 7.5,
     "kävely": 3.8, "soutu": 7.0, "uinti": 7.0, "hyppynaru": 11.0, "muu": 6.0,
+    # Lihashuolto / lämmittely (matala kulutus, mutta seurantaa varten)
+    "lämmittely": 4.0, "venyttely": 2.5, "foam roll": 2.8, "liikkuvuus": 2.8,
 }
 
 
@@ -119,17 +121,18 @@ def readiness(profile_id: int = Query(...), db: Session = Depends(get_db)):
                .filter(models.BodyEntry.profile_id == profile_id)
                .order_by(models.BodyEntry.entry_date).all())
 
-    def _avg(key, days_from, days_to):
+    def _stat(key, days_from, days_to):
         vals = [getattr(e, key) for e in entries
                 if getattr(e, key) is not None
                 and days_from <= (today - e.entry_date).days < days_to]
-        return sum(vals) / len(vals) if vals else None
+        return (sum(vals) / len(vals) if vals else None), len(vals)
 
-    hrv_recent = _avg("hrv", 0, 7)
-    hrv_base = _avg("hrv", 7, 35)
-    rhr_recent = _avg("resting_hr", 0, 7)
-    rhr_base = _avg("resting_hr", 7, 35)
-    sleep_recent = _avg("sleep_hours", 0, 7)
+    # Pitkän ajan vertailujakso (7–42 pv) vaimentaa yksittäiset heilahdukset
+    hrv_recent, hrv_rn = _stat("hrv", 0, 7)
+    hrv_base, hrv_bn = _stat("hrv", 7, 42)
+    rhr_recent, rhr_rn = _stat("resting_hr", 0, 7)
+    rhr_base, rhr_bn = _stat("resting_hr", 7, 42)
+    sleep_recent, sleep_n = _stat("sleep_hours", 0, 7)
 
     # Treenikuorma: kokonaiskuorma (rauta) + kardiokalorit, ACWR
     workouts = (db.query(models.WorkoutSession)
@@ -153,7 +156,41 @@ def readiness(profile_id: int = Query(...), db: Session = Depends(get_db)):
     acwr_info = engine.acwr_status(acute, chronic4)
     acwr = acwr_info["acwr"] if acwr_info else None
 
-    result = engine.readiness(hrv_recent, hrv_base, rhr_recent, rhr_base, sleep_recent, acwr)
+    # Treenifiilis (huono hymiö) viim. 14 pv — auttaa kun muuta dataa on vähän
+    recent_feel = [s.feeling for s in workouts
+                   if s.feeling and 0 <= (today - s.session_date).days < 14]
+    neg_ratio = (sum(1 for f in recent_feel if f == "negative") / len(recent_feel)) if recent_feel else None
+
+    # Ravinnon vajaus viim. 14 pv (vain jos tarpeeksi kirjattuja päiviä)
+    nutrition_deficit, nutrition_n = _nutrition_deficit(db, profile_id, today)
+
+    result = engine.readiness(
+        hrv_recent, hrv_base, hrv_bn, hrv_rn,
+        rhr_recent, rhr_base, rhr_bn, rhr_rn,
+        sleep_recent, sleep_n, acwr,
+        neg_feeling_ratio=neg_ratio, feeling_n=len(recent_feel),
+        nutrition_deficit_pct=nutrition_deficit, nutrition_n=nutrition_n)
     result["acwr"] = acwr_info
     result["has_data"] = bool(result["factors"])
     return result
+
+
+def _nutrition_deficit(db: Session, profile_id: int, today: date):
+    """Keskimääräinen kalorivajaus (osuus tarpeesta) viim. 14 pv, ja montako
+    päivää ruokaa on kirjattu. Vajaus vain jos dataa on tarpeeksi säännöllisesti."""
+    logs = (db.query(models.FoodLog)
+            .filter(models.FoodLog.profile_id == profile_id,
+                    models.FoodLog.entry_date >= today - timedelta(days=13),
+                    models.FoodLog.entry_date <= today).all())
+    by_date: dict = {}
+    for fl in logs:
+        by_date[fl.entry_date] = by_date.get(fl.entry_date, 0.0) + (fl.food.kcal * fl.grams / 100.0)
+    n = len(by_date)
+    if n < 5:
+        return None, n
+    avg_intake = sum(by_date.values()) / n
+    # Karkea tarve: paino * 30 (ei kriittinen tarkkuus, vain vajauksen suunta)
+    bw = _latest_bodyweight(db, profile_id) or 75
+    need = bw * 32
+    deficit = max(0.0, (need - avg_intake) / need)
+    return round(deficit, 2), n

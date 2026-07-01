@@ -76,16 +76,34 @@ def test_best_1rm_assumes_reserve_for_working_sets():
 
 
 def test_readiness_flags_overtraining():
-    # HRV alhaalla, leposyke koholla, uni vähissä, kuormapiikki -> matala pisteet + varoitukset
-    r = engine.readiness(hrv_recent=38, hrv_base=48, rhr_recent=60, rhr_base=52,
-                         sleep_recent=6.0, acwr=1.8)
+    # Riittävästi pitkän ajan dataa -> hälytykset annetaan
+    r = engine.readiness(hrv_recent=38, hrv_base=48, hrv_base_n=20, hrv_recent_n=6,
+                         rhr_recent=60, rhr_base=52, rhr_base_n=20, rhr_recent_n=6,
+                         sleep_recent=6.0, sleep_n=6, acwr=1.8)
     assert r["score"] < 60
     assert "ylikuormitus" in r["status"]
     assert len(r["warnings"]) >= 3
     # Hyvä tilanne -> korkeat pisteet, ei varoituksia
-    good = engine.readiness(hrv_recent=50, hrv_base=48, rhr_recent=50, rhr_base=52,
-                            sleep_recent=8.0, acwr=1.0)
+    good = engine.readiness(hrv_recent=50, hrv_base=48, hrv_base_n=20, hrv_recent_n=6,
+                            rhr_recent=50, rhr_base=52, rhr_base_n=20, rhr_recent_n=6,
+                            sleep_recent=8.0, sleep_n=6, acwr=1.0)
     assert good["score"] >= 80 and not good["warnings"]
+
+
+def test_readiness_thin_data_no_alarm():
+    # Vähän vertailudataa -> ei kovaa hälytystä vaikka arvot huonoja
+    r = engine.readiness(hrv_recent=38, hrv_base=48, hrv_base_n=3, hrv_recent_n=1,
+                         rhr_recent=60, rhr_base=52, rhr_base_n=3, rhr_recent_n=1)
+    assert not r["warnings"]
+    assert r["thin_data"] is True
+
+
+def test_readiness_feeling_and_nutrition():
+    # Huono treenifiilis + ravinnon vajaus tuottavat varoitukset ilman biometriaa
+    r = engine.readiness(neg_feeling_ratio=0.6, feeling_n=5,
+                         nutrition_deficit_pct=0.30, nutrition_n=8)
+    assert any("fiilis" in w.lower() for w in r["warnings"])
+    assert any("ravinto" in w.lower() for w in r["warnings"])
 
 
 def test_acwr_status():

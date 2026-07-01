@@ -819,11 +819,33 @@ async function loadProgress() {
   renderBackfill();
   await loadForecastAccuracy();
   await loadVolume();
+  await loadCoverage();
   await loadLevels();
   await loadComeback();
   await loadSports();
   await loadLoadTimeline();
   await loadRecordsTable();
+}
+
+async function loadCoverage() {
+  const div = document.getElementById("coverage-content");
+  const data = await api.get(pq("/api/stats/coverage"));
+  div.innerHTML = "";
+  const tone = { ok: "var(--accent-2)", low: "#f59e0b", none: "#ef4444" };
+  data.groups.forEach((g) => {
+    const info = g.days_since != null ? `${g.sets_window} sarjaa · viimeksi ${g.days_since} pv sitten` : "ei koskaan treenattu";
+    div.append(el("div", { class: "item" },
+      el("div", { class: "row-between" },
+        el("strong", { style: "text-transform:capitalize" }, g.group),
+        el("span", { class: "tag", style: `color:${tone[g.status]};border-color:${tone[g.status]}` }, g.label)),
+      el("div", { class: "muted" }, info)));
+  });
+  if (data.missing.length) {
+    div.append(el("div", { style: "color:#f59e0b;margin-top:8px" },
+      `⚠ Jäänyt väliin: ${data.missing.join(", ")}. Lisää nämä ohjelmaan tasapainon vuoksi.`));
+  } else {
+    div.append(el("div", { class: "muted", style: "margin-top:8px" }, "Koko keho tulee treenattua — hyvä tasapaino."));
+  }
 }
 
 async function loadComeback() {
@@ -2033,6 +2055,12 @@ async function renderDietStatus() {
       (s.intake_avg_kcal ? ` · keskisyönti ${s.intake_avg_kcal} kcal` : "")),
     el("div", { class: "result-box", style: "margin-top:10px" }, s.recommendation)));
 
+  // Kardio-/lämmittelyvinkki tavoitteen mukaan
+  if (s.cardio_tip) {
+    div.append(el("div", { class: "card" }, el("h3", {}, "Kardio & kulutus"),
+      el("div", { class: "muted" }, s.cardio_tip)));
+  }
+
   // Voiman seuranta dieetillä
   if (s.strength_note) {
     div.append(el("div", { class: "card" }, el("h3", {}, "Voiman seuranta"),
@@ -2085,6 +2113,10 @@ async function loadReadiness() {
     div.append(w);
   } else {
     div.append(el("div", { class: "muted", style: "margin-top:6px" }, "Ei varoituksia — keho vaikuttaa palautuneelta."));
+  }
+  if (r.thin_data) {
+    div.append(el("div", { class: "muted", style: "margin-top:6px" },
+      "Osasta mittareista on vielä vähän dataa — hälytykset annetaan vasta kun pitkän ajan vertailu on luotettava. Kirjaa unta/HRV:tä/sykettä säännöllisesti."));
   }
   // Tekijät
   const tbl = el("table", { style: "margin-top:8px" });

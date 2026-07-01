@@ -276,9 +276,23 @@ def diet_status(profile_id: int = Query(...), db: Session = Depends(get_db)):
     day_targets = engine.day_targets(targets, training_days, workout_kcal_avg)
     review = engine.weekly_review(targets["kcal"], avg_intake, target_rate, trend)
 
+    # Kardio-/lämmittelyvinkit tavoitteen mukaan
+    cardio_tip = None
+    if goal == "cut":
+        cardio_tip = ("Tehosta kcal-polttoa: 20–40 min kävelyä tai juoksumattoa treenin jälkeen tai "
+                      "lepopäivänä lisää kulutusta ~150–350 kcal syömättä palautumista — helpottaa vajeen "
+                      "saavuttamista ilman että tarvitsee leikata ruokaa lisää. Kirjaa se Palautuminen-välilehden kardioon.")
+    elif goal == "maintain" and trend is not None and trend > 0.15:
+        cardio_tip = ("Paino nousee tavoitetta nopeammin. Lisää arkeen kävelyä tai kevyttä kardiota "
+                      "(esim. crosstrainer 20–30 min) tasapainottamaan, tai laske hieman kaloreita.")
+    elif goal == "bulk":
+        cardio_tip = ("Massalla kevyt kardio (kävely 2–3× viikossa) pitää sydänkunnon ja ruokahalun kunnossa "
+                      "ilman että se haittaa massan nousua — älä ylitä, jottei kulutus kasva liikaa.")
+
     return {
         "goal": goal,
         "target_rate": target_rate,
+        "cardio_tip": cardio_tip,
         "model": phase.model if phase else None,
         "week_avg_weight": week_avg,
         "trend_kg_per_week": trend,

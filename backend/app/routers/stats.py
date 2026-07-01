@@ -823,6 +823,74 @@ def volume_analysis(profile_id: int = Query(...), db: Session = Depends(get_db))
     }
 
 
+# Kanoniset päälihasryhmät (koko kehon kate) ja vapaakategorioiden mäppäys
+MAJOR_GROUPS = ["rinta", "selkä", "jalat", "olkapäät", "kädet", "keskivartalo"]
+
+
+def _major_group(category: str | None, muscle_group: str | None, name: str | None) -> str | None:
+    """Mäppää liike yhteen pääryhmään koko kehon katetta varten."""
+    text = " ".join([(category or ""), (muscle_group or ""), (name or "")]).lower()
+    if any(k in text for k in ("rinta", "penkki", "fly", "dippi")):
+        return "rinta"
+    if any(k in text for k in ("selkä", "soutu", "leuanveto", "ylätalja", "alatalja", "maasta", "mave")):
+        return "selkä"
+    if any(k in text for k in ("jalat", "jalka", "reisi", "reidet", "kyykky", "pakara", "pohje",
+                               "takareisi", "prässi", "lähennys", "loitonnus", "olympia", "tempaus", "rinnalleveto")):
+        return "jalat"
+    if any(k in text for k in ("olkapää", "olkapäät", "hartia", "pystypunnerrus", "sivunosto", "vipunosto", "delt")):
+        return "olkapäät"
+    if any(k in text for k in ("hauis", "ojentaja", "kääntö", "curl", "kickback", "kyynärvarsi", "ranne", "kädet", "käsi")):
+        return "kädet"
+    if any(k in text for k in ("keskivartalo", "vatsa", "vyötärö", "selän ojennus", "alaselkä", "plank")):
+        return "keskivartalo"
+    return None
+
+
+@router.get("/coverage")
+def coverage(profile_id: int = Query(...), db: Session = Depends(get_db)):
+    """Koko kehon treenaustahti: näyttää KAIKKI päälihasryhmät (myös ne joita ei
+    ole treenattu) rullaavalla ~10 pv ikkunalla. Sietää jaksotetun/split-treenin,
+    mutta paljastaa jos jokin ryhmä jää jatkuvasti väliin."""
+    today = date.today()
+    window = 10
+    sessions = (db.query(models.WorkoutSession)
+                .filter(models.WorkoutSession.profile_id == profile_id,
+                        models.WorkoutSession.status != "skipped").all())
+    sets_by_group = {g: 0 for g in MAJOR_GROUPS}
+    last_by_group: dict[str, date] = {}
+    for s in sessions:
+        for we in s.exercises:
+            if not we.exercise:
+                continue
+            g = _major_group(we.exercise.category, we.exercise.muscle_group, we.exercise.name)
+            if not g:
+                continue
+            done_sets = sum(1 for st in we.sets if st.completed and st.reps > 0)
+            if done_sets:
+                if g not in last_by_group or s.session_date > last_by_group[g]:
+                    last_by_group[g] = s.session_date
+                if 0 <= (today - s.session_date).days < window:
+                    sets_by_group[g] += done_sets
+
+    groups = []
+    for g in MAJOR_GROUPS:
+        sw = sets_by_group[g]
+        last = last_by_group.get(g)
+        days_since = (today - last).days if last else None
+        if sw >= 10:
+            status, label = "ok", "hyvä tahti"
+        elif sw >= 4:
+            status, label = "ok", "riittävä"
+        elif sw >= 1:
+            status, label = "low", "vähän"
+        else:
+            status, label = "none", ("ei treenattu" if days_since is None else f"tauolla {days_since} pv")
+        groups.append({"group": g, "sets_window": sw, "days_since": days_since,
+                       "status": status, "label": label})
+    missing = [g["group"] for g in groups if g["status"] == "none"]
+    return {"window_days": window, "groups": groups, "missing": missing}
+
+
 @router.post("/volume-ack")
 def volume_ack(profile_id: int = Query(...), week_key: str = Query(...), db: Session = Depends(get_db)):
     """Kuittaa viikon volyymi OK:ksi (ei muutoksia tarvita)."""

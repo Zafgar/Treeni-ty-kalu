@@ -240,43 +240,65 @@ def acwr_status(acute: float, chronic: float) -> dict | None:
     return {"acwr": ratio, "zone": zone}
 
 
-def readiness(hrv_recent=None, hrv_base=None, rhr_recent=None, rhr_base=None,
-              sleep_recent=None, acwr: float | None = None) -> dict:
+# Kuinka monta havaintoa tarvitaan ennen kuin tekijästä annetaan VAROITUS.
+# Nojataan pitkän ajan keskiarvoon: yksittäinen huono päivä ei hälytä.
+READINESS_MIN_BASE = 10   # HRV/leposyke: pitkän ajan vertailujakson havainnot
+READINESS_MIN_RECENT = 3  # tuoreen jakson havainnot (ei yksittäistä päivää)
+
+
+def readiness(hrv_recent=None, hrv_base=None, hrv_base_n=0, hrv_recent_n=0,
+              rhr_recent=None, rhr_base=None, rhr_base_n=0, rhr_recent_n=0,
+              sleep_recent=None, sleep_n=0, acwr: float | None = None,
+              neg_feeling_ratio=None, feeling_n=0,
+              nutrition_deficit_pct=None, nutrition_n=0) -> dict:
     """Palautumis-/valmiuspisteet (0–100) ja varoitukset ylikuormituksesta.
 
-    Yhdistää sykevälivaihtelun (HRV laskee → stressi), leposykkeen (nousee →
-    stressi), unen (liian vähän → vajaa palautuminen) ja treenikuorman (ACWR
-    piikki → ylikuormitusriski). Käyttää vain saatavilla olevia tekijöitä.
+    Yhdistää sykevälivaihtelun (HRV), leposykkeen, unen, treenikuorman (ACWR),
+    treenifiiliksen ja ravinnon. TÄRKEÄÄ: hälytys annetaan vain kun tekijällä on
+    tarpeeksi pitkän ajan vertailudataa — yksittäinen huono päivä tai ohut data
+    ei laukaise varoitusta. Vähäisellä datalla lasketaan pehmeämmin ja kehotetaan
+    keräämään lisää.
     """
     score = 100.0
     warnings: list[str] = []
     factors: list[dict] = []
+    thin = False  # onko jokin tekijä liian ohutdataista luotettavaan hälytykseen
+
+    def enough(base_n, recent_n):
+        return base_n >= READINESS_MIN_BASE and recent_n >= READINESS_MIN_RECENT
 
     if hrv_base and hrv_recent:
         pct = (hrv_recent - hrv_base) / hrv_base
+        ok = enough(hrv_base_n, hrv_recent_n)
         if pct < 0:
-            score -= min(30.0, -pct * 120)
-        if pct <= -0.08:
-            warnings.append(f"HRV laskenut {round(-pct*100)}% normaalista — merkki kertyneestä stressistä.")
+            score -= min(30.0, -pct * 120) * (1.0 if ok else 0.4)
+        if pct <= -0.08 and ok:
+            warnings.append(f"HRV laskenut {round(-pct*100)}% pitkän ajan tasosta — merkki kertyneestä stressistä.")
+        if not ok:
+            thin = True
         factors.append({"name": "HRV", "recent": round(hrv_recent, 1), "baseline": round(hrv_base, 1),
-                        "change_pct": round(pct * 100, 1)})
+                        "change_pct": round(pct * 100, 1), "enough_data": ok})
 
     if rhr_base and rhr_recent:
         pct = (rhr_recent - rhr_base) / rhr_base
+        ok = enough(rhr_base_n, rhr_recent_n)
         if pct > 0:
-            score -= min(25.0, pct * 100 * 2.5)
-        if pct >= 0.05:
-            warnings.append(f"Leposyke koholla (+{round(pct*100)}%) — keho ei ehkä ole palautunut.")
+            score -= min(25.0, pct * 100 * 2.5) * (1.0 if ok else 0.4)
+        if pct >= 0.05 and ok:
+            warnings.append(f"Leposyke koholla (+{round(pct*100)}%) pitkän ajan tasosta — keho ei ehkä ole palautunut.")
+        if not ok:
+            thin = True
         factors.append({"name": "Leposyke", "recent": round(rhr_recent, 1), "baseline": round(rhr_base, 1),
-                        "change_pct": round(pct * 100, 1)})
+                        "change_pct": round(pct * 100, 1), "enough_data": ok})
 
-    if sleep_recent is not None:
+    if sleep_recent is not None and sleep_n > 0:
+        ok = sleep_n >= 4
         if sleep_recent < 7:
-            score -= min(25.0, (7 - sleep_recent) * 10)
-        if sleep_recent < 6.5:
+            score -= min(25.0, (7 - sleep_recent) * 10) * (1.0 if ok else 0.5)
+        if sleep_recent < 6.5 and ok:
             warnings.append(f"Uni jäänyt lyhyeksi (~{round(sleep_recent,1)} h/yö) — palautuminen kärsii.")
         factors.append({"name": "Uni", "recent": round(sleep_recent, 1), "baseline": 8.0,
-                        "change_pct": None})
+                        "change_pct": None, "enough_data": ok})
 
     if acwr is not None:
         if acwr > 1.5:
@@ -285,7 +307,27 @@ def readiness(hrv_recent=None, hrv_base=None, rhr_recent=None, rhr_base=None,
                             "Harkitse kevennystä.")
         elif acwr > 1.3:
             score -= (acwr - 1.3) * 20
-        factors.append({"name": "Kuormasuhde (ACWR)", "recent": acwr, "baseline": 1.0, "change_pct": None})
+        factors.append({"name": "Kuormasuhde (ACWR)", "recent": acwr, "baseline": 1.0,
+                        "change_pct": None, "enough_data": True})
+
+    # Treenifiilis: usein huono fiilis auttaa datan keruussa (ei tarvitse muita mittareita)
+    if neg_feeling_ratio is not None and feeling_n >= 3:
+        score -= min(20.0, neg_feeling_ratio * 30)
+        if neg_feeling_ratio >= 0.4:
+            warnings.append(f"Treenifiilis ollut usein huono viime aikoina ({round(neg_feeling_ratio*100)}% treeneistä) "
+                            "— kuuntele kehoa.")
+        factors.append({"name": "Treenifiilis", "recent": f"{round(neg_feeling_ratio*100)}% huono",
+                        "baseline": "0%", "change_pct": None, "enough_data": True})
+
+    # Ravinto: vain jos dataa on tarpeeksi (moni ei kirjaa joka päivä)
+    if nutrition_deficit_pct is not None and nutrition_n >= 5:
+        if nutrition_deficit_pct > 0.10:
+            score -= min(20.0, (nutrition_deficit_pct - 0.10) * 120)
+        if nutrition_deficit_pct >= 0.25:
+            warnings.append(f"Ravinto jäänyt selvästi tarpeen alle (~{round(nutrition_deficit_pct*100)}% vajaus) "
+                            "— liian vähäinen syönti heikentää palautumista.")
+        factors.append({"name": "Ravinto", "recent": f"−{round(nutrition_deficit_pct*100)}% tarpeesta",
+                        "baseline": "tarve", "change_pct": None, "enough_data": True})
 
     score = int(max(0, min(100, round(score))))
     if not factors:
@@ -296,7 +338,8 @@ def readiness(hrv_recent=None, hrv_base=None, rhr_recent=None, rhr_base=None,
         status = "kohtalainen"
     else:
         status = "varo — kohonnut ylikuormitusriski"
-    return {"score": score, "status": status, "warnings": warnings, "factors": factors}
+    return {"score": score, "status": status, "warnings": warnings, "factors": factors,
+            "thin_data": thin}
 
 
 def detrained_1rm(best_ever_1rm: float, weeks_since: float) -> float:
