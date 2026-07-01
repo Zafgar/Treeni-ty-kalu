@@ -378,12 +378,23 @@
       </div>
 
       <div class="card">
-        <h3>Lajitotal</h3>
+        <h3>Lajitotal & kisataso</h3>
         <div class="btn-row">
           <select id="sport-select"></select>
         </div>
         <div id="total-summary"></div>
+        <div class="btn-row" style="margin:8px 0;align-items:center">
+          <span class="muted">Historia:</span>
+          <button class="small trange-btn" data-range="182">½ v</button>
+          <button class="small trange-btn" data-range="365">1 v</button>
+          <button class="small trange-btn" data-range="1095">3 v</button>
+          <button class="small trange-btn active" data-range="0">Kaikki</button>
+          <span class="muted" style="margin-left:10px">Ruudukko:</span>
+          <button class="small tgrid-btn active" data-grid="none">Ei</button>
+          <button class="small tgrid-btn" data-grid="month">Kuukausi</button>
+        </div>
         <canvas id="total-chart" width="840" height="300"></canvas>
+        <div class="muted" style="font-size:0.82em">Ennuste (katkoviiva) ulottuu ~1 v eteenpäin. Vie hiiri viivalle → pvm ja kg.</div>
       </div>
       <div class="card">
         <h3>Kokonaiskuormitus (siirretty rauta)</h3>

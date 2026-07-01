@@ -75,6 +75,23 @@ def test_best_1rm_assumes_reserve_for_working_sets():
     assert single["assumed_rir"] == 0.0
 
 
+def test_forecast_tames_with_sparse_data():
+    from datetime import date, timedelta
+    base = date.today()
+    # Harva, jyrkkä data (2 pistettä viikon välein, +8 kg) -> ei saa räjähtää
+    sparse = [(base - timedelta(days=7), 100), (base, 108)]
+    conf_s = engine.forecast_confidence(2, 7)
+    fc_s = engine.forecast_progress(sparse, 52, ceiling=200, confidence=conf_s)
+    # Tiheä, tasainen data -> kapeampi haarukka ja maltillisempi mid
+    rich = [(base - timedelta(days=180 - i * 15), 100 + i * 1.5) for i in range(12)]
+    conf_r = engine.forecast_confidence(12, 180)
+    fc_r = engine.forecast_progress(rich, 52, ceiling=200, confidence=conf_r)
+    w_sparse = fc_s[-1]["high"] - fc_s[-1]["low"]
+    w_rich = fc_r[-1]["high"] - fc_r[-1]["low"]
+    assert w_rich < w_sparse            # haarukka kapenee kun dataa on enemmän
+    assert fc_s[-1]["mid"] < 100 + 52 * 4  # ei absurdia nousua vuodessa
+
+
 def test_readiness_flags_overtraining():
     # Riittävästi pitkän ajan dataa -> hälytykset annetaan
     r = engine.readiness(hrv_recent=38, hrv_base=48, hrv_base_n=20, hrv_recent_n=6,

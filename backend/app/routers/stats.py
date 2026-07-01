@@ -346,7 +346,7 @@ def total(
     bw_trend = _bodyweight_trend(db, profile_id) or 0.0
     profile = db.get(models.Profile, profile_id) if profile_id else None
     sex = profile.sex if profile else None
-    horizon = 26
+    horizon = 52  # ~1 vuosi (pidemmälle ei ennusteta luotettavasti)
     fc_mid = [0.0] * horizon
     fc_low = [0.0] * horizon
     fc_high = [0.0] * horizon
@@ -360,8 +360,11 @@ def total(
         ceiling = engine.natural_ceiling(lk, bw, sex) if (lk and bw) else None
         span = (pts[-1]["date"] - pts[0]["date"]).days
         conf = engine.forecast_confidence(len(pts), span)
+        best_ever = max(p["estimated_1rm"] for p in pts)
+        prior_best = best_ever if best_ever > pts[-1]["estimated_1rm"] + 0.5 else None
         fc = engine.forecast_progress([(p["date"], p["estimated_1rm"]) for p in pts],
-                                      horizon, ceiling, bodyweight_trend_per_week=bw_trend, confidence=conf)
+                                      horizon, ceiling, bodyweight_trend_per_week=bw_trend,
+                                      confidence=conf, prior_best=prior_best)
         if not fc:
             continue
         have_fc = True

@@ -1370,7 +1370,7 @@ async function drawTotal() {
     el("div", { class: "muted" }, `Haarukka ${t.total_low}–${t.total_high} kg`),
     el("div", { class: "muted" }, t.per_lift.map((l) => `${l.exercise_name}: ${l.current_1rm}kg`).join(" · ")),
     fcEnd ? el("div", { class: "muted", style: "margin-top:6px" },
-      `Ennuste ~6 kk: ${fcEnd.low}–${fcEnd.high} kg (mihin tällä tahdilla ollaan menossa)`) : ""));
+      `Ennuste ~1 v: ${fcEnd.low}–${fcEnd.high} kg (mihin tällä tahdilla ollaan menossa; haarukka kapenee kun dataa kertyy)`) : ""));
 
   // Kilpailutaso: painoluokka + paikallinen → MM (yhteistuloksen mukaan)
   const c = t.competition;
@@ -1410,7 +1410,11 @@ async function drawTotal() {
     sum.append(box);
   }
 
-  const series = [{ points: t.timeline.map((p) => ({ x: new Date(p.date).getTime(), y: p.total })) }];
+  // Historiaraja (ennuste säilyy kokonaan)
+  const cutoff = totalRangeDays ? Date.now() - totalRangeDays * 864e5 : null;
+  let tl = t.timeline.map((p) => ({ x: new Date(p.date).getTime(), y: p.total }));
+  if (cutoff) tl = tl.filter((p) => p.x >= cutoff);
+  const series = [{ points: tl }];
   if (t.forecast && t.forecast.length && t.timeline.length) {
     const last = t.timeline[t.timeline.length - 1];
     const anchor = { x: new Date(last.date).getTime(), y: last.total };
@@ -1418,8 +1422,21 @@ async function drawTotal() {
     const band = t.forecast.map((p) => ({ x: new Date(p.date).getTime(), low: p.low, high: p.high }));
     series.push({ points: [anchor, ...fc], band, dashed: true, color: CHART_COLORS[1] });
   }
-  drawLineChart(document.getElementById("total-chart"), series, { unit: "kg" });
+  drawLineChart(document.getElementById("total-chart"), series, { unit: "kg", timeGrid: totalGrid });
 }
+
+let totalRangeDays = 0;
+let totalGrid = "none";
+document.querySelectorAll(".trange-btn").forEach((b) => b.addEventListener("click", () => {
+  totalRangeDays = +b.dataset.range;
+  document.querySelectorAll(".trange-btn").forEach((x) => x.classList.toggle("active", x === b));
+  drawTotal();
+}));
+document.querySelectorAll(".tgrid-btn").forEach((b) => b.addEventListener("click", () => {
+  totalGrid = b.dataset.grid;
+  document.querySelectorAll(".tgrid-btn").forEach((x) => x.classList.toggle("active", x === b));
+  drawTotal();
+}));
 
 // ---- Ennätystaulukko ----
 async function loadRecordsTable() {

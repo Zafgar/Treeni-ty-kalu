@@ -717,6 +717,15 @@ def forecast_progress(
     rate_per_week = rate_per_day * 7 * max(0.6, min(1.4, rate_calibration))
 
     current = valid[-1][1]
+
+    # TÄRKEÄÄ: vähällä datalla / lyhyellä jaksolla lyhyt jyrkkä pätkä ei saa
+    # ekstrapoloitua järjettömäksi. Kutista tahtia luottamuksen mukaan (enemmän
+    # dataa & pidempi seuranta -> lähempänä todellista keskimääräistä tahtia) ja
+    # rajaa realistiseen viikkokattoon (myös aloittelijalla on rajansa).
+    rate_per_week *= (0.35 + 0.65 * max(0.0, min(1.0, confidence)))
+    rate_cap = max(1.5, current * 0.04)  # ~4 %/vk tai väh. 1.5 kg/vk
+    rate_per_week = min(rate_per_week, rate_cap)
+
     if ceiling is None or ceiling <= current:
         ceiling = current * 1.5  # ilman standardia oletetaan 50 % varaa
 
