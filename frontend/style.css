@@ -219,6 +219,12 @@ td input.notes { width: 100%; }
 .photo-meta { display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem;
   color: var(--muted); padding: 4px 6px; }
 
+/* Graafin hover-tooltip */
+.chart-tooltip { position: fixed; z-index: 1000; display: none; pointer-events: none;
+  background: var(--surface); border: 1px solid var(--border, #2e333f); border-radius: 8px;
+  padding: 6px 9px; font-size: 0.82rem; box-shadow: 0 6px 20px rgba(0,0,0,0.4); }
+.range-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
 .btn-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
 
 #calc-result { margin-top: 14px; font-size: 0.95rem; }

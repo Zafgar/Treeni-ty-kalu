@@ -783,6 +783,30 @@ function drawLineChart(canvas, series, opts = {}) {
   ctx.fillText(fmt(minX), pad.l, H - 12);
   ctx.textAlign = "right"; ctx.fillText(fmt(maxX), W - pad.r, H - 12); ctx.textAlign = "left";
 
+  // Aika-ruudukko (viikko/kuukausi) pystyviivoina jos pyydetty
+  if (opts.timeGrid === "week" || opts.timeGrid === "month") {
+    ctx.strokeStyle = "#262b36"; ctx.fillStyle = "#7a8290"; ctx.font = "10px system-ui";
+    const step = opts.timeGrid === "week" ? 7 * 864e5 : null;
+    const marks = [];
+    if (step) {
+      const spanDays = (maxX - minX) / 864e5;
+      const stride = spanDays > 200 ? step * 4 : step;  // harvenna jos pitkä jakso
+      const d0 = new Date(minX); d0.setHours(0, 0, 0, 0);
+      for (let t = d0.getTime(); t <= maxX; t += stride) if (t >= minX) marks.push(t);
+    } else {
+      const d = new Date(minX); d.setDate(1); d.setHours(0, 0, 0, 0);
+      while (d.getTime() <= maxX) { if (d.getTime() >= minX) marks.push(d.getTime()); d.setMonth(d.getMonth() + 1); }
+    }
+    marks.forEach((t) => {
+      const X = xPix(t);
+      ctx.beginPath(); ctx.moveTo(X, pad.t); ctx.lineTo(X, pad.t + plotH); ctx.stroke();
+      const lbl = opts.timeGrid === "month"
+        ? new Date(t).toLocaleDateString("fi-FI", { month: "short", year: "2-digit" })
+        : new Date(t).toLocaleDateString("fi-FI", { day: "numeric", month: "numeric" });
+      ctx.save(); ctx.translate(X, H - 2); ctx.fillText(lbl, -14, 0); ctx.restore();
+    });
+  }
+
   // Gradienttitäyttö viivan alle kun yksi yhtenäinen sarja (näyttävämpi)
   const solid = series.filter((s) => !s.dashed && s.points && s.points.length);
   if (solid.length === 1) {
@@ -822,6 +846,52 @@ function drawLineChart(canvas, series, opts = {}) {
     ctx.stroke();
     ctx.setLineDash([]);
     if (!s.dashed) pts.forEach((p) => { ctx.beginPath(); ctx.arc(xPix(p.x), yPix(p.y), 3, 0, Math.PI * 2); ctx.fill(); });
+  });
+
+  // Tallenna pisteet hover-tooltippiä varten ja sido kuuntelijat kerran
+  const hoverPts = [];
+  series.forEach((s, idx) => {
+    const color = s.color || CHART_COLORS[idx % CHART_COLORS.length];
+    (s.points || []).forEach((p) => hoverPts.push({
+      px: xPix(p.x), py: yPix(p.y), x: p.x, y: p.y, color,
+      forecast: !!s.dashed, unit: opts.unit || "",
+    }));
+  });
+  canvas._hoverPts = hoverPts;
+  bindChartHover(canvas);
+}
+
+let _chartTooltip = null;
+function bindChartHover(canvas) {
+  if (canvas._hoverBound) return;
+  canvas._hoverBound = true;
+  if (!_chartTooltip) {
+    _chartTooltip = el("div", { class: "chart-tooltip" });
+    document.body.append(_chartTooltip);
+  }
+  const hide = () => { if (_chartTooltip) _chartTooltip.style.display = "none"; };
+  canvas.addEventListener("mouseleave", hide);
+  canvas.addEventListener("mousemove", (e) => {
+    const pts = canvas._hoverPts;
+    if (!pts || !pts.length) return hide();
+    const rect = canvas.getBoundingClientRect();
+    const sx = canvas.width / rect.width, sy = canvas.height / rect.height;
+    const mx = (e.clientX - rect.left) * sx, my = (e.clientY - rect.top) * sy;
+    let best = null, bestD = 1e9;
+    for (const p of pts) {
+      const d = (p.px - mx) ** 2 + (p.py - my) ** 2;
+      if (d < bestD) { bestD = d; best = p; }
+    }
+    if (!best || bestD > (28 * sx) ** 2) return hide();
+    const dstr = new Date(best.x).toLocaleDateString("fi-FI", { day: "numeric", month: "numeric", year: "numeric" });
+    const vstr = (Math.round(best.y * 10) / 10) + (best.unit || "");
+    _chartTooltip.innerHTML = "";
+    _chartTooltip.append(
+      el("div", { style: `font-weight:700;color:${best.color}` }, vstr + (best.forecast ? " (ennuste)" : "")),
+      el("div", { class: "muted" }, dstr));
+    _chartTooltip.style.display = "block";
+    _chartTooltip.style.left = (e.clientX + 12) + "px";
+    _chartTooltip.style.top = (e.clientY + 12) + "px";
   });
 }
 
@@ -1120,19 +1190,23 @@ function renderProgressChips() {
     });
 }
 
+let progressRangeDays = 0;   // 0 = kaikki
+let progressGrid = "none";
+
 async function drawProgressChart() {
   const series = [];
   const legend = document.getElementById("progress-legend");
   legend.innerHTML = "";
   let idx = 0;
   const single = selectedProgress.size === 1;
+  // Historiaraja: näytä vain viimeiset N päivää (ennuste säilyy kokonaan)
+  const cutoff = progressRangeDays ? Date.now() - progressRangeDays * 864e5 : null;
   for (const id of selectedProgress) {
     const h = await api.get(pq(`/api/stats/exercises/${id}/history`));
     const color = CHART_COLORS[idx % CHART_COLORS.length];
-    series.push({
-      points: h.points.map((p) => ({ x: new Date(p.date).getTime(), y: p.estimated_1rm })),
-      color,
-    });
+    let pts = h.points.map((p) => ({ x: new Date(p.date).getTime(), y: p.estimated_1rm }));
+    if (cutoff) pts = pts.filter((p) => p.x >= cutoff);
+    series.push({ points: pts, color });
     legend.append(el("span", { class: "tag", style: `color:${color};border-color:${color}` }, h.exercise_name));
     // Ennuste (katkoviiva + haarukka) vain kun yksi liike valittuna -> selkeä
     if (single && h.forecast && h.forecast.length) {
@@ -1149,10 +1223,20 @@ async function drawProgressChart() {
     }
     idx++;
   }
-  drawLineChart(document.getElementById("progress-chart"), series, { unit: "kg" });
+  drawLineChart(document.getElementById("progress-chart"), series, { unit: "kg", timeGrid: progressGrid });
 }
 
 document.getElementById("progress-search").addEventListener("input", renderProgressChips);
+document.querySelectorAll(".range-btn").forEach((b) => b.addEventListener("click", () => {
+  progressRangeDays = +b.dataset.range;
+  document.querySelectorAll(".range-btn").forEach((x) => x.classList.toggle("active", x === b));
+  drawProgressChart();
+}));
+document.querySelectorAll(".grid-btn").forEach((b) => b.addEventListener("click", () => {
+  progressGrid = b.dataset.grid;
+  document.querySelectorAll(".grid-btn").forEach((x) => x.classList.toggle("active", x === b));
+  drawProgressChart();
+}));
 
 // ---- Lajitotal ----
 async function loadSports() {

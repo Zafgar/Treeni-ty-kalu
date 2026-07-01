@@ -299,7 +299,20 @@
           ennusteen haarukoineen (vähenevä tuotto kohti fysiologista kattoa).</p>
         <input id="progress-search" placeholder="Hae liikettä…" />
         <div id="progress-chips" class="btn-row"></div>
+        <div class="btn-row" style="margin:8px 0;align-items:center">
+          <span class="muted">Historia:</span>
+          <button class="small range-btn" data-range="30">1 kk</button>
+          <button class="small range-btn" data-range="182">½ v</button>
+          <button class="small range-btn" data-range="365">1 v</button>
+          <button class="small range-btn" data-range="1095">3 v</button>
+          <button class="small range-btn active" data-range="0">Kaikki</button>
+          <span class="muted" style="margin-left:10px">Ruudukko:</span>
+          <button class="small grid-btn active" data-grid="none">Ei</button>
+          <button class="small grid-btn" data-grid="week">Viikko</button>
+          <button class="small grid-btn" data-grid="month">Kuukausi</button>
+        </div>
         <canvas id="progress-chart" width="840" height="360"></canvas>
+        <div class="muted" style="font-size:0.82em">Vie hiiri viivan päälle → näet päivämäärän ja arvon. Ennuste (katkoviiva) ulottuu ~1 vuoden eteenpäin.</div>
         <div id="progress-legend" class="btn-row"></div>
       </div>
 
