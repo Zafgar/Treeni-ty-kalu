@@ -208,10 +208,37 @@ def _training_profile(db: Session, profile_id: int, ref_date: date) -> tuple[int
         per_week = 0  # treenejä on historiassa, mutta ei viime aikoina -> tauolla
     else:
         per_week = 3  # ei dataa lainkaan -> oletetaan maltillinen treenitausta
-    kcals = [s.kcal_burned for s in sessions
-             if s.kcal_burned and 0 <= (ref_date - s.session_date).days < 30]
-    kcal_avg = round(sum(kcals) / len(kcals)) if kcals else None
+    # Keskim. treenin kcal: käytä merkittyjä; puuttuville arvioi omasta
+    # kcal/min-historiasta tai painosta+kuormasta. Näin kulutus huomioidaan
+    # vaikkei kaloreita merkitsisi joka kerta.
+    logged = [(s.kcal_burned, s.duration_min) for s in sessions
+              if s.kcal_burned and s.duration_min and 0 <= (ref_date - s.session_date).days < 60]
+    per_min = (sum(k / m for k, m in logged) / len(logged)) if logged else None
+    bw = _latest_bodyweight(db, profile_id) or 75
+
+    def _burn(s):
+        if s.kcal_burned:
+            return s.kcal_burned
+        if not s.duration_min:
+            return None
+        if per_min:
+            return per_min * s.duration_min
+        tonnage = 0.0
+        for we in s.exercises:
+            tonnage += sum(st.weight * st.reps for st in we.sets if st.completed)
+        return bw * 0.0875 * s.duration_min + tonnage * 0.0008
+
+    burns = [b for s in sessions
+             if 0 <= (ref_date - s.session_date).days < 30 and (b := _burn(s)) is not None]
+    kcal_avg = round(sum(burns) / len(burns)) if burns else None
     return per_week, kcal_avg
+
+
+def _latest_bodyweight(db: Session, profile_id: int) -> float | None:
+    b = (db.query(models.BodyEntry)
+         .filter(models.BodyEntry.profile_id == profile_id, models.BodyEntry.bodyweight.isnot(None))
+         .order_by(models.BodyEntry.entry_date.desc()).first())
+    return b.bodyweight if b else None
 
 
 @router.get("/status")

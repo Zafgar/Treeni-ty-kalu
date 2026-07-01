@@ -598,6 +598,46 @@ def levels(profile_id: int | None = Query(None), db: Session = Depends(get_db)):
             "level_meanings": engine.LEVEL_MEANINGS, "lifts": result}
 
 
+@router.get("/target-weights")
+def target_weights(profile_id: int | None = Query(None), db: Session = Depends(get_db)):
+    """Pääliikkeiden tämänhetkiset tavoitepainot: arvioidusta 1RM:stä johdetut
+    työpainot yleisimmille sarjamalleille + ennuste ~1 v päähän. Näin näet
+    helposti millä painoilla kannattaa treenata (penkki/kyykky/mave/pystyp.)."""
+    bw = _latest_bodyweight(db, profile_id)
+    profile = db.get(models.Profile, profile_id) if profile_id else None
+    sex = profile.sex if profile else None
+    lifts = []
+    for ex in db.query(models.Exercise).filter(models.Exercise.is_main_lift.is_(True)).order_by(models.Exercise.name).all():
+        points = _exercise_session_points(db, ex.id, profile_id)
+        rec = _records_for_exercise(points, DEFAULT_WINDOW_DAYS)
+        if not rec:
+            continue
+        one_rm = rec["current_1rm"]
+        inc = engine.progression_increment(ex.name, ex.equipment, ex.category, ex.is_main_lift, ex.per_hand)
+        schemes = {
+            "5x5": engine.round_to_increment(engine.weight_for_reps(one_rm, 5, 2), inc),
+            "3x3": engine.round_to_increment(engine.weight_for_reps(one_rm, 3, 1), inc),
+            "1RM": engine.round_to_increment(one_rm, inc),
+        }
+        # Ennuste ~1 v: käytä liikkeen kehityskäyrää jos dataa riittää
+        forecast_1rm = None
+        pts = [(p["date"], p["estimated_1rm"]) for p in points if p["estimated_1rm"] > 0]
+        if len(pts) >= 2:
+            lk = engine.classify_lift(ex.name)
+            ceiling = engine.natural_ceiling(lk, bw, sex) if (lk and bw) else None
+            span = (pts[-1][0] - pts[0][0]).days
+            conf = engine.forecast_confidence(len(pts), span)
+            fc = engine.forecast_progress(pts, 52, ceiling, confidence=conf)
+            if fc:
+                forecast_1rm = fc[-1]["mid"]
+        lifts.append({
+            "exercise_name": ex.name, "current_1rm": one_rm, "increment": inc,
+            "schemes": schemes, "forecast_1rm_1y": forecast_1rm,
+            "last_trained": rec["last_trained"].isoformat() if rec["last_trained"] else None,
+        })
+    return {"bodyweight": bw, "lifts": lifts}
+
+
 @router.get("/body-score")
 def body_score(profile_id: int = Query(...), db: Session = Depends(get_db)):
     """Kehon yhteispisteet: suhdepisteet (mitat) + fysiikkataso (FFMI) +

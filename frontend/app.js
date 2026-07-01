@@ -442,6 +442,34 @@ function renderWorkoutItem(w, opts = {}) {
   );
 }
 
+// Arvioi treenin kaloripoltto kun sitä ei ole merkitty. Käyttää ensisijaisesti
+// omaa kcal/min-historiaa (aiemmat merkinnät), muuten MET-arviota painosta ja
+// siirretystä raudasta.
+let _kcalPerMinCache = null;
+function estimateWorkoutBurn(w) {
+  const dur = w.duration_min;
+  if (!dur) return null;
+  const prof = profilesCache.find((p) => p.id === currentProfileId);
+  const bw = w.bodyweight || (prof && prof.latest_bodyweight) || 80;
+  let tonnage = 0;
+  (w.exercises || []).forEach((we) => (we.sets || []).forEach((s) => { if (s.completed) tonnage += s.weight * s.reps; }));
+  // Oma historia (aiemmat kcal-merkinnät): kcal/min
+  if (_kcalPerMinCache != null) return Math.round(_kcalPerMinCache * dur);
+  return Math.round(bw * 0.0875 * dur + tonnage * 0.0008);
+}
+
+// Laske käyttäjän oma kcal/min aiemmista merkinnöistä (treenin muokkausta varten)
+async function refreshKcalPerMin() {
+  try {
+    const ws = await api.get(pq("/api/workouts"));
+    const withBoth = ws.filter((w) => w.kcal_burned && w.duration_min);
+    if (withBoth.length >= 2) {
+      const rates = withBoth.map((w) => w.kcal_burned / w.duration_min);
+      _kcalPerMinCache = rates.reduce((a, b) => a + b, 0) / rates.length;
+    } else _kcalPerMinCache = null;
+  } catch (e) { _kcalPerMinCache = null; }
+}
+
 // Ennätysjuhla: banneri + kevyt konfetti kun treeni rikkoo aiemman parhaan
 function celebratePR(lines) {
   const overlay = el("div", { class: "pr-celebrate" },
@@ -530,6 +558,7 @@ document.getElementById("new-workout-btn").addEventListener("click", async () =>
 
 async function openWorkoutEditor(id) {
   const w = await api.get(`/api/workouts/${id}`);
+  await refreshKcalPerMin();
   const editor = document.getElementById("workout-editor");
   editor.classList.remove("hidden");
   editor.innerHTML = "";
@@ -586,6 +615,20 @@ async function openWorkoutEditor(id) {
     el("label", {}, "Kehon paino", bw), el("label", {}, "Kesto (min)", dur),
     el("label", {}, "Poltetut kcal", kcal), el("label", {}, "Fiilis", feeling),
     el("label", {}, "Fiilis-huomio", feelingNote), el("label", {}, "Huomiot", notes)));
+
+  // Kaloriarvio jos ei merkitty (kesto + siirretty rauta + kehon paino).
+  // Nojaa aiempiin merkintöihin: käyttää oman kcal/min-historian jos on.
+  if (!w.kcal_burned && w.duration_min) {
+    const est = estimateWorkoutBurn(w);
+    if (est) {
+      const hint = el("div", { class: "muted", style: "margin:4px 0" },
+        `Kaloriarvio (ei merkitty): ~${est} kcal `,
+        el("button", { class: "small", onclick: async () => {
+          kcal.value = est; await saveMeta();
+        } }, "Käytä arviota"));
+      editor.append(hint);
+    }
+  }
 
   // Palautusajastin (esiasetetut ajat)
   editor.append(renderRestTimer());
@@ -951,8 +994,30 @@ function recordsTable(recs) {
 // =================== KEHITYS (graafit) ===================
 let selectedProgress = new Set();
 
+async function loadTargetWeights() {
+  const card = document.getElementById("target-weights-card");
+  const div = document.getElementById("target-weights");
+  const data = await api.get(pq("/api/stats/target-weights"));
+  if (!data.lifts || !data.lifts.length) { card.style.display = "none"; return; }
+  card.style.display = "";
+  div.innerHTML = "";
+  data.lifts.forEach((l) => {
+    div.append(el("div", { class: "item" },
+      el("div", { class: "row-between" },
+        el("strong", {}, l.exercise_name),
+        el("span", { class: "tag main" }, `1RM ~${l.current_1rm} kg`)),
+      el("div", { class: "btn-row", style: "gap:14px;flex-wrap:wrap;margin-top:4px" },
+        el("span", {}, el("span", { class: "muted" }, "5×5: "), el("strong", {}, `${l.schemes["5x5"]} kg`)),
+        el("span", {}, el("span", { class: "muted" }, "3×3: "), el("strong", {}, `${l.schemes["3x3"]} kg`)),
+        el("span", {}, el("span", { class: "muted" }, "1RM: "), el("strong", {}, `${l.schemes["1RM"]} kg`))),
+      l.forecast_1rm_1y ? el("div", { class: "muted", style: "margin-top:3px" },
+        `Ennuste ~1 v: 1RM ~${l.forecast_1rm_1y} kg (5×5 ~${Math.round(l.forecast_1rm_1y / (1 + 7 / 30) / l.increment) * l.increment} kg)`) : ""));
+  });
+}
+
 async function loadProgress() {
   renderProgressChips();
+  await loadTargetWeights();
   renderBackfill();
   await loadForecastAccuracy();
   await loadVolume();
