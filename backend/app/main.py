@@ -29,6 +29,7 @@ from .routers import (
     engine_api,
     exercises,
     nutrition,
+    photos,
     profiles,
     programs,
     recovery,
@@ -72,6 +73,7 @@ app.include_router(nutrition.router)
 app.include_router(diet.router)
 app.include_router(recovery.router)
 app.include_router(backup.router)
+app.include_router(photos.router)
 
 
 @app.get("/api/health")

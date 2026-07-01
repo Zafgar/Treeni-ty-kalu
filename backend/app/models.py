@@ -298,6 +298,20 @@ class Measurement(Base):
     value_cm: Mapped[float] = mapped_column(Float)
 
 
+class ProgressPhoto(Base):
+    """Edistymiskuva: päivätty valokuva kehon kehityksen seurantaan.
+    Kuvatiedosto tallennetaan levylle (data/photos), rivi viittaa siihen."""
+
+    __tablename__ = "progress_photos"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    profile_id: Mapped[int] = mapped_column(ForeignKey("profiles.id", ondelete="CASCADE"), index=True)
+    entry_date: Mapped[date] = mapped_column(Date, default=date.today, index=True)
+    filename: Mapped[str] = mapped_column(String(200))
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class Food(Base):
     """Ruoka-aine (yhteinen kirjasto). Makrot ja energia 100 grammaa kohden.
 

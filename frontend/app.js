@@ -1772,13 +1772,58 @@ function renderBodyFigure(sites, height) {
   applyHidden(localStorage.getItem("figureHidden") === "1");
 }
 
+async function loadPhotos() {
+  const gal = document.getElementById("photo-gallery");
+  if (!gal) return;
+  gal.innerHTML = "";
+  const photos = await api.get(pq("/api/photos"));
+  if (!photos.length) { gal.append(el("p", { class: "muted" }, "Ei kuvia vielä.")); return; }
+  photos.forEach((p) => {
+    const img = el("img", { src: p.url, alt: p.entry_date, loading: "lazy" });
+    img.addEventListener("click", () => {
+      const ov = el("div", { class: "pr-celebrate", onclick: () => ov.remove() },
+        el("img", { src: p.url, style: "max-width:92vw;max-height:88vh;border-radius:10px" }));
+      document.body.append(ov);
+    });
+    gal.append(el("div", { class: "photo-item" }, img,
+      el("div", { class: "photo-meta" }, p.entry_date,
+        el("button", { class: "small danger", onclick: async () => {
+          if (confirm("Poista kuva?")) { await api.del(`/api/photos/${p.id}`); loadPhotos(); }
+        } }, "×"))));
+  });
+}
+
+document.getElementById("photo-add-btn").addEventListener("click", () => document.getElementById("photo-file").click());
+document.getElementById("photo-file").addEventListener("change", async (ev) => {
+  const file = ev.target.files[0];
+  if (!file) return;
+  const status = document.getElementById("photo-status");
+  if (file.size > 12 * 1024 * 1024) { status.textContent = "Kuva liian suuri (max 12 MB)."; ev.target.value = ""; return; }
+  status.textContent = "Ladataan…";
+  const reader = new FileReader();
+  reader.onload = async () => {
+    try {
+      await api.post(pq("/api/photos"), {
+        image_base64: reader.result, mime: file.type,
+        entry_date: document.getElementById("photo-date").value || null,
+      });
+      status.textContent = "Kuva lisätty.";
+      loadPhotos();
+    } catch (e) { status.textContent = "Lisäys epäonnistui: " + e.message; }
+  };
+  reader.readAsDataURL(file);
+  ev.target.value = "";
+});
+
 async function loadBody() {
   document.getElementById("b-date").value = new Date().toISOString().slice(0, 10);
   document.getElementById("m-date").value = new Date().toISOString().slice(0, 10);
+  document.getElementById("photo-date").value = new Date().toISOString().slice(0, 10);
   const s = await api.get(pq("/api/body/summary"));
   renderBodyScore();
   renderBodypartLevels();
   renderBodyFigure(s.measurement_sites, s.height_cm);
+  loadPhotos();
 
   // Koostumus
   const comp = document.getElementById("composition");
