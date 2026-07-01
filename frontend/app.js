@@ -1413,11 +1413,29 @@ async function loadNetworkInfo() {
   }
 }
 
+function renderCompletenessHint() {
+  const list = document.getElementById("profile-list");
+  const p = profilesCache.find((x) => x.id === currentProfileId);
+  if (!p) return;
+  const missing = [];
+  if (!p.sex) missing.push("sukupuoli");
+  if (p.age == null) missing.push("syntymäaika (ikä)");
+  if (!p.height_cm) missing.push("pituus");
+  if (!p.latest_bodyweight) missing.push("kehon paino (Keho-välilehti)");
+  if (missing.length) {
+    list.append(el("div", { class: "item", style: "border-left:3px solid #f59e0b" },
+      el("strong", { style: "color:#f59e0b" }, "Täydennä profiili tarkempia lukuja varten"),
+      el("div", { class: "muted", style: "margin-top:4px" },
+        `Puuttuu: ${missing.join(", ")}. Näitä käytetään TDEE:hen, FFMI:hin ja voimatasoihin — ilman niitä arviot ovat karkeampia.`)));
+  }
+}
+
 async function loadProfilesTab() {
   await loadProfiles();
   loadNetworkInfo();
   const list = document.getElementById("profile-list");
   list.innerHTML = "";
+  renderCompletenessHint();
   for (const p of profilesCache) {
     const isCurrent = p.id === currentProfileId;
     const item = el("div", { class: "item" },
@@ -1858,9 +1876,11 @@ document.getElementById("b-save").addEventListener("click", async () => {
     hrv: v("b-hrv") ? +v("b-hrv") : null,
     resting_hr: v("b-rhr") ? +v("b-rhr") : null,
     kcal: v("b-kcal") ? +v("b-kcal") : null,
+    steps: v("b-steps") ? +v("b-steps") : null,
+    water_l: v("b-water") ? +v("b-water") : null,
   };
   await api.post(pq("/api/body/entries"), body);
-  ["b-weight", "b-bf", "b-sleep", "b-sscore", "b-hrv", "b-rhr", "b-kcal"].forEach((id) => (document.getElementById(id).value = ""));
+  ["b-weight", "b-bf", "b-sleep", "b-sscore", "b-hrv", "b-rhr", "b-kcal", "b-steps", "b-water"].forEach((id) => (document.getElementById(id).value = ""));
   loadBody();
 });
 
@@ -1927,7 +1947,24 @@ async function renderFoodResults() {
   });
 }
 
+async function renderRecentFoods() {
+  const box = document.getElementById("recent-foods");
+  if (!box) return;
+  box.innerHTML = "";
+  const foods = await api.get(pq("/api/nutrition/recent"));
+  if (!foods.length) return;
+  box.append(el("span", { class: "muted", style: "align-self:center" }, "Pikakirjaa:"));
+  foods.forEach((f) => {
+    box.append(el("button", { class: "small", title: `${f.kcal} kcal /100g`, onclick: async () => {
+      await api.post(pq("/api/nutrition/logs") + "&on_date=" + nDate(),
+        { food_id: f.id, grams: f.default_grams || 100 });
+      renderDayLog();
+    } }, `+ ${f.name}`));
+  });
+}
+
 async function renderDayLog() {
+  renderRecentFoods();
   const s = await api.get(pq("/api/nutrition/summary") + "&on_date=" + nDate());
   const t = s.today;
   // Yhteenveto + liikaa/liian vähän -arvio dieettitavoitteeseen nähden
@@ -2058,9 +2095,10 @@ document.getElementById("nf-save").addEventListener("click", async () => {
       name: v("nf-name").trim(), category: v("nf-cat").trim() || null,
       kcal: +v("nf-kcal") || 0, protein_g: +v("nf-prot") || 0,
       carbs_g: +v("nf-carb") || 0, fat_g: +v("nf-fat") || 0,
+      fiber_g: +v("nf-fiber") || 0, sugar_g: +v("nf-sugar") || 0, sodium_mg: +v("nf-sodium") || 0,
       default_grams: v("nf-grams") ? +v("nf-grams") : null,
     });
-    ["nf-name", "nf-cat", "nf-kcal", "nf-prot", "nf-carb", "nf-fat", "nf-grams"].forEach((id) => (document.getElementById(id).value = ""));
+    ["nf-name", "nf-cat", "nf-kcal", "nf-prot", "nf-carb", "nf-fat", "nf-fiber", "nf-sugar", "nf-sodium", "nf-grams"].forEach((id) => (document.getElementById(id).value = ""));
     foodCats = []; loadNutrition();
   } catch (e) { alert("Virhe: " + e.message); }
 });

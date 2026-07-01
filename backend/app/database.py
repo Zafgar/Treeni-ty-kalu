@@ -67,6 +67,11 @@ def ensure_columns():
         ("exercises", "per_hand", "BOOLEAN DEFAULT 0"),
         ("profiles", "creatine", "BOOLEAN DEFAULT 0"),
         ("programs", "auto_progress", "BOOLEAN DEFAULT 0"),
+        ("body_entries", "steps", "FLOAT"),
+        ("body_entries", "water_l", "FLOAT"),
+        ("foods", "fiber_g", "FLOAT DEFAULT 0"),
+        ("foods", "sugar_g", "FLOAT DEFAULT 0"),
+        ("foods", "sodium_mg", "FLOAT DEFAULT 0"),
     ]
     inspector = inspect(engine)
     existing_tables = set(inspector.get_table_names())

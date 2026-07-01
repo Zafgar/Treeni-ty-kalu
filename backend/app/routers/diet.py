@@ -106,6 +106,22 @@ def _avg_daily_cardio_kcal(db: Session, profile_id: int, ref_date: date, days: i
     return round(total / days)
 
 
+def _avg_daily_steps_kcal(db: Session, profile_id: int, ref_date: date, days: int, weight: float) -> float:
+    """Keskimääräinen askelista poltettu kcal/pv. ~0.04 kcal/askel 70 kg:lla,
+    skaalattuna painoon. Vain kirjatuista päivistä (ei oleteta nollaa muille)."""
+    start = ref_date - timedelta(days=days - 1)
+    entries = (db.query(models.BodyEntry)
+               .filter(models.BodyEntry.profile_id == profile_id,
+                       models.BodyEntry.steps.isnot(None),
+                       models.BodyEntry.entry_date >= start,
+                       models.BodyEntry.entry_date <= ref_date).all())
+    if not entries:
+        return 0.0
+    per_step = 0.04 * ((weight or 70) / 70.0)
+    avg_steps = sum(e.steps for e in entries) / len(entries)
+    return round(avg_steps * per_step)
+
+
 def _daily_kcal(db: Session, profile_id: int) -> dict[date, float]:
     out: dict[date, float] = {}
     for fl in db.query(models.FoodLog).filter(models.FoodLog.profile_id == profile_id).all():
@@ -244,10 +260,11 @@ def diet_status(profile_id: int = Query(...), db: Session = Depends(get_db)):
         tdee = engine.baseline_tdee(
             week_avg, profile.height_cm if profile else None, age,
             profile.sex if profile else None, training_days)
-        # Lisää keskimääräinen kardiokulutus/pv (adaptiivinen malli huomioi
-        # kardion jo automaattisesti painomuutoksen kautta).
+        # Lisää keskimääräinen kardiokulutus/pv ja askelkulutus (arkiaktiivisuus).
+        # Adaptiivinen malli huomioi nämä jo automaattisesti painomuutoksen kautta.
         if tdee:
             tdee += _avg_daily_cardio_kcal(db, profile_id, ref_date, 14)
+            tdee += _avg_daily_steps_kcal(db, profile_id, ref_date, 14, week_avg)
 
     low_carb = bool(next((m for m in DIET_MODELS
                           if phase and m["name"] == phase.model and m.get("low_carb")), None))

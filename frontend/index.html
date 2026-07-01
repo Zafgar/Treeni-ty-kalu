@@ -151,6 +151,8 @@
           <label title="HRV = sykevälivaihtelu (Heart Rate Variability), ms. Korkeampi = parempi palautuminen. Älykellosta.">HRV<input id="b-hrv" type="number" /></label>
           <label title="Leposyke = syke levossa (bpm). Matalampi kertoo usein paremmasta kunnosta/palautumisesta.">Leposyke<input id="b-rhr" type="number" /></label>
           <label title="Päivän aikana syömäsi kokonaiskalorit. Käytetään dieettiohjauksessa ylläpitokalorien (TDEE) tarkentamiseen. Vapaaehtoinen.">Syödyt kalorit (kcal/pv)<input id="b-kcal" type="number" placeholder="koko päivän syönti" /></label>
+          <label title="Päivän askeleet (esim. kello/puhelin). Arkiaktiivisuus nostaa kulutusta.">Askeleet<input id="b-steps" type="number" /></label>
+          <label title="Juotu vesi litroina. Nesteytys tukee palautumista ja suorituskykyä.">Vesi (l)<input id="b-water" type="number" step="0.1" /></label>
         </div>
         <p class="muted" style="margin:6px 0 0">Kalorit = koko päivän <strong>syödyt</strong> kalorit (ei treenin
           poltto — sen voit kirjata treenin tietoihin). Tämä auttaa arvioimaan tarpeesi tarkemmin.</p>
@@ -388,6 +390,7 @@
 
       <div class="card">
         <h3>Päivän kirjaukset</h3>
+        <div id="recent-foods" class="btn-row" style="margin-bottom:8px"></div>
         <div id="today-log" class="list"></div>
       </div>
 
@@ -416,6 +419,9 @@
           <label>Proteiini g<input id="nf-prot" type="number" step="0.1" /></label>
           <label>Hiilarit g<input id="nf-carb" type="number" step="0.1" /></label>
           <label>Rasva g<input id="nf-fat" type="number" step="0.1" /></label>
+          <label title="Vapaaehtoinen">Kuitu g<input id="nf-fiber" type="number" step="0.1" /></label>
+          <label title="Vapaaehtoinen">Sokeri g<input id="nf-sugar" type="number" step="0.1" /></label>
+          <label title="Vapaaehtoinen">Natrium mg<input id="nf-sodium" type="number" /></label>
           <label>Annos g<input id="nf-grams" type="number" /></label>
         </div>
         <button id="nf-save" class="success">Tallenna ruoka</button>

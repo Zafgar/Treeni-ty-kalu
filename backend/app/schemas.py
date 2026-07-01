@@ -264,6 +264,8 @@ class BodyEntryBase(BaseModel):
     hrv: float | None = None
     resting_hr: float | None = None
     kcal: float | None = None
+    steps: float | None = None
+    water_l: float | None = None
     notes: str | None = None
 
 
@@ -324,6 +326,9 @@ class FoodBase(BaseModel):
     protein_g: float = 0.0
     carbs_g: float = 0.0
     fat_g: float = 0.0
+    fiber_g: float = 0.0
+    sugar_g: float = 0.0
+    sodium_mg: float = 0.0
     default_grams: float | None = None
 
 
@@ -339,6 +344,9 @@ class FoodUpdate(BaseModel):
     protein_g: float | None = None
     carbs_g: float | None = None
     fat_g: float | None = None
+    fiber_g: float | None = None
+    sugar_g: float | None = None
+    sodium_mg: float | None = None
     default_grams: float | None = None
 
 

@@ -254,6 +254,9 @@ class BodyEntry(Base):
     hrv: Mapped[float | None] = mapped_column(Float, nullable=True)
     resting_hr: Mapped[float | None] = mapped_column(Float, nullable=True)
     kcal: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Askeleet (arkiaktiivisuus -> kulutus) ja juotu vesi (l)
+    steps: Mapped[float | None] = mapped_column(Float, nullable=True)
+    water_l: Mapped[float | None] = mapped_column(Float, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
@@ -314,6 +317,10 @@ class Food(Base):
     protein_g: Mapped[float] = mapped_column(Float, default=0.0)
     carbs_g: Mapped[float] = mapped_column(Float, default=0.0)
     fat_g: Mapped[float] = mapped_column(Float, default=0.0)
+    # Mikroravinteet (vapaaehtoisia), per 100 g
+    fiber_g: Mapped[float] = mapped_column(Float, default=0.0, server_default="0")
+    sugar_g: Mapped[float] = mapped_column(Float, default=0.0, server_default="0")
+    sodium_mg: Mapped[float] = mapped_column(Float, default=0.0, server_default="0")
     # Tyypillinen annoskoko grammoina (esim. banaani ~120 g) nopeaa kirjausta varten
     default_grams: Mapped[float | None] = mapped_column(Float, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

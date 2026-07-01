@@ -86,6 +86,24 @@ def list_logs(
     return q.order_by(models.FoodLog.entry_date.desc(), models.FoodLog.id.desc()).all()
 
 
+@router.get("/recent", response_model=list[schemas.FoodOut])
+def recent_foods(profile_id: int = Query(...), limit: int = Query(12), db: Session = Depends(get_db)):
+    """Viimeksi kirjatut ruoat (uniikit) nopeaa uudelleenkirjausta varten."""
+    logs = (db.query(models.FoodLog)
+            .filter(models.FoodLog.profile_id == profile_id)
+            .order_by(models.FoodLog.entry_date.desc(), models.FoodLog.id.desc())
+            .limit(120).all())
+    seen, foods = set(), []
+    for lg in logs:
+        if lg.food_id in seen:
+            continue
+        seen.add(lg.food_id)
+        foods.append(lg.food)
+        if len(foods) >= limit:
+            break
+    return foods
+
+
 @router.post("/logs", response_model=schemas.FoodLogOut, status_code=201)
 def create_log(profile_id: int, payload: schemas.FoodLogCreate, db: Session = Depends(get_db)):
     if not db.get(models.Food, payload.food_id):
