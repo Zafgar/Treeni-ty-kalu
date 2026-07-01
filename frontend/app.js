@@ -1302,7 +1302,7 @@ async function drawProgressChart() {
     series.push({ points: pts, color });
     legend.append(el("span", { class: "tag", style: `color:${color};border-color:${color}` }, h.exercise_name));
     // Ennuste (katkoviiva + haarukka) vain kun yksi liike valittuna -> selkeä
-    if (single && h.forecast && h.forecast.length) {
+    if (single && h.forecast && h.forecast.length && h.points.length) {
       const lastPt = h.points[h.points.length - 1];
       const anchor = { x: new Date(lastPt.date).getTime(), y: lastPt.estimated_1rm };
       const fc = h.forecast.map((p) => ({ x: new Date(p.date).getTime(), y: p.mid }));
@@ -2049,16 +2049,30 @@ async function loadBody() {
         `Rasvamassa ~${c.fat_mass_kg} kg` +
         (c.bmi ? ` · BMI ${c.bmi}` : "") + (c.ffmi ? ` · FFMI ${c.ffmi}` : "") +
         (c.creatine_water_kg ? ` · josta kreatiinivettä ~${c.creatine_water_kg} kg (ei rasvaa)` : ""))));
-    // Fysiikkataso (aloittelija → IFBB Pro)
+    // Fysiikkataso (aloittelija → Mr. Olympia) segmentoituna palkkina
     if (s.physique) {
       const p = s.physique;
-      const pct = Math.min(100, Math.round(((p.level_index + 1) / p.levels.length) * 100));
-      comp.append(el("div", { style: "margin-top:12px" },
+      const box = el("div", { style: "margin-top:12px" },
         el("div", { class: "row-between" },
           el("strong", {}, "Fysiikkataso"),
-          el("span", { class: "tag main" }, `${p.level} (FFMI ${p.ffmi})`)),
-        el("div", { class: "level-bar" }, el("div", { class: "level-fill", style: `width:${pct}%` })),
-        el("div", { class: "muted" }, p.next_level ? `Seuraava: ${p.next_level} @ FFMI ${p.next_ffmi}` : "Huipputaso!")));
+          el("span", { class: "tag main" }, `${p.level} (FFMI ${p.ffmi})`)));
+      const seg = el("div", { class: "seg-bar" });
+      p.levels.forEach((name, i) => {
+        seg.append(el("div", {
+          class: "seg" + (i <= p.level_index ? " on" : "") + (i === p.level_index ? " current" : ""),
+          title: name,
+        }));
+      });
+      box.append(seg);
+      const SHORT = ["Aloitt.", "Harrast.", "Keski", "Edist.", "Kokenut", "Eliitti", "Kilpa", "IFBB", "Olympia"];
+      const labels = el("div", { class: "seg-labels" });
+      p.levels.forEach((name, i) => labels.append(el("span", {
+        class: "seg-label" + (i === p.level_index ? " current" : "") + (i <= p.level_index ? " on" : ""),
+        title: name,
+      }, SHORT[i] || name)));
+      box.append(labels);
+      box.append(el("div", { class: "muted" }, p.next_level ? `Seuraava: ${p.next_level} @ FFMI ${p.next_ffmi}` : "Ylin taso saavutettu!"));
+      comp.append(box);
     }
   } else {
     comp.append(el("p", { class: "muted" }, "Anna paino ja rasva-% nähdäksesi koostumusarvion."));
