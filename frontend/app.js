@@ -1871,23 +1871,23 @@ async function renderBodypartLevels() {
   });
 }
 
-// ---- Kehon hahmo mittojen suhteista (SVG, etukuva) ----
-function svgEl(tag, attrs) {
-  const e = document.createElementNS("http://www.w3.org/2000/svg", tag);
-  for (const k in attrs) e.setAttribute(k, attrs[k]);
-  return e;
-}
+// ---- Kehon 3D-hahmo (canvas): pyöritettävä mallinukke ----
+// Keho mallinnetaan poikkileikkausviipaleina (leveys + syvyys), jolloin hahmoa
+// voi pyörittää: sivusta näkyy syvyysprofiili (maha, povi), edestä leveys.
+// Sukupuoli muokkaa hartia/lantio-suhdetta, rasva-% keskivartalon syvyyttä ja
+// pyöreyttä. Oikeat ympärysmitat ohjaavat kokoa; puuttuvat arvioidaan.
+let _figAnim = null;
 
-function renderBodyFigure(sites, height) {
+function renderBodyFigure(sites, height, sex, bodyFat) {
   const area = document.getElementById("figure-area");
   const dateWrap = document.getElementById("figure-date-wrap");
   area.innerHTML = ""; dateWrap.innerHTML = "";
+  if (_figAnim) { cancelAnimationFrame(_figAnim); _figAnim = null; }
   const siteNames = Object.keys(sites || {});
   if (!siteNames.length) {
     area.append(el("p", { class: "muted" }, "Lisää ympärysmittoja (vyötärö, hartia, reisi…) niin piirrän hahmon."));
     return;
   }
-  // Kaikki mittauspäivät (uniikit, järjestyksessä)
   const dateSet = new Set();
   siteNames.forEach((s) => sites[s].forEach((p) => dateSet.add(p.date)));
   const dates = [...dateSet].sort();
@@ -1899,127 +1899,203 @@ function renderBodyFigure(sites, height) {
     return v;
   }
 
-  function draw(dateStr) {
-    area.innerHTML = "";
-    const h = height || 178;
-    // Hahmon mittakaava: keho täyttää pystysuunnan, leveys skaalataan SAMALLA
-    // px/cm-kertoimella -> suhteet ovat oikein pituuteen nähden.
-    const VB_W = 200, VB_H = 440, cx = 100;
-    const yTop = 14, bodyPx = VB_H - yTop - 10;   // pää-latvasta nilkkaan
-    const pxPerCm = bodyPx / h;
-    // Ympärys -> säde (puolileveys) = ympärys/(2π). Etukuvassa keho on hieman
-    // leveämpi kuin syvä -> kerroin 1.15. Raajoissa käytetään halkaisijaa.
-    const FRONT = 1.15;
-    const halfW = (circ) => (circ / (2 * Math.PI)) * pxPerCm * FRONT;   // puolileveys px
-    const dia = (circ) => (circ / Math.PI) * pxPerCm * FRONT;           // halkaisija px
-    // Oletukset jos mitta puuttuu (keskiverto, suhteessa pituuteen, cm)
-    const def = { hartia: h * 0.63, rintakehä: h * 0.55, vyötärö: h * 0.47,
-      lantio: h * 0.53, hauis: h * 0.19, reisi: h * 0.31, pohje: h * 0.22, kaula: h * 0.21 };
-    const mv = (site) => { const v = valueAsOf(site, dateStr); return { v, c: v != null ? v : def[site], real: v != null }; };
-    const sh = mv("hartia"), ch = mv("rintakehä"), wa = mv("vyötärö"), hip = mv("lantio"),
-      arm = mv("hauis"), th = mv("reisi"), ca = mv("pohje"), neck = mv("kaula");
+  const CW = 320, CH = 540;
+  const canvas = el("canvas", { style: "background:transparent;cursor:grab;touch-action:pan-y;margin-top:0" });
+  const dpr = Math.min(3, window.devicePixelRatio || 1);
+  canvas.width = CW * dpr; canvas.height = CH * dpr;
+  canvas.style.width = CW + "px"; canvas.style.height = CH + "px";
+  const ctx = canvas.getContext("2d");
+  const chipRow = el("div", { class: "btn-row", style: "justify-content:center;margin-top:6px" });
+  area.append(canvas, chipRow);
 
-    const svg = svgEl("svg", { viewBox: `0 0 ${VB_W} ${VB_H}`, width: "230", height: "506",
-      style: "max-width:100%;height:auto" });
-    const grad = "url(#bodyGrad)";
-    const defs = svgEl("defs", {});
-    const lg = svgEl("linearGradient", { id: "bodyGrad", x1: "0", y1: "0", x2: "1", y2: "1" });
-    lg.append(svgEl("stop", { offset: "0", "stop-color": "#5b9dff" }));
-    lg.append(svgEl("stop", { offset: "0.55", "stop-color": "#3f8cff" }));
-    lg.append(svgEl("stop", { offset: "1", "stop-color": "#2fbf8f" }));
-    defs.append(lg);
-    // Pehmeä varjo syvyyden tuntuun
-    const filt = svgEl("filter", { id: "bodyShadow", x: "-20%", y: "-20%", width: "140%", height: "140%" });
-    const fe = svgEl("feDropShadow", { dx: "0", dy: "3", stdDeviation: "4", "flood-color": "#000", "flood-opacity": "0.35" });
-    filt.append(fe); defs.append(filt); svg.append(defs);
+  const female = (sex || "").toLowerCase().startsWith("nain");
+  const h = height || (female ? 167 : 178);
+  const refBf = female ? 20 : 12;
+  const fat = bodyFat == null ? 0.25 : Math.max(0, Math.min(1, (bodyFat - refBf) / 22));
 
-    // Yhteinen ryhmä: yhtenäinen ääriviiva + varjo -> siistimpi kokonaisuus
-    const g = svgEl("g", { fill: grad, stroke: "rgba(10,20,40,0.55)", "stroke-width": "1.5",
-      "stroke-linejoin": "round", "stroke-linecap": "round", filter: "url(#bodyShadow)" });
+  const topY = 26, botY = CH - 34;
+  const bodyPx = botY - topY;
+  const pxCm = bodyPx / h;
+  const rOf = (circ) => (circ / (2 * Math.PI)) * pxCm;
 
-    // Pystytasot (osuudet bodyPx:stä)
-    const headR = bodyPx * 0.062;
-    const yHead = yTop + headR;
-    const yShoulder = yTop + bodyPx * 0.175;
-    const yChest = yTop + bodyPx * 0.27;
-    const yWaist = yTop + bodyPx * 0.46;
-    const yHip = yTop + bodyPx * 0.525;
-    const yKnee = yTop + bodyPx * 0.74;
-    const yCalf = yTop + bodyPx * 0.85;
-    const yAnkle = yTop + bodyPx * 0.985;
+  let model = null;
 
-    const shW = halfW(sh.c), chW = halfW(ch.c), waW = halfW(wa.c), hipW = halfW(hip.c);
-    const round1 = (n) => Math.round(n * 10) / 10;
-    const P = (x, y) => `${round1(x)},${round1(y)}`;
+  function buildModel(dateStr) {
+    const defC = female
+      ? { hartia: h * 0.585, rintakehä: h * 0.53, vyötärö: h * 0.42, lantio: h * 0.56,
+          hauis: h * 0.165, reisi: h * 0.325, pohje: h * 0.21, kaula: h * 0.19 }
+      : { hartia: h * 0.63, rintakehä: h * 0.55, vyötärö: h * 0.465, lantio: h * 0.52,
+          hauis: h * 0.19, reisi: h * 0.31, pohje: h * 0.22, kaula: h * 0.215 };
+    const used = {};
+    const C = (site) => {
+      const v = valueAsOf(site, dateStr);
+      used[site] = { v, real: v != null };
+      return v != null ? v : defC[site];
+    };
+    const rNeck = rOf(C("kaula")), rChest = rOf(C("rintakehä"));
+    const rWaist = rOf(C("vyötärö")), rHip = rOf(C("lantio"));
+    const rArm = rOf(C("hauis")), rThigh = rOf(C("reisi")), rCalf = rOf(C("pohje"));
+    const shoulderHalf = (C("hartia") / 3.1) * pxCm * (female ? 0.94 : 1.0);
 
-    // --- Jalat: pehmeät taperoituvat muodot (reisi -> polvi -> pohje -> nilkka) ---
-    const thD = dia(th.c), caD = dia(ca.c);
-    [-1, 1].forEach((d) => {
-      const legCx = cx + d * (hipW * 0.48);
-      const wThigh = thD * 0.98, wKnee = thD * 0.58, wCalf = caD, wAnkle = caD * 0.5;
-      // Bézier-reunat pehmentävät reisi->polvi->pohje-siirtymän
-      const dd = `M ${P(legCx - wThigh / 2, yHip)}
-        C ${P(legCx - wThigh / 2, yHip + 40)} ${P(legCx - wKnee / 2, yKnee - 30)} ${P(legCx - wKnee / 2, yKnee)}
-        C ${P(legCx - wCalf / 2, yKnee + 18)} ${P(legCx - wCalf / 2, yCalf)} ${P(legCx - wAnkle / 2, yAnkle)}
-        L ${P(legCx + wAnkle / 2, yAnkle)}
-        C ${P(legCx + wCalf / 2, yCalf)} ${P(legCx + wCalf / 2, yKnee + 18)} ${P(legCx + wKnee / 2, yKnee)}
-        C ${P(legCx + wKnee / 2, yKnee - 30)} ${P(legCx + wThigh / 2, yHip + 40)} ${P(legCx + wThigh / 2, yHip)} Z`;
-      g.append(svgEl("path", { d: dd.replace(/\s+/g, " ") }));
+    // Ellipsin leveys/syvyys-suhteet; rasva kasvattaa keskivartalon syvyyttä
+    const chestK = female ? 1.18 : 1.28;
+    const chestD = (female ? 0.98 : 0.8) + 0.18 * fat;
+    const waistK = 1.12 - 0.14 * fat;
+    const waistD = 0.85 + 0.45 * fat;
+    const hipK = female ? 1.3 : 1.2;
+    const hipD = 0.85 + 0.2 * fat;
+    const delt = (1 - fat * 0.5) * (female ? 0.4 : 1.0);
+
+    const Y = (f) => topY + bodyPx * f;
+    const torso = [
+      { y: Y(0.115), w: rNeck * 1.05, d: rNeck * 1.05 },
+      { y: Y(0.14), w: rNeck * 1.45, d: rNeck * 1.15 },
+      { y: Y(0.19), w: shoulderHalf * 0.92, d: rChest * 0.76 },
+      { y: Y(0.26), w: rChest * chestK, d: rChest * chestD },
+      { y: Y(0.35), w: (rChest * chestK + rWaist * waistK) / 2, d: (rChest * chestD + rWaist * waistD) / 2 },
+      { y: Y(0.435), w: rWaist * waistK, d: rWaist * waistD },
+      { y: Y(0.52), w: rHip * hipK, d: rHip * hipD },
+      { y: Y(0.555), w: rHip * hipK * 0.96, d: rHip * hipD * 0.97 },
+      { y: Y(0.60), w: rHip * hipK * 0.62, d: rHip * hipD * 0.72 },
+    ];
+    const legOff = rHip * hipK * 0.5;
+    const leg = [
+      { y: Y(0.545), w: rThigh * 1.04, d: rThigh * 1.06 },
+      { y: Y(0.63), w: rThigh * 0.94, d: rThigh * 0.96 },
+      { y: Y(0.745), w: rThigh * 0.6, d: rThigh * 0.64 },
+      { y: Y(0.82), w: rCalf, d: rCalf * 1.05 },
+      { y: Y(0.975), w: rCalf * 0.48, d: rCalf * 0.5 },
+    ];
+    const armOff = shoulderHalf * 0.98 + rArm * 0.15;
+    const dC = rArm * (0.95 + 0.22 * delt);
+    const arm = [
+      { y: Y(0.155), w: dC * 0.42, d: dC * 0.42 },
+      { y: Y(0.2), w: dC, d: dC },
+      { y: Y(0.28), w: rArm, d: rArm },
+      { y: Y(0.36), w: rArm * 0.78, d: rArm * 0.78 },
+      { y: Y(0.47), w: rArm * 0.58, d: rArm * 0.58 },
+      { y: Y(0.52), w: rArm * 0.5, d: rArm * 0.5 },
+      { y: Y(0.545), w: rArm * 0.56, d: rArm * 0.56 },
+      { y: Y(0.585), w: rArm * 0.26, d: rArm * 0.3 },
+    ];
+    const headR = bodyPx * 0.063;
+    model = { torso, leg, arm, legOff, armOff, headR, headY: topY + headR, used };
+
+    chipRow.innerHTML = "";
+    ["hartia", "rintakehä", "vyötärö", "lantio", "hauis", "reisi", "pohje"].forEach((s) => {
+      const u = used[s] || {};
+      chipRow.append(el("span", {
+        class: "tag", style: u.real ? "" : "opacity:0.45",
+        title: u.real ? "Mitattu" : "Arvio — lisää mitta tarkentaaksesi",
+      }, `${s} ${u.v != null ? u.v + " cm" : "~"}`));
     });
-
-    // --- Kädet: pehmeät taperoituvat muodot, pieni rako vartaloon ---
-    const armD = dia(arm.c);
-    const yWrist = yWaist + bodyPx * 0.05;
-    const yElbow = (yShoulder + yWrist) / 2;
-    [-1, 1].forEach((d) => {
-      const ax = cx + d * (shW + armD * 0.55 + 2);
-      const wTop = armD, wElbow = armD * 0.7, wWrist = armD * 0.48;
-      const dd = `M ${P(ax - wTop / 2, yShoulder)}
-        C ${P(ax - wTop / 2, yElbow - 20)} ${P(ax - wElbow / 2, yElbow - 10)} ${P(ax - wElbow / 2, yElbow)}
-        C ${P(ax - wWrist / 2, yElbow + 20)} ${P(ax - wWrist / 2, yWrist)} ${P(ax - wWrist / 2, yWrist)}
-        L ${P(ax + wWrist / 2, yWrist)}
-        C ${P(ax + wWrist / 2, yElbow + 20)} ${P(ax + wElbow / 2, yElbow + 10)} ${P(ax + wElbow / 2, yElbow)}
-        C ${P(ax + wElbow / 2, yElbow - 10)} ${P(ax + wTop / 2, yElbow - 20)} ${P(ax + wTop / 2, yShoulder)} Z`;
-      g.append(svgEl("path", { d: dd.replace(/\s+/g, " "), rx: 6 }));
-    });
-
-    // --- Vartalo: pehmeä silhouette (hartia -> rinta -> vyötärö -> lantio) ---
-    const torso = `M ${P(cx - shW, yShoulder)}
-      C ${P(cx - shW, yShoulder + 6)} ${P(cx - chW, yChest - 10)} ${P(cx - chW, yChest)}
-      C ${P(cx - waW, yWaist - 20)} ${P(cx - waW, yWaist)} ${P(cx - waW, yWaist)}
-      C ${P(cx - hipW, yHip - 14)} ${P(cx - hipW, yHip)} ${P(cx - hipW, yHip)}
-      L ${P(cx + hipW, yHip)}
-      C ${P(cx + hipW, yHip - 14)} ${P(cx + waW, yWaist)} ${P(cx + waW, yWaist)}
-      C ${P(cx + waW, yWaist - 20)} ${P(cx + chW, yChest)} ${P(cx + chW, yChest)}
-      C ${P(cx + chW, yChest - 10)} ${P(cx + shW, yShoulder + 6)} ${P(cx + shW, yShoulder)} Z`;
-    g.append(svgEl("path", { d: torso.replace(/\s+/g, " ") }));
-
-    // --- Kaula + pää päälle ---
-    const neckW = halfW(neck.c) * 1.3;
-    g.append(svgEl("rect", { x: round1(cx - neckW / 2), y: round1(yHead + headR * 0.4),
-      width: round1(neckW), height: round1(yShoulder - yHead), rx: 5 }));
-    g.append(svgEl("circle", { cx, cy: round1(yHead), r: round1(headR) }));
-
-    svg.append(g);
-    area.append(svg);
-
-    // Mitat-listaus hahmon alle (oikeat vs. oletetut)
-    const order = ["hartia", "rintakehä", "vyötärö", "lantio", "hauis", "reisi", "pohje"];
-    const mm = { hartia: sh, rintakehä: ch, vyötärö: wa, lantio: hip, hauis: arm, reisi: th, pohje: ca };
-    const info = el("div", { class: "btn-row", style: "justify-content:center;margin-top:6px" });
-    order.forEach((site) => {
-      const o = mm[site];
-      info.append(el("span", { class: "tag" + (o.real ? "" : " "), style: o.real ? "" : "opacity:0.5" },
-        `${site} ${o.v != null ? o.v + "cm" : "—"}`));
-    });
-    area.append(info);
-    if (order.some((s) => !mm[s].real)) {
-      area.append(el("div", { class: "muted", style: "margin-top:4px" },
-        "Himmeät kohdat ovat arvioita (mitta puuttuu) — lisää mitta tarkentaaksesi hahmoa."));
-    }
   }
 
-  // Näytä/piilota-kytkin (muistetaan valinta selaimeen)
+  // Mallinukke-sävyt (sopii tummaan teemaan)
+  const TONE = { light: "#bcc4d8", dark: "#535d76", darker: "#3a4154", hair: "#272c3a" };
+  function shade(x0, x1) {
+    const g = ctx.createLinearGradient(x0, 0, x1, 0);
+    g.addColorStop(0, TONE.dark);
+    g.addColorStop(0.38, TONE.light);
+    g.addColorStop(1, TONE.darker);
+    return g;
+  }
+
+  function densify(keys) {
+    const out = [];
+    for (let i = 0; i < keys.length - 1; i++) {
+      const a = keys[i], b = keys[i + 1];
+      const steps = Math.max(2, Math.round((b.y - a.y) / 4));
+      for (let s = 0; s < steps; s++) {
+        const t = s / steps, u = (1 - Math.cos(t * Math.PI)) / 2;
+        out.push({ y: a.y + (b.y - a.y) * t, w: a.w + (b.w - a.w) * u, d: a.d + (b.d - a.d) * u });
+      }
+    }
+    out.push(keys[keys.length - 1]);
+    return out;
+  }
+
+  function drawPart(keys, cx, theta, dim) {
+    const sl = densify(keys);
+    const cosT = Math.cos(theta), sinT = Math.sin(theta);
+    const aw = (p) => Math.sqrt(p.w * p.w * cosT * cosT + p.d * p.d * sinT * sinT);
+    ctx.beginPath();
+    sl.forEach((p, i) => { const x = cx + aw(p); i ? ctx.lineTo(x, p.y) : ctx.moveTo(x, p.y); });
+    for (let i = sl.length - 1; i >= 0; i--) ctx.lineTo(cx - aw(sl[i]), sl[i].y);
+    ctx.closePath();
+    let maxW = 0;
+    sl.forEach((p) => { const a = aw(p); if (a > maxW) maxW = a; });
+    ctx.fillStyle = shade(cx - maxW, cx + maxW);
+    if (dim) { ctx.save(); ctx.globalAlpha = 0.78; ctx.fill(); ctx.restore(); }
+    else ctx.fill();
+  }
+
+  let theta = 0.3, auto = true, dragging = false, lastX = 0;
+
+  function render() {
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, CW, CH);
+    if (!model) return;
+    const cx = CW / 2;
+    const cosT = Math.cos(theta), sinT = Math.sin(theta);
+
+    // Lattiavarjo
+    ctx.fillStyle = "rgba(0,0,0,0.32)";
+    ctx.beginPath(); ctx.ellipse(cx, botY + 10, 64, 9, 0, 0, Math.PI * 2); ctx.fill();
+
+    const armL = { off: -model.armOff * cosT, z: -sinT };
+    const armR = { off: model.armOff * cosT, z: sinT };
+    const legs = [
+      { off: -model.legOff * cosT, z: -sinT },
+      { off: model.legOff * cosT, z: sinT },
+    ].sort((a, b) => a.z - b.z);
+
+    // Takimmainen käsi
+    [armL, armR].filter((a) => a.z < 0).forEach((a) => drawPart(model.arm, cx + a.off, theta, true));
+    // Jalat (takimmainen himmeämpänä kun ollaan sivuprofiilissa)
+    legs.forEach((l, i) => drawPart(model.leg, cx + l.off, theta, i === 0 && Math.abs(sinT) > 0.4));
+    // Vartalo
+    drawPart(model.torso, cx, theta, false);
+    // Hiukset takana (naisilla pidemmät)
+    const hr = model.headR, hy = model.headY;
+    if (female) {
+      ctx.beginPath(); ctx.ellipse(cx, hy + hr * 0.7, hr * 0.95, hr * 1.6, 0, 0, Math.PI * 2);
+      ctx.fillStyle = TONE.hair; ctx.fill();
+    }
+    // Pää
+    ctx.beginPath(); ctx.ellipse(cx, hy + hr * 0.05, hr * 0.8, hr, 0, 0, Math.PI * 2);
+    ctx.fillStyle = shade(cx - hr, cx + hr); ctx.fill();
+    // Hiuslakki
+    ctx.beginPath();
+    ctx.ellipse(cx, hy - hr * 0.2, hr * 0.84, hr * 0.72, 0, Math.PI * 0.95, Math.PI * 2.05);
+    ctx.fillStyle = TONE.hair; ctx.fill();
+    // Etummainen käsi
+    [armL, armR].filter((a) => a.z >= 0).forEach((a) => drawPart(model.arm, cx + a.off, theta, false));
+
+    ctx.fillStyle = "rgba(154,163,178,0.65)"; ctx.font = "11px system-ui"; ctx.textAlign = "center";
+    ctx.fillText("↔ pyöritä vetämällä", cx, CH - 5);
+    ctx.textAlign = "left";
+  }
+
+  function loop() {
+    if (!canvas.isConnected) { _figAnim = null; return; }
+    if (auto && !dragging) theta += 0.0055;
+    render();
+    _figAnim = requestAnimationFrame(loop);
+  }
+
+  canvas.addEventListener("pointerdown", (e) => {
+    dragging = true; auto = false; lastX = e.clientX;
+    try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
+    canvas.style.cursor = "grabbing";
+  });
+  canvas.addEventListener("pointermove", (e) => {
+    if (dragging) { theta += (e.clientX - lastX) * 0.012; lastX = e.clientX; }
+  });
+  canvas.addEventListener("pointerup", () => { dragging = false; canvas.style.cursor = "grab"; });
+  canvas.addEventListener("dblclick", () => { auto = true; });
+
+  // Näytä/piilota + aikajana
   const applyHidden = (hidden) => {
     area.style.display = hidden ? "none" : "";
     slideHost.style.display = hidden ? "none" : "";
@@ -2028,22 +2104,21 @@ function renderBodyFigure(sites, height) {
   const toggle = el("button", { class: "small", style: "margin-bottom:8px" });
   const slideHost = el("div");
   toggle.addEventListener("click", () => {
-    const nowHidden = area.style.display !== "none" ? true : false;
+    const nowHidden = area.style.display !== "none";
     localStorage.setItem("figureHidden", nowHidden ? "1" : "0");
     applyHidden(nowHidden);
   });
   dateWrap.append(toggle, slideHost);
-
-  // Aikajana jos useita päiviä
   if (dates.length > 1) {
     const slider = el("input", { type: "range", min: "0", max: String(dates.length - 1),
       value: String(dates.length - 1), style: "width:100%" });
     const lbl = el("div", { class: "muted", style: "text-align:center" }, dates[dates.length - 1]);
-    slider.addEventListener("input", () => { lbl.textContent = dates[+slider.value]; draw(dates[+slider.value]); });
+    slider.addEventListener("input", () => { lbl.textContent = dates[+slider.value]; buildModel(dates[+slider.value]); });
     slideHost.append(slider, lbl);
   }
-  draw(dates[dates.length - 1]);
+  buildModel(dates[dates.length - 1]);
   applyHidden(localStorage.getItem("figureHidden") === "1");
+  loop();
 }
 
 async function loadPhotos() {
@@ -2096,7 +2171,7 @@ async function loadBody() {
   const s = await api.get(pq("/api/body/summary"));
   renderBodyScore();
   renderBodypartLevels();
-  renderBodyFigure(s.measurement_sites, s.height_cm);
+  renderBodyFigure(s.measurement_sites, s.height_cm, s.sex, s.composition ? s.composition.body_fat_pct : null);
   loadPhotos();
 
   // Koostumus
