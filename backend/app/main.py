@@ -19,6 +19,7 @@ from .database import (
     ensure_default_profile,
     ensure_exercise_descriptions,
     ensure_extra_exercises,
+    ensure_extra_foods,
     ensure_seed_exercises,
     ensure_seed_foods,
 )
@@ -48,6 +49,7 @@ ensure_seed_exercises()
 ensure_extra_exercises()
 ensure_exercise_descriptions()
 ensure_seed_foods()
+ensure_extra_foods()
 
 app = FastAPI(
     title="Treeni-ty-kalu API",

@@ -1871,27 +1871,30 @@ async function renderBodypartLevels() {
   });
 }
 
-// ---- Kehon 3D-hahmo (canvas): pyöritettävä mallinukke ----
-// Keho mallinnetaan poikkileikkausviipaleina (leveys + syvyys), jolloin hahmoa
-// voi pyörittää: sivusta näkyy syvyysprofiili (maha, povi), edestä leveys.
-// Sukupuoli muokkaa hartia/lantio-suhdetta, rasva-% keskivartalon syvyyttä ja
-// pyöreyttä. Oikeat ympärysmitat ohjaavat kokoa; puuttuvat arvioidaan.
-let _figAnim = null;
+// ---- Kehon 3D-hahmo (Three.js): oikea valaistu 3D-malli ----
+// Keho rakennetaan poikkileikkausrenkaista oikeaksi 3D-verkoksi (ellipsi-
+// renkaat + etusiirtymä), joten maha ja povi työntyvät VAIN eteenpäin ja
+// pakarat taakse. Pää kasvonpiirteineen (nenä, korvat, hiukset) kääntyy
+// mukana. Sukupuoli ja rasva-% muokkaavat muotoa, mitat kokoa.
+let _figState = null;
 
 function renderBodyFigure(sites, height, sex, bodyFat) {
   const area = document.getElementById("figure-area");
   const dateWrap = document.getElementById("figure-date-wrap");
   area.innerHTML = ""; dateWrap.innerHTML = "";
-  if (_figAnim) { cancelAnimationFrame(_figAnim); _figAnim = null; }
+  if (_figState) { _figState.dead = true; try { _figState.renderer.dispose(); } catch (e) {} _figState = null; }
   const siteNames = Object.keys(sites || {});
   if (!siteNames.length) {
     area.append(el("p", { class: "muted" }, "Lisää ympärysmittoja (vyötärö, hartia, reisi…) niin piirrän hahmon."));
     return;
   }
+  if (typeof THREE === "undefined") {
+    area.append(el("p", { class: "muted" }, "3D-hahmo vaatii three.js-kirjaston (frontend/vendor)."));
+    return;
+  }
   const dateSet = new Set();
   siteNames.forEach((s) => sites[s].forEach((p) => dateSet.add(p.date)));
   const dates = [...dateSet].sort();
-
   function valueAsOf(site, dateStr) {
     if (!sites[site]) return null;
     let v = null;
@@ -1899,201 +1902,251 @@ function renderBodyFigure(sites, height, sex, bodyFat) {
     return v;
   }
 
-  const CW = 320, CH = 540;
-  const canvas = el("canvas", { style: "background:transparent;cursor:grab;touch-action:pan-y;margin-top:0" });
-  const dpr = Math.min(3, window.devicePixelRatio || 1);
-  canvas.width = CW * dpr; canvas.height = CH * dpr;
-  canvas.style.width = CW + "px"; canvas.style.height = CH + "px";
-  const ctx = canvas.getContext("2d");
-  const chipRow = el("div", { class: "btn-row", style: "justify-content:center;margin-top:6px" });
-  area.append(canvas, chipRow);
-
   const female = (sex || "").toLowerCase().startsWith("nain");
   const h = height || (female ? 167 : 178);
   const refBf = female ? 20 : 12;
   const fat = bodyFat == null ? 0.25 : Math.max(0, Math.min(1, (bodyFat - refBf) / 22));
 
-  const topY = 26, botY = CH - 34;
-  const bodyPx = botY - topY;
-  const pxCm = bodyPx / h;
-  const rOf = (circ) => (circ / (2 * Math.PI)) * pxCm;
+  // --- Three.js-perusta ---
+  const CW = 340, CH = 560;
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  renderer.setPixelRatio(Math.min(2.5, window.devicePixelRatio || 1));
+  renderer.setSize(CW, CH);
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.domElement.style.cssText = "max-width:100%;cursor:grab;touch-action:pan-y;border-radius:12px";
+  const chipRow = el("div", { class: "btn-row", style: "justify-content:center;margin-top:6px" });
+  const hint = el("div", { class: "muted", style: "font-size:0.8em;margin-top:2px" }, "↔ pyöritä vetämällä · tuplaklikkaus = automaattipyöritys");
+  area.append(renderer.domElement, chipRow, hint);
 
-  let model = null;
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(32, CW / CH, 1, 2000);
+  camera.position.set(0, h * 0.56, h * 2.05);
+  camera.lookAt(0, h * 0.5, 0);
+  scene.add(new THREE.HemisphereLight(0xbfd0e8, 0x2a2d38, 1.15));
+  const sun = new THREE.DirectionalLight(0xffffff, 1.6);
+  sun.position.set(60, 160, 120);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(1024, 1024);
+  sun.shadow.bias = -0.0002;
+  sun.shadow.normalBias = 2.5;
+  const sc = sun.shadow.camera;
+  sc.left = -80; sc.right = 80; sc.top = 200; sc.bottom = -10; sc.far = 500;
+  scene.add(sun);
+  const fill = new THREE.DirectionalLight(0x8899cc, 0.5);
+  fill.position.set(-80, 60, -80);
+  scene.add(fill);
+  // Lattia (vain varjo)
+  const ground = new THREE.Mesh(new THREE.CircleGeometry(70, 48), new THREE.ShadowMaterial({ opacity: 0.35 }));
+  ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true;
+  scene.add(ground);
 
+  const group = new THREE.Group();
+  scene.add(group);
+
+  // Materiaalit
+  const skin = new THREE.MeshStandardMaterial({ color: 0xc9a58f, roughness: 0.72, metalness: 0.03 });
+  const hairM = new THREE.MeshStandardMaterial({ color: 0x33261d, roughness: 0.85 });
+  const eyeM = new THREE.MeshStandardMaterial({ color: 0x1c1c22, roughness: 0.35 });
+
+  // Yleistetty sylinteri renkaista: {y, w (x-puolileveys), d (z-puolisyvyys), zc (etusiirtymä)}
+  function tube(rawRings, mat) {
+    const seg = 30;
+    // Tihennä renkaat (cosine-interpolointi) -> sileät normaalit ja muodot
+    const rings = [];
+    for (let i = 0; i < rawRings.length - 1; i++) {
+      const a = rawRings[i], b = rawRings[i + 1];
+      const steps = Math.max(1, Math.round(Math.abs(b.y - a.y) / (h * 0.012)));
+      for (let s = 0; s < steps; s++) {
+        const t = s / steps, u = (1 - Math.cos(t * Math.PI)) / 2;
+        rings.push({
+          y: a.y + (b.y - a.y) * t,
+          w: a.w + (b.w - a.w) * u,
+          d: a.d + (b.d - a.d) * u,
+          zc: (a.zc || 0) + ((b.zc || 0) - (a.zc || 0)) * u,
+        });
+      }
+    }
+    rings.push(rawRings[rawRings.length - 1]);
+    const pos = [];
+    rings.forEach((r) => {
+      for (let i = 0; i <= seg; i++) {
+        const a = (i / seg) * Math.PI * 2;
+        pos.push(r.w * Math.sin(a), r.y, (r.zc || 0) + r.d * Math.cos(a));
+      }
+    });
+    const idx = [];
+    for (let j = 0; j < rings.length - 1; j++) {
+      for (let i = 0; i < seg; i++) {
+        const a = j * (seg + 1) + i, b = a + 1, c = a + seg + 1, d = c + 1;
+        idx.push(a, b, c, b, d, c);
+      }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    g.setIndex(idx);
+    g.computeVertexNormals();
+    const m = new THREE.Mesh(g, mat);
+    m.castShadow = true;
+    return m;
+  }
+  const ell = (rx, ry, rz, mat) => {
+    const m = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 18), mat);
+    m.scale.set(rx, ry, rz); m.castShadow = true;
+    return m;
+  };
+
+  let usedChips = {};
   function buildModel(dateStr) {
+    // Tyhjennä vanha
+    for (let i = group.children.length - 1; i >= 0; i--) {
+      const c = group.children[i];
+      c.traverse && c.traverse((o) => { if (o.geometry) o.geometry.dispose(); });
+      group.remove(c);
+    }
     const defC = female
       ? { hartia: h * 0.585, rintakehä: h * 0.53, vyötärö: h * 0.42, lantio: h * 0.56,
           hauis: h * 0.165, reisi: h * 0.325, pohje: h * 0.21, kaula: h * 0.19 }
       : { hartia: h * 0.63, rintakehä: h * 0.55, vyötärö: h * 0.465, lantio: h * 0.52,
           hauis: h * 0.19, reisi: h * 0.31, pohje: h * 0.22, kaula: h * 0.215 };
-    const used = {};
+    usedChips = {};
     const C = (site) => {
       const v = valueAsOf(site, dateStr);
-      used[site] = { v, real: v != null };
+      usedChips[site] = { v, real: v != null };
       return v != null ? v : defC[site];
     };
-    const rNeck = rOf(C("kaula")), rChest = rOf(C("rintakehä"));
-    const rWaist = rOf(C("vyötärö")), rHip = rOf(C("lantio"));
-    const rArm = rOf(C("hauis")), rThigh = rOf(C("reisi")), rCalf = rOf(C("pohje"));
-    const shoulderHalf = (C("hartia") / 3.1) * pxCm * (female ? 0.94 : 1.0);
+    const R = (c) => c / (2 * Math.PI); // ympärys -> säde (cm)
+    const rNeck = R(C("kaula")), rChest = R(C("rintakehä")), rWaist = R(C("vyötärö"));
+    const rHip = R(C("lantio")), rArm = R(C("hauis")), rThigh = R(C("reisi")), rCalf = R(C("pohje"));
+    const shoulderHalf = C("hartia") / 3.3 * (female ? 0.95 : 1.0);
 
-    // Ellipsin leveys/syvyys-suhteet; rasva kasvattaa keskivartalon syvyyttä
-    const chestK = female ? 1.18 : 1.28;
-    const chestD = (female ? 0.98 : 0.8) + 0.18 * fat;
-    const waistK = 1.12 - 0.14 * fat;
-    const waistD = 0.85 + 0.45 * fat;
-    const hipK = female ? 1.3 : 1.2;
-    const hipD = 0.85 + 0.2 * fat;
-    const delt = (1 - fat * 0.5) * (female ? 0.4 : 1.0);
+    const chestK = female ? 1.15 : 1.26, chestD = female ? 0.9 : 0.8;
+    const waistK = 1.1 - 0.12 * fat, waistD = 0.8 + 0.28 * fat;
+    const hipK = female ? 1.28 : 1.18, hipD = 0.82 + 0.12 * fat;
+    const belly = fat * rWaist * 0.5;              // maha VAIN eteenpäin
+    const bust = female ? rChest * 0.3 : rChest * 0.06 * (1 - fat * 0.5);
+    const butt = rHip * (female ? 0.3 : 0.22);      // pakarat taakse
 
-    const Y = (f) => topY + bodyPx * f;
-    const torso = [
-      { y: Y(0.115), w: rNeck * 1.05, d: rNeck * 1.05 },
-      { y: Y(0.14), w: rNeck * 1.45, d: rNeck * 1.15 },
-      { y: Y(0.19), w: shoulderHalf * 0.92, d: rChest * 0.76 },
-      { y: Y(0.26), w: rChest * chestK, d: rChest * chestD },
-      { y: Y(0.35), w: (rChest * chestK + rWaist * waistK) / 2, d: (rChest * chestD + rWaist * waistD) / 2 },
-      { y: Y(0.435), w: rWaist * waistK, d: rWaist * waistD },
-      { y: Y(0.52), w: rHip * hipK, d: rHip * hipD },
-      { y: Y(0.555), w: rHip * hipK * 0.96, d: rHip * hipD * 0.97 },
-      { y: Y(0.60), w: rHip * hipK * 0.62, d: rHip * hipD * 0.72 },
-    ];
-    const legOff = rHip * hipK * 0.5;
-    const leg = [
-      { y: Y(0.545), w: rThigh * 1.04, d: rThigh * 1.06 },
-      { y: Y(0.63), w: rThigh * 0.94, d: rThigh * 0.96 },
-      { y: Y(0.745), w: rThigh * 0.6, d: rThigh * 0.64 },
-      { y: Y(0.82), w: rCalf, d: rCalf * 1.05 },
-      { y: Y(0.975), w: rCalf * 0.48, d: rCalf * 0.5 },
-    ];
-    const armOff = shoulderHalf * 0.98 + rArm * 0.15;
-    const dC = rArm * (0.95 + 0.22 * delt);
-    const arm = [
-      { y: Y(0.155), w: dC * 0.42, d: dC * 0.42 },
-      { y: Y(0.2), w: dC, d: dC },
-      { y: Y(0.28), w: rArm, d: rArm },
-      { y: Y(0.36), w: rArm * 0.78, d: rArm * 0.78 },
-      { y: Y(0.47), w: rArm * 0.58, d: rArm * 0.58 },
-      { y: Y(0.52), w: rArm * 0.5, d: rArm * 0.5 },
-      { y: Y(0.545), w: rArm * 0.56, d: rArm * 0.56 },
-      { y: Y(0.585), w: rArm * 0.26, d: rArm * 0.3 },
-    ];
-    const headR = bodyPx * 0.063;
-    model = { torso, leg, arm, legOff, armOff, headR, headY: topY + headR, used };
+    const Y = (f) => h * f;
+    // --- Vartalo ---
+    const torso = tube([
+      { y: Y(0.845), w: rNeck * 1.02, d: rNeck * 1.02 },
+      { y: Y(0.825), w: rNeck * 1.35, d: rNeck * 1.2 },
+      { y: Y(0.80), w: shoulderHalf * 0.88, d: rChest * 0.72 },
+      { y: Y(0.72), w: rChest * chestK, d: rChest * chestD, zc: bust * 0.5 },
+      { y: Y(0.665), w: rChest * chestK * 0.97, d: rChest * chestD, zc: bust },
+      { y: Y(0.60), w: rWaist * waistK, d: rWaist * waistD, zc: belly * 0.7 },
+      { y: Y(0.555), w: (rWaist * waistK + rHip * hipK) / 2, d: (rWaist * waistD + rHip * hipD) / 2, zc: belly },
+      { y: Y(0.52), w: rHip * hipK, d: rHip * hipD, zc: belly * 0.4 - butt * 0.25 },
+      { y: Y(0.48), w: rHip * hipK * 0.93, d: rHip * hipD * 0.95, zc: -butt * 0.3 },
+      { y: Y(0.44), w: rHip * hipK * 0.62, d: rHip * hipD * 0.7, zc: -butt * 0.12 },
+    ], skin);
+    group.add(torso);
 
+    // --- Hartiat (deltoid-pallot) + kädet ---
+    const armX = shoulderHalf * 0.98;
+    [-1, 1].forEach((s) => {
+      const delt = ell(rArm * 1.06, rArm * 1.15, rArm * 1.06, skin);
+      delt.position.set(s * armX, Y(0.782), 0);
+      group.add(delt);
+      const ax = s * (armX + rArm * 0.15);
+      const arm = tube([
+        { y: Y(0.79), w: rArm * 0.98, d: rArm * 0.98 },
+        { y: Y(0.70), w: rArm * 0.95, d: rArm * 0.95 },
+        { y: Y(0.63), w: rArm * 0.78, d: rArm * 0.8 },
+        { y: Y(0.54), w: rArm * 0.6, d: rArm * 0.62 },
+        { y: Y(0.485), w: rArm * 0.5, d: rArm * 0.52 },
+      ], skin);
+      arm.position.x = ax;
+      group.add(arm);
+      const hand = ell(rArm * 0.42, rArm * 0.75, rArm * 0.5, skin);
+      hand.position.set(ax, Y(0.45), 1);
+      group.add(hand);
+    });
+
+    // --- Jalat + jalkaterät ---
+    const legX = rHip * hipK * 0.5;
+    [-1, 1].forEach((s) => {
+      const leg = tube([
+        { y: Y(0.50), w: rThigh * 1.02, d: rThigh * 1.06, zc: -butt * 0.15 },
+        { y: Y(0.42), w: rThigh * 0.95, d: rThigh, zc: 0 },
+        { y: Y(0.29), w: rThigh * 0.58, d: rThigh * 0.62 },
+        { y: Y(0.22), w: rCalf * 0.95, d: rCalf * 1.05, zc: -rCalf * 0.15 },
+        { y: Y(0.10), w: rCalf * 0.55, d: rCalf * 0.6 },
+        { y: Y(0.03), w: rCalf * 0.5, d: rCalf * 0.55 },
+      ], skin);
+      leg.position.x = s * legX;
+      group.add(leg);
+      const foot = ell(4.4, 3.2, 12, skin);
+      foot.position.set(s * legX, 3.2, 6.5);
+      group.add(foot);
+    });
+
+    // --- Pää: kallo, nenä, korvat, silmät, hiukset ---
+    const headR = h * 0.058;
+    const hy = Y(0.845) + headR * 1.06;
+    const headG = new THREE.Group();
+    const skull = ell(headR * 0.78 * (1 + fat * 0.08), headR, headR * 0.84, skin);
+    headG.add(skull);
+    const nose = new THREE.Mesh(new THREE.ConeGeometry(headR * 0.13, headR * 0.32, 12), skin);
+    nose.rotation.x = Math.PI / 2;
+    nose.position.set(0, -headR * 0.12, headR * 0.82);
+    nose.castShadow = true;
+    headG.add(nose);
+    [-1, 1].forEach((s) => {
+      const ear = ell(headR * 0.1, headR * 0.22, headR * 0.16, skin);
+      ear.position.set(s * headR * 0.78, -headR * 0.05, 0);
+      headG.add(ear);
+      const eye = ell(headR * 0.08, headR * 0.05, headR * 0.04, eyeM);
+      eye.position.set(s * headR * 0.3, headR * 0.08, headR * 0.72);
+      headG.add(eye);
+    });
+    // Hiukset: lakki + naisilla pitkät taakse
+    const cap = ell(headR * 0.82, headR * 0.78, headR * 0.82, hairM);
+    cap.position.set(0, headR * 0.34, -headR * 0.18);
+    headG.add(cap);
+    if (female) {
+      const back = ell(headR * 0.72, headR * 1.5, headR * 0.5, hairM);
+      back.position.set(0, -headR * 0.7, -headR * 0.55);
+      headG.add(back);
+    }
+    headG.position.y = hy;
+    // Pään varjo rintaan olisi liian raju -> pää ei heitä varjoa
+    headG.traverse((o) => { o.castShadow = false; });
+    group.add(headG);
+
+    // Mittachipit
     chipRow.innerHTML = "";
     ["hartia", "rintakehä", "vyötärö", "lantio", "hauis", "reisi", "pohje"].forEach((s) => {
-      const u = used[s] || {};
-      chipRow.append(el("span", {
-        class: "tag", style: u.real ? "" : "opacity:0.45",
-        title: u.real ? "Mitattu" : "Arvio — lisää mitta tarkentaaksesi",
-      }, `${s} ${u.v != null ? u.v + " cm" : "~"}`));
+      const u = usedChips[s] || {};
+      chipRow.append(el("span", { class: "tag", style: u.real ? "" : "opacity:0.45",
+        title: u.real ? "Mitattu" : "Arvio — lisää mitta tarkentaaksesi" },
+        `${s} ${u.v != null ? u.v + " cm" : "~"}`));
     });
   }
 
-  // Mallinukke-sävyt (sopii tummaan teemaan)
-  const TONE = { light: "#bcc4d8", dark: "#535d76", darker: "#3a4154", hair: "#272c3a" };
-  function shade(x0, x1) {
-    const g = ctx.createLinearGradient(x0, 0, x1, 0);
-    g.addColorStop(0, TONE.dark);
-    g.addColorStop(0.38, TONE.light);
-    g.addColorStop(1, TONE.darker);
-    return g;
-  }
-
-  function densify(keys) {
-    const out = [];
-    for (let i = 0; i < keys.length - 1; i++) {
-      const a = keys[i], b = keys[i + 1];
-      const steps = Math.max(2, Math.round((b.y - a.y) / 4));
-      for (let s = 0; s < steps; s++) {
-        const t = s / steps, u = (1 - Math.cos(t * Math.PI)) / 2;
-        out.push({ y: a.y + (b.y - a.y) * t, w: a.w + (b.w - a.w) * u, d: a.d + (b.d - a.d) * u });
-      }
-    }
-    out.push(keys[keys.length - 1]);
-    return out;
-  }
-
-  function drawPart(keys, cx, theta, dim) {
-    const sl = densify(keys);
-    const cosT = Math.cos(theta), sinT = Math.sin(theta);
-    const aw = (p) => Math.sqrt(p.w * p.w * cosT * cosT + p.d * p.d * sinT * sinT);
-    ctx.beginPath();
-    sl.forEach((p, i) => { const x = cx + aw(p); i ? ctx.lineTo(x, p.y) : ctx.moveTo(x, p.y); });
-    for (let i = sl.length - 1; i >= 0; i--) ctx.lineTo(cx - aw(sl[i]), sl[i].y);
-    ctx.closePath();
-    let maxW = 0;
-    sl.forEach((p) => { const a = aw(p); if (a > maxW) maxW = a; });
-    ctx.fillStyle = shade(cx - maxW, cx + maxW);
-    if (dim) { ctx.save(); ctx.globalAlpha = 0.78; ctx.fill(); ctx.restore(); }
-    else ctx.fill();
-  }
-
-  let theta = 0.3, auto = true, dragging = false, lastX = 0;
-
-  function render() {
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, CW, CH);
-    if (!model) return;
-    const cx = CW / 2;
-    const cosT = Math.cos(theta), sinT = Math.sin(theta);
-
-    // Lattiavarjo
-    ctx.fillStyle = "rgba(0,0,0,0.32)";
-    ctx.beginPath(); ctx.ellipse(cx, botY + 10, 64, 9, 0, 0, Math.PI * 2); ctx.fill();
-
-    const armL = { off: -model.armOff * cosT, z: -sinT };
-    const armR = { off: model.armOff * cosT, z: sinT };
-    const legs = [
-      { off: -model.legOff * cosT, z: -sinT },
-      { off: model.legOff * cosT, z: sinT },
-    ].sort((a, b) => a.z - b.z);
-
-    // Takimmainen käsi
-    [armL, armR].filter((a) => a.z < 0).forEach((a) => drawPart(model.arm, cx + a.off, theta, true));
-    // Jalat (takimmainen himmeämpänä kun ollaan sivuprofiilissa)
-    legs.forEach((l, i) => drawPart(model.leg, cx + l.off, theta, i === 0 && Math.abs(sinT) > 0.4));
-    // Vartalo
-    drawPart(model.torso, cx, theta, false);
-    // Hiukset takana (naisilla pidemmät)
-    const hr = model.headR, hy = model.headY;
-    if (female) {
-      ctx.beginPath(); ctx.ellipse(cx, hy + hr * 0.7, hr * 0.95, hr * 1.6, 0, 0, Math.PI * 2);
-      ctx.fillStyle = TONE.hair; ctx.fill();
-    }
-    // Pää
-    ctx.beginPath(); ctx.ellipse(cx, hy + hr * 0.05, hr * 0.8, hr, 0, 0, Math.PI * 2);
-    ctx.fillStyle = shade(cx - hr, cx + hr); ctx.fill();
-    // Hiuslakki
-    ctx.beginPath();
-    ctx.ellipse(cx, hy - hr * 0.2, hr * 0.84, hr * 0.72, 0, Math.PI * 0.95, Math.PI * 2.05);
-    ctx.fillStyle = TONE.hair; ctx.fill();
-    // Etummainen käsi
-    [armL, armR].filter((a) => a.z >= 0).forEach((a) => drawPart(model.arm, cx + a.off, theta, false));
-
-    ctx.fillStyle = "rgba(154,163,178,0.65)"; ctx.font = "11px system-ui"; ctx.textAlign = "center";
-    ctx.fillText("↔ pyöritä vetämällä", cx, CH - 5);
-    ctx.textAlign = "left";
-  }
+  // --- Pyöritys + animaatio ---
+  const st = { dead: false, renderer, auto: true, dragging: false, lastX: 0 };
+  _figState = st;
+  group.rotation.y = 0.4;
+  const cv = renderer.domElement;
+  cv.addEventListener("pointerdown", (e) => {
+    st.dragging = true; st.auto = false; st.lastX = e.clientX;
+    try { cv.setPointerCapture(e.pointerId); } catch (err) {}
+    cv.style.cursor = "grabbing";
+  });
+  cv.addEventListener("pointermove", (e) => {
+    if (st.dragging) { group.rotation.y += (e.clientX - st.lastX) * 0.012; st.lastX = e.clientX; }
+  });
+  cv.addEventListener("pointerup", () => { st.dragging = false; cv.style.cursor = "grab"; });
+  cv.addEventListener("dblclick", () => { st.auto = true; });
 
   function loop() {
-    if (!canvas.isConnected) { _figAnim = null; return; }
-    if (auto && !dragging) theta += 0.0055;
-    render();
-    _figAnim = requestAnimationFrame(loop);
+    if (st.dead || !cv.isConnected) return;
+    if (st.auto && !st.dragging) group.rotation.y += 0.006;
+    renderer.render(scene, camera);
+    requestAnimationFrame(loop);
   }
-
-  canvas.addEventListener("pointerdown", (e) => {
-    dragging = true; auto = false; lastX = e.clientX;
-    try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
-    canvas.style.cursor = "grabbing";
-  });
-  canvas.addEventListener("pointermove", (e) => {
-    if (dragging) { theta += (e.clientX - lastX) * 0.012; lastX = e.clientX; }
-  });
-  canvas.addEventListener("pointerup", () => { dragging = false; canvas.style.cursor = "grab"; });
-  canvas.addEventListener("dblclick", () => { auto = true; });
 
   // Näytä/piilota + aikajana
   const applyHidden = (hidden) => {
