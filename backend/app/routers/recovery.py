@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from .. import engine, models, schemas
 from ..database import get_db
+from .stats import _latest_bodyweight, _session_tonnage
 
 router = APIRouter(prefix="/api/recovery", tags=["recovery"])
 
@@ -67,15 +68,6 @@ def delete_cardio(cardio_id: int, db: Session = Depends(get_db)):
     db.commit()
 
 
-def _latest_bodyweight(db: Session, profile_id: int | None) -> float | None:
-    if profile_id is None:
-        return None
-    b = (db.query(models.BodyEntry)
-         .filter(models.BodyEntry.profile_id == profile_id, models.BodyEntry.bodyweight.isnot(None))
-         .order_by(models.BodyEntry.entry_date.desc()).first())
-    return b.bodyweight if b else None
-
-
 @router.get("/cardio/trend")
 def cardio_trend(profile_id: int = Query(...), db: Session = Depends(get_db)):
     """Aerobisen kunnon kehitys: per tapahtuma keskinopeus (km/h) ja tahti
@@ -100,16 +92,6 @@ def cardio_trend(profile_id: int = Query(...), db: Session = Depends(get_db)):
     week_kcal = round(sum(s.kcal or 0 for s in week))
     week_min = round(sum(s.duration_min or 0 for s in week))
     return {"points": points, "week_kcal": week_kcal, "week_minutes": week_min, "week_sessions": len(week)}
-
-
-def _session_tonnage(s: models.WorkoutSession) -> float:
-    tonnage = 0.0
-    for we in s.exercises:
-        top_w = max((st.weight for st in we.sets if st.completed), default=0.0)
-        tonnage += sum(st.weight * st.reps for st in we.sets if st.completed)
-        if we.missed_reps:
-            tonnage = max(0.0, tonnage - we.missed_reps * top_w)
-    return tonnage
 
 
 @router.get("/readiness")

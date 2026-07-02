@@ -781,19 +781,84 @@ document.getElementById("calc-btn").addEventListener("click", async () => {
 });
 
 // =================== CANVAS-GRAAFI (ei riippuvuuksia) ===================
-const CHART_COLORS = ["#4f8cff", "#34d399", "#f59e0b", "#ef4444", "#a78bfa", "#ec4899", "#22d3ee"];
+// Validoitu kategorinen paletti tummalle pinnalle (#1a1d24): jokainen väri
+// erottuu myös värisokealle ja täyttää 3:1-kontrastin. Järjestys on kiinteä.
+const CHART_COLORS = ["#3987e5", "#199e70", "#c98500", "#9085e9", "#e66767", "#d55181", "#d95926"];
+const CHART_INK = { grid: "#232733", axis: "#3a4150", label: "#9aa3b2", faint: "#7a8290" };
+
+// Yhteinen segmentoitu tasopalkki (voimatasot, kisataso, fysiikkataso):
+// jokainen taso oma lohko, saavutetut värillisinä, nykyinen korostettuna,
+// nimet palkin alla. titles[i] = hover-teksti per lohko.
+function segLevelBar(levels, currentIdx, { shorts = null, titles = null } = {}) {
+  const wrap = el("div", {});
+  const seg = el("div", { class: "seg-bar" });
+  levels.forEach((name, i) => {
+    seg.append(el("div", {
+      class: "seg" + (i <= currentIdx ? " on" : "") + (i === currentIdx ? " current" : ""),
+      title: (titles && titles[i]) || name,
+    }));
+  });
+  const labels = el("div", { class: "seg-labels" });
+  levels.forEach((name, i) => {
+    labels.append(el("span", {
+      class: "seg-label" + (i === currentIdx ? " current" : "") + (i <= currentIdx ? " on" : ""),
+      title: name,
+    }, (shorts && shorts[i]) || name.split(" ")[0]));
+  });
+  wrap.append(seg, labels);
+  return wrap;
+}
+
+// Siistit y-akselin askeleet (1/2/5 × 10^n) -> pyöreät luvut ruudukkoon
+function niceTicks(min, max, count = 5) {
+  const span = max - min || 1;
+  const raw = span / Math.max(1, count - 1);
+  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((s) => s >= raw) || 10 * mag;
+  const lo = Math.floor(min / step) * step;
+  const ticks = [];
+  for (let v = lo; v <= max + step * 0.5; v += step) if (v >= min - step * 0.5) ticks.push(v);
+  return ticks;
+}
+
+// Automaattiset päivämäärämerkit x-akselille (~4-6 kpl, siistit rajat)
+function timeTicks(minX, maxX, mode) {
+  const marks = [];
+  const spanDays = (maxX - minX) / 864e5;
+  if (mode === "week" || (!mode && spanDays <= 45)) {
+    const stride = 7 * 864e5 * (spanDays > 200 ? 4 : spanDays > 60 ? 2 : 1);
+    const d0 = new Date(minX); d0.setHours(0, 0, 0, 0);
+    for (let t = d0.getTime(); t <= maxX; t += stride) if (t >= minX) marks.push(t);
+  } else {
+    const stepM = spanDays > 900 ? 6 : spanDays > 480 ? 3 : spanDays > 240 ? 2 : 1;
+    const d = new Date(minX); d.setDate(1); d.setHours(0, 0, 0, 0);
+    if (d.getTime() < minX) d.setMonth(d.getMonth() + 1);
+    while (d.getTime() <= maxX) { marks.push(d.getTime()); d.setMonth(d.getMonth() + stepM); }
+  }
+  return marks;
+}
 
 function drawLineChart(canvas, series, opts = {}) {
+  // Looginen koko attribuuteista; taustapuskuri skaalataan näytön tarkkuuteen
+  // (HiDPI) jotta viivat ja teksti ovat teräviä.
+  if (!canvas._logW) { canvas._logW = canvas.width; canvas._logH = canvas.height; }
+  const W = canvas._logW, H = canvas._logH;
+  const dpr = Math.min(3, window.devicePixelRatio || 1);
+  if (canvas.width !== Math.round(W * dpr)) {
+    canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
+  }
   const ctx = canvas.getContext("2d");
-  const W = canvas.width, H = canvas.height;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, W, H);
-  const pad = { l: 50, r: 16, t: 16, b: 36 };
+  const pad = { l: 52, r: 16, t: 14, b: 30 };
   const plotW = W - pad.l - pad.r, plotH = H - pad.t - pad.b;
 
-  const allPts = series.flatMap((s) => s.points);
+  const allPts = series.flatMap((s) => s.points || []);
   if (!allPts.length) {
-    ctx.fillStyle = "#9aa3b2"; ctx.font = "14px system-ui";
-    ctx.fillText("Ei dataa vielä — kirjaa treenejä nähdäksesi kehityksen.", pad.l, H / 2);
+    ctx.fillStyle = CHART_INK.label; ctx.font = "13px system-ui"; ctx.textAlign = "center";
+    ctx.fillText(opts.empty || "Ei dataa vielä — kirjaa, niin käyrä ilmestyy tähän.", W / 2, H / 2);
+    ctx.textAlign = "left";
+    canvas._hoverPts = [];
     return;
   }
   // Sisällytä ennustehaarukan (band) pisteet akseleihin
@@ -802,53 +867,50 @@ function drawLineChart(canvas, series, opts = {}) {
   const ys = allPts.map((p) => p.y).concat(bandPts.flatMap((p) => [p.low, p.high]));
   let minX = Math.min(...xs), maxX = Math.max(...xs);
   let minY = Math.min(...ys), maxY = Math.max(...ys);
-  if (minX === maxX) maxX = minX + 1;
-  // Hieman ilmaa ylä/alarajaan
-  const yPad = (maxY - minY) * 0.1 || 5;
+  if (minX === maxX) maxX = minX + 864e5;
+  const yPad = (maxY - minY) * 0.08 || 5;
   minY = Math.max(0, minY - yPad); maxY = maxY + yPad;
 
   const xPix = (x) => pad.l + ((x - minX) / (maxX - minX)) * plotW;
   const yPix = (y) => pad.t + plotH - ((y - minY) / (maxY - minY)) * plotH;
 
-  // Ruudukko + y-akselin arvot
-  ctx.strokeStyle = "#2e333f"; ctx.fillStyle = "#9aa3b2"; ctx.font = "11px system-ui";
-  ctx.lineWidth = 1;
-  const span = maxY - minY;
-  const fmtY = (v) => (span < 10 ? v.toFixed(1) : String(Math.round(v)));
-  for (let i = 0; i <= 4; i++) {
-    const y = pad.t + (plotH / 4) * i;
-    const val = maxY - (span / 4) * i;
+  // Y-ruudukko siistein askelin (recessiivinen hiusviiva) + arvot
+  ctx.font = "11px system-ui"; ctx.lineWidth = 1;
+  const yTicks = niceTicks(minY, maxY);
+  minY = Math.min(minY, yTicks[0]); maxY = Math.max(maxY, yTicks[yTicks.length - 1]);
+  const dec = (maxY - minY) < 8 ? 1 : 0;
+  yTicks.forEach((v) => {
+    const y = yPix(v);
+    if (y < pad.t - 1 || y > pad.t + plotH + 1) return;
+    ctx.strokeStyle = CHART_INK.grid;
     ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(W - pad.r, y); ctx.stroke();
-    ctx.fillText(fmtY(val) + (opts.unit || ""), 6, y + 3);
-  }
-  // X-akselin päivämäärät (alku ja loppu)
-  const fmt = (ms) => new Date(ms).toLocaleDateString("fi-FI", { day: "numeric", month: "numeric", year: "2-digit" });
-  ctx.fillText(fmt(minX), pad.l, H - 12);
-  ctx.textAlign = "right"; ctx.fillText(fmt(maxX), W - pad.r, H - 12); ctx.textAlign = "left";
+    ctx.fillStyle = CHART_INK.label; ctx.textAlign = "right";
+    ctx.fillText(v.toFixed(dec) + (opts.unit ? " " + opts.unit : ""), pad.l - 6, y + 3.5);
+  });
+  ctx.textAlign = "left";
 
-  // Aika-ruudukko (viikko/kuukausi) pystyviivoina jos pyydetty
-  if (opts.timeGrid === "week" || opts.timeGrid === "month") {
-    ctx.strokeStyle = "#262b36"; ctx.fillStyle = "#7a8290"; ctx.font = "10px system-ui";
-    const step = opts.timeGrid === "week" ? 7 * 864e5 : null;
-    const marks = [];
-    if (step) {
-      const spanDays = (maxX - minX) / 864e5;
-      const stride = spanDays > 200 ? step * 4 : step;  // harvenna jos pitkä jakso
-      const d0 = new Date(minX); d0.setHours(0, 0, 0, 0);
-      for (let t = d0.getTime(); t <= maxX; t += stride) if (t >= minX) marks.push(t);
-    } else {
-      const d = new Date(minX); d.setDate(1); d.setHours(0, 0, 0, 0);
-      while (d.getTime() <= maxX) { if (d.getTime() >= minX) marks.push(d.getTime()); d.setMonth(d.getMonth() + 1); }
-    }
-    marks.forEach((t) => {
-      const X = xPix(t);
-      ctx.beginPath(); ctx.moveTo(X, pad.t); ctx.lineTo(X, pad.t + plotH); ctx.stroke();
-      const lbl = opts.timeGrid === "month"
-        ? new Date(t).toLocaleDateString("fi-FI", { month: "short", year: "2-digit" })
-        : new Date(t).toLocaleDateString("fi-FI", { day: "numeric", month: "numeric" });
-      ctx.save(); ctx.translate(X, H - 2); ctx.fillText(lbl, -14, 0); ctx.restore();
-    });
-  }
+  // X-akselin päivämäärämerkit: aina automaattisesti (viikko/kk tiheyden mukaan)
+  const spanDays = (maxX - minX) / 864e5;
+  const marks = timeTicks(minX, maxX, opts.timeGrid === "none" ? null : opts.timeGrid);
+  ctx.font = "10px system-ui"; ctx.textAlign = "center";
+  let lastLblX = -1e9;
+  marks.forEach((t) => {
+    const X = xPix(t);
+    if (X < pad.l - 1 || X > W - pad.r + 1) return;
+    ctx.strokeStyle = CHART_INK.grid;
+    ctx.beginPath(); ctx.moveTo(X, pad.t); ctx.lineTo(X, pad.t + plotH); ctx.stroke();
+    if (X - lastLblX < 52) return;  // ei päällekkäisiä tekstejä
+    lastLblX = X;
+    const lbl = spanDays > 45
+      ? new Date(t).toLocaleDateString("fi-FI", { month: "short", year: "2-digit" })
+      : new Date(t).toLocaleDateString("fi-FI", { day: "numeric", month: "numeric" });
+    ctx.fillStyle = CHART_INK.faint;
+    ctx.fillText(lbl, X, H - 10);
+  });
+  ctx.textAlign = "left";
+  // Pohjaviiva (akseli) hieman ruudukkoa vahvempana
+  ctx.strokeStyle = CHART_INK.axis;
+  ctx.beginPath(); ctx.moveTo(pad.l, pad.t + plotH); ctx.lineTo(W - pad.r, pad.t + plotH); ctx.stroke();
 
   // Gradienttitäyttö viivan alle kun yksi yhtenäinen sarja (näyttävämpi)
   const solid = series.filter((s) => !s.dashed && s.points && s.points.length);
@@ -857,7 +919,7 @@ function drawLineChart(canvas, series, opts = {}) {
     const color = s.color || CHART_COLORS[0];
     const pts = [...s.points].sort((a, b) => a.x - b.x);
     const grad = ctx.createLinearGradient(0, pad.t, 0, pad.t + plotH);
-    grad.addColorStop(0, color + "44");
+    grad.addColorStop(0, color + "3d");
     grad.addColorStop(1, color + "00");
     ctx.fillStyle = grad;
     ctx.beginPath();
@@ -867,40 +929,48 @@ function drawLineChart(canvas, series, opts = {}) {
     ctx.closePath(); ctx.fill();
   }
 
-  // Piirrä ennustehaarukat (band) ensin taustalle
+  // Ennustehaarukat (band) taustalle
   series.forEach((s, idx) => {
     if (!s.band || !s.band.length) return;
     const color = s.color || CHART_COLORS[idx % CHART_COLORS.length];
     const b = [...s.band].sort((a, p) => a.x - p.x);
-    ctx.fillStyle = color + "22";
+    ctx.fillStyle = color + "1f";
     ctx.beginPath();
     b.forEach((p, i) => { const X = xPix(p.x), Y = yPix(p.high); i ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y); });
     for (let i = b.length - 1; i >= 0; i--) ctx.lineTo(xPix(b[i].x), yPix(b[i].low));
     ctx.closePath(); ctx.fill();
   });
 
+  // Viivat: 2 px, pisteet vain jos niitä on vähän (ei tukkoon piirrettyä käyrää)
   series.forEach((s, idx) => {
     const color = s.color || CHART_COLORS[idx % CHART_COLORS.length];
     const pts = [...s.points].sort((a, b) => a.x - b.x);
     ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = 2;
+    ctx.lineJoin = "round"; ctx.lineCap = "round";
     ctx.setLineDash(s.dashed ? [6, 5] : []);
     ctx.beginPath();
     pts.forEach((p, i) => { const X = xPix(p.x), Y = yPix(p.y); i ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y); });
     ctx.stroke();
     ctx.setLineDash([]);
-    if (!s.dashed) pts.forEach((p) => { ctx.beginPath(); ctx.arc(xPix(p.x), yPix(p.y), 3, 0, Math.PI * 2); ctx.fill(); });
+    if (!s.dashed && pts.length <= 48) {
+      pts.forEach((p) => {
+        ctx.beginPath(); ctx.arc(xPix(p.x), yPix(p.y), 2.5, 0, Math.PI * 2); ctx.fill();
+      });
+    }
   });
 
-  // Tallenna pisteet hover-tooltippiä varten ja sido kuuntelijat kerran
+  // Tallenna pisteet + geometria hoverille (ristikko + korostettu piste)
   const hoverPts = [];
   series.forEach((s, idx) => {
     const color = s.color || CHART_COLORS[idx % CHART_COLORS.length];
     (s.points || []).forEach((p) => hoverPts.push({
       px: xPix(p.x), py: yPix(p.y), x: p.x, y: p.y, color,
-      forecast: !!s.dashed, unit: opts.unit || "",
+      name: s.name || null, forecast: !!s.dashed, unit: opts.unit || "",
     }));
   });
   canvas._hoverPts = hoverPts;
+  canvas._plot = { t: pad.t, b: pad.t + plotH };
+  canvas._redraw = () => drawLineChart(canvas, series, opts);
   bindChartHover(canvas);
 }
 
@@ -912,28 +982,55 @@ function bindChartHover(canvas) {
     _chartTooltip = el("div", { class: "chart-tooltip" });
     document.body.append(_chartTooltip);
   }
-  const hide = () => { if (_chartTooltip) _chartTooltip.style.display = "none"; };
+  const hide = () => {
+    if (_chartTooltip) _chartTooltip.style.display = "none";
+    if (canvas._hoverDrawn && canvas._redraw) { canvas._hoverDrawn = false; canvas._redraw(); }
+  };
   canvas.addEventListener("mouseleave", hide);
   canvas.addEventListener("mousemove", (e) => {
     const pts = canvas._hoverPts;
     if (!pts || !pts.length) return hide();
     const rect = canvas.getBoundingClientRect();
-    const sx = canvas.width / rect.width, sy = canvas.height / rect.height;
-    const mx = (e.clientX - rect.left) * sx, my = (e.clientY - rect.top) * sy;
+    const scale = (canvas._logW || canvas.width) / rect.width;
+    const mx = (e.clientX - rect.left) * scale, my = (e.clientY - rect.top) * scale;
     let best = null, bestD = 1e9;
     for (const p of pts) {
       const d = (p.px - mx) ** 2 + (p.py - my) ** 2;
       if (d < bestD) { bestD = d; best = p; }
     }
-    if (!best || bestD > (28 * sx) ** 2) return hide();
-    const dstr = new Date(best.x).toLocaleDateString("fi-FI", { day: "numeric", month: "numeric", year: "numeric" });
-    const vstr = (Math.round(best.y * 10) / 10) + (best.unit || "");
+    if (!best || bestD > 32 ** 2) return hide();
+
+    // Ristikko + korostettu piste piirretään uudelleenpiirron päälle
+    if (canvas._redraw) {
+      canvas._redraw();
+      canvas._hoverDrawn = true;
+      const dpr = Math.min(3, window.devicePixelRatio || 1);
+      const ctx = canvas.getContext("2d");
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      const plot = canvas._plot || { t: 0, b: canvas._logH };
+      ctx.strokeStyle = "rgba(154,163,178,0.35)"; ctx.lineWidth = 1;
+      ctx.setLineDash([3, 3]);
+      ctx.beginPath(); ctx.moveTo(best.px, plot.t); ctx.lineTo(best.px, plot.b); ctx.stroke();
+      ctx.setLineDash([]);
+      // Korostettu piste: iso merkki + pinnanvärinen rengas
+      ctx.beginPath(); ctx.arc(best.px, best.py, 5.5, 0, Math.PI * 2);
+      ctx.fillStyle = best.color; ctx.fill();
+      ctx.lineWidth = 2; ctx.strokeStyle = "#1a1d24"; ctx.stroke();
+    }
+
+    const dstr = new Date(best.x).toLocaleDateString("fi-FI", { weekday: "short", day: "numeric", month: "numeric", year: "numeric" });
+    const vstr = (Math.round(best.y * 10) / 10).toLocaleString("fi-FI") + (best.unit ? " " + best.unit : "");
     _chartTooltip.innerHTML = "";
     _chartTooltip.append(
-      el("div", { style: `font-weight:700;color:${best.color}` }, vstr + (best.forecast ? " (ennuste)" : "")),
-      el("div", { class: "muted" }, dstr));
+      el("div", { style: "display:flex;align-items:center;gap:6px" },
+        el("span", { style: `width:9px;height:9px;border-radius:50%;background:${best.color};flex:none` }),
+        el("strong", {}, vstr), best.forecast ? el("span", { class: "muted" }, "ennuste") : ""),
+      el("div", { class: "muted", style: "margin-top:2px" },
+        (best.name ? best.name + " · " : "") + dstr));
     _chartTooltip.style.display = "block";
-    _chartTooltip.style.left = (e.clientX + 12) + "px";
+    const tw = 170;
+    const lx = e.clientX + 14 + tw > window.innerWidth ? e.clientX - tw - 10 : e.clientX + 14;
+    _chartTooltip.style.left = lx + "px";
     _chartTooltip.style.top = (e.clientY + 12) + "px";
   });
 }
@@ -1178,29 +1275,12 @@ async function loadLevels() {
         el("strong", {}, l.exercise_name),
         el("span", { class: "tag main", title: l.level_meaning || "" }, `${l.level} (${l.ratio}× paino)`)));
 
-    // Segmentoitu palkki: jokainen 8 tasosta oma lohko. Värillinen = saavutettu.
-    // Hover näyttää tason nimen, rajan kiloina ja merkityksen.
-    const seg = el("div", { class: "seg-bar" });
-    (l.thresholds_kg || []).forEach((thr, i) => {
-      const reached = i <= l.level_index;
-      const isCurrent = i === l.level_index;
-      seg.append(el("div", {
-        class: "seg" + (reached ? " on" : "") + (isCurrent ? " current" : ""),
-        title: `${data.all_levels[i]} — raja ${thr} kg` + (meanings[i] ? `\n${meanings[i]}` : ""),
-      }));
-    });
-    box.append(seg);
-
-    // Tasojen nimet matalimmasta suurimpaan palkin alle (nykyinen korostettu)
-    const SHORT = ["Aloitt.", "Harrast.", "Keski", "Edist.", "Kokenut", "Piiri", "SM", "MM"];
-    const labels = el("div", { class: "seg-labels" });
-    data.all_levels.forEach((name, i) => {
-      labels.append(el("span", {
-        class: "seg-label" + (i === l.level_index ? " current" : "") + (i <= l.level_index ? " on" : ""),
-        title: name,
-      }, SHORT[i] || name));
-    });
-    box.append(labels);
+    // Segmentoitu tasopalkki: hover näyttää rajan kiloina ja tason merkityksen
+    box.append(segLevelBar(data.all_levels, l.level_index, {
+      shorts: ["Aloitt.", "Harrast.", "Keski", "Edist.", "Kokenut", "Piiri", "SM", "MM"],
+      titles: (l.thresholds_kg || []).map((thr, i) =>
+        `${data.all_levels[i]} — raja ${thr} kg` + (meanings[i] ? `\n${meanings[i]}` : "")),
+    }));
 
     // Nykytaso + sen merkitys + seuraavan tason raja kiloina
     box.append(el("div", { class: "muted", style: "margin-top:6px" }, l.level_meaning || ""));
@@ -1251,7 +1331,7 @@ async function loadLoadTimeline() {
     let idx = 0;
     (data.programs || []).forEach((prog) => {
       const color = CHART_COLORS[idx % CHART_COLORS.length];
-      series.push({ points: prog.cycles.map((c) => ({ x: new Date(c.date).getTime(), y: c.total_kg })), color });
+      series.push({ name: prog.program_name, points: prog.cycles.map((c) => ({ x: new Date(c.date).getTime(), y: c.total_kg })), color });
       idx++;
       const last = prog.cycles[prog.cycles.length - 1];
       sum.append(el("div", { class: "muted" },
@@ -1262,7 +1342,7 @@ async function loadLoadTimeline() {
     if (!series.length) {
       sum.append(el("p", { class: "muted" }, "Kun ohjelman kaikki treenit on tehty kerran, näet kierron kokonaiskuorman tässä. (Aktivoi ohjelma ja tee sen treenit.)"));
     }
-    drawLineChart(document.getElementById("load-chart"), series, { unit: "kg", timeGrid: "month" });
+    drawLineChart(document.getElementById("load-chart"), series, { unit: "kg" });
   } else {
     const data = await api.get(pq("/api/stats/load-timeline"));
     if (data.length) {
@@ -1275,7 +1355,7 @@ async function loadLoadTimeline() {
         ` · kaikkiaan siirretty ${Math.round(totalAll).toLocaleString("fi-FI")} kg`));
     }
     drawLineChart(document.getElementById("load-chart"),
-      [{ points: data.map((d) => ({ x: new Date(d.date).getTime(), y: d.total_kg })) }], { unit: "kg" });
+      [{ name: "Treenin kuorma", points: data.map((d) => ({ x: new Date(d.date).getTime(), y: d.total_kg })) }], { unit: "kg" });
   }
 }
 
@@ -1302,7 +1382,6 @@ function renderProgressChips() {
 }
 
 let progressRangeDays = 0;   // 0 = kaikki
-let progressGrid = "none";
 
 async function drawProgressChart() {
   const series = [];
@@ -1317,7 +1396,7 @@ async function drawProgressChart() {
     const color = CHART_COLORS[idx % CHART_COLORS.length];
     let pts = h.points.map((p) => ({ x: new Date(p.date).getTime(), y: p.estimated_1rm }));
     if (cutoff) pts = pts.filter((p) => p.x >= cutoff);
-    series.push({ points: pts, color });
+    series.push({ name: h.exercise_name, points: pts, color });
     legend.append(el("span", { class: "tag", style: `color:${color};border-color:${color}` }, h.exercise_name));
     // Ennuste (katkoviiva + haarukka) vain kun yksi liike valittuna -> selkeä
     if (single && h.forecast && h.forecast.length && h.points.length) {
@@ -1325,7 +1404,7 @@ async function drawProgressChart() {
       const anchor = { x: new Date(lastPt.date).getTime(), y: lastPt.estimated_1rm };
       const fc = h.forecast.map((p) => ({ x: new Date(p.date).getTime(), y: p.mid }));
       const band = h.forecast.map((p) => ({ x: new Date(p.date).getTime(), low: p.low, high: p.high }));
-      series.push({ points: [anchor, ...fc], band, color, dashed: true });
+      series.push({ name: h.exercise_name, points: [anchor, ...fc], band, color, dashed: true });
       legend.append(el("span", { class: "muted" }, " — katkoviiva = ennuste, alue = haarukka"));
       if (h.forecast_meta) {
         document.getElementById("progress-legend").append(
@@ -1334,18 +1413,13 @@ async function drawProgressChart() {
     }
     idx++;
   }
-  drawLineChart(document.getElementById("progress-chart"), series, { unit: "kg", timeGrid: progressGrid });
+  drawLineChart(document.getElementById("progress-chart"), series, { unit: "kg" });
 }
 
 document.getElementById("progress-search").addEventListener("input", renderProgressChips);
 document.querySelectorAll(".range-btn").forEach((b) => b.addEventListener("click", () => {
   progressRangeDays = +b.dataset.range;
   document.querySelectorAll(".range-btn").forEach((x) => x.classList.toggle("active", x === b));
-  drawProgressChart();
-}));
-document.querySelectorAll(".grid-btn").forEach((b) => b.addEventListener("click", () => {
-  progressGrid = b.dataset.grid;
-  document.querySelectorAll(".grid-btn").forEach((x) => x.classList.toggle("active", x === b));
   drawProgressChart();
 }));
 
@@ -1397,23 +1471,10 @@ async function drawTotal() {
       el("div", { class: "row-between" },
         el("strong", {}, `Kisataso · painoluokka ${c.weight_class}`),
         el("span", { class: "tag main" }, c.level)));
-    // Segmentoitu palkki: Paikallinen · SM · EM · MM
-    const seg = el("div", { class: "seg-bar" });
-    c.thresholds_kg.forEach((thr, i) => {
-      seg.append(el("div", {
-        class: "seg" + (i <= c.level_index ? " on" : "") + (i === c.level_index ? " current" : ""),
-        title: `${c.levels[i]} — raja ${thr} kg`,
-      }));
-    });
-    box.append(seg);
-    const labels = el("div", { class: "seg-labels" });
-    c.levels.forEach((name, i) => {
-      labels.append(el("span", {
-        class: "seg-label" + (i === c.level_index ? " current" : "") + (i <= c.level_index ? " on" : ""),
-        title: name,
-      }, name.split(" ")[0]));
-    });
-    box.append(labels);
+    // Segmentoitu tasopalkki: Paikallinen · SM · EM · MM (raja kiloina hoverissa)
+    box.append(segLevelBar(c.levels, c.level_index, {
+      titles: c.thresholds_kg.map((thr, i) => `${c.levels[i]} — raja ${thr} kg`),
+    }));
     box.append(el("div", { class: "muted" }, c.next_threshold_kg
       ? `Seuraava taso (${c.next_level}) painoluokassasi: ${c.next_threshold_kg} kg — eroa ${c.to_next_kg} kg`
       : "Olet ylimmällä tasolla!"));
@@ -1432,27 +1493,21 @@ async function drawTotal() {
   const cutoff = totalRangeDays ? Date.now() - totalRangeDays * 864e5 : null;
   let tl = t.timeline.map((p) => ({ x: new Date(p.date).getTime(), y: p.total }));
   if (cutoff) tl = tl.filter((p) => p.x >= cutoff);
-  const series = [{ points: tl }];
+  const series = [{ name: "Yhteistulos", points: tl }];
   if (t.forecast && t.forecast.length && t.timeline.length) {
     const last = t.timeline[t.timeline.length - 1];
     const anchor = { x: new Date(last.date).getTime(), y: last.total };
     const fc = t.forecast.map((p) => ({ x: new Date(p.date).getTime(), y: p.mid }));
     const band = t.forecast.map((p) => ({ x: new Date(p.date).getTime(), low: p.low, high: p.high }));
-    series.push({ points: [anchor, ...fc], band, dashed: true, color: CHART_COLORS[1] });
+    series.push({ name: "Yhteistulos", points: [anchor, ...fc], band, dashed: true, color: CHART_COLORS[1] });
   }
-  drawLineChart(document.getElementById("total-chart"), series, { unit: "kg", timeGrid: totalGrid });
+  drawLineChart(document.getElementById("total-chart"), series, { unit: "kg" });
 }
 
 let totalRangeDays = 0;
-let totalGrid = "none";
 document.querySelectorAll(".trange-btn").forEach((b) => b.addEventListener("click", () => {
   totalRangeDays = +b.dataset.range;
   document.querySelectorAll(".trange-btn").forEach((x) => x.classList.toggle("active", x === b));
-  drawTotal();
-}));
-document.querySelectorAll(".tgrid-btn").forEach((b) => b.addEventListener("click", () => {
-  totalGrid = b.dataset.grid;
-  document.querySelectorAll(".tgrid-btn").forEach((x) => x.classList.toggle("active", x === b));
   drawTotal();
 }));
 
@@ -2076,21 +2131,9 @@ async function loadBody() {
         el("div", { class: "row-between" },
           el("strong", {}, "Fysiikkataso"),
           el("span", { class: "tag main" }, `${p.level} (FFMI ${p.ffmi})`)));
-      const seg = el("div", { class: "seg-bar" });
-      p.levels.forEach((name, i) => {
-        seg.append(el("div", {
-          class: "seg" + (i <= p.level_index ? " on" : "") + (i === p.level_index ? " current" : ""),
-          title: name,
-        }));
-      });
-      box.append(seg);
-      const SHORT = ["Aloitt.", "Harrast.", "Keski", "Edist.", "Kokenut", "Eliitti", "Kilpa", "IFBB", "Olympia"];
-      const labels = el("div", { class: "seg-labels" });
-      p.levels.forEach((name, i) => labels.append(el("span", {
-        class: "seg-label" + (i === p.level_index ? " current" : "") + (i <= p.level_index ? " on" : ""),
-        title: name,
-      }, SHORT[i] || name)));
-      box.append(labels);
+      box.append(segLevelBar(p.levels, p.level_index, {
+        shorts: ["Aloitt.", "Harrast.", "Keski", "Edist.", "Kokenut", "Eliitti", "Kilpa", "IFBB", "Olympia"],
+      }));
       box.append(el("div", { class: "muted" }, p.next_level ? `Seuraava: ${p.next_level} @ FFMI ${p.next_ffmi}` : "Ylin taso saavutettu!"));
       comp.append(box);
     }
@@ -2100,7 +2143,7 @@ async function loadBody() {
 
   // Painokäyrä
   drawLineChart(document.getElementById("weight-chart"),
-    [{ points: s.weight_series.map((p) => ({ x: new Date(p.date).getTime(), y: p.value })) }], { unit: "kg" });
+    [{ name: "Paino", points: s.weight_series.map((p) => ({ x: new Date(p.date).getTime(), y: p.value })) }], { unit: "kg" });
 
   // Mitat
   const legend = document.getElementById("measure-legend");
@@ -2111,7 +2154,7 @@ async function loadBody() {
   let hasFc = false;
   for (const [site, pts] of Object.entries(s.measurement_sites)) {
     const color = CHART_COLORS[idx % CHART_COLORS.length];
-    series.push({ color, points: pts.map((p) => ({ x: new Date(p.date).getTime(), y: p.value })) });
+    series.push({ name: site, color, points: pts.map((p) => ({ x: new Date(p.date).getTime(), y: p.value })) });
     legend.append(el("span", { class: "tag", style: `color:${color};border-color:${color}` }, site));
     // Ennuste (katkoviiva + haarukka) jos dataa riittää
     if (fcs[site] && fcs[site].length && pts.length) {
@@ -2119,7 +2162,7 @@ async function loadBody() {
       const anchor = { x: new Date(last.date).getTime(), y: last.value };
       const fc = fcs[site].map((p) => ({ x: new Date(p.date).getTime(), y: p.mid }));
       const band = fcs[site].map((p) => ({ x: new Date(p.date).getTime(), low: p.low, high: p.high }));
-      series.push({ color, dashed: true, points: [anchor, ...fc], band });
+      series.push({ name: site, color, dashed: true, points: [anchor, ...fc], band });
       hasFc = true;
     }
     idx++;
@@ -2291,7 +2334,7 @@ async function renderDayLog() {
   ];
   const series = macroSeries.map(([key, label, color]) => {
     legend.append(el("span", { class: "tag", style: `color:${color};border-color:${color}` }, label));
-    return { color, points: tl.map((p) => ({ x: new Date(p.date).getTime(), y: p[key] })) };
+    return { name: label, color, points: tl.map((p) => ({ x: new Date(p.date).getTime(), y: p[key] })) };
   });
   // Normalisoi 0–100 jotta eri mittakaavat näkyvät samassa
   drawLineChart(document.getElementById("intake-chart"),
@@ -2579,8 +2622,8 @@ async function loadCardio() {
   const hrPts = data.points.filter((p) => p.avg_hr != null)
     .map((p) => ({ x: new Date(p.date).getTime(), y: p.avg_hr }));
   const series = [];
-  if (speedPts.length >= 2) series.push({ points: speedPts, color: CHART_COLORS[1] });
-  if (hrPts.length >= 2) series.push({ points: normalize01to100(hrPts), color: CHART_COLORS[3] });
+  if (speedPts.length >= 2) series.push({ name: "Nopeus", points: speedPts, color: CHART_COLORS[1] });
+  if (hrPts.length >= 2) series.push({ name: "Keskisyke (norm.)", points: normalize01to100(hrPts), color: CHART_COLORS[3] });
   drawLineChart(document.getElementById("cardio-chart"), series, { unit: speedPts.length ? "km/h" : "" });
 
   const ul = document.getElementById("cardio-list");
@@ -2635,7 +2678,7 @@ async function loadRecovery() {
       .map((e) => ({ x: new Date(e.entry_date).getTime(), y: e[key] }));
     if (pts.length < 2) continue;
     const color = CHART_COLORS[idx % CHART_COLORS.length];
-    series.push({ points: normalize01to100(pts), color });
+    series.push({ name: label, points: normalize01to100(pts), color });
     const latest = pts.sort((a, b) => a.x - b.x)[pts.length - 1].y;
     legend.append(el("span", { class: "tag", style: `color:${color};border-color:${color}` }, `${label} (nyt ${latest})`));
     idx++;

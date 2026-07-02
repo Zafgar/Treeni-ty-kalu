@@ -7,7 +7,7 @@
 // päivitysten jälkeen.)
 //
 // Versionumeroa nostamalla vanha välimuisti tyhjenee aktivoinnissa.
-const CACHE = "treeni-v4";
+const CACHE = "treeni-v5";
 const ASSETS = ["/", "/static/style.css", "/static/app.js", "/icon.svg", "/manifest.json"];
 
 self.addEventListener("install", (e) => {

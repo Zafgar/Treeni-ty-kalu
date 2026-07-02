@@ -933,7 +933,7 @@ def program_load(profile_id: int | None = Query(None), db: Session = Depends(get
         cycles = []
         seen, load, last_date, cnt = set(), 0.0, None, 0
         for s in sessions:
-            load += _session_tonnage_val(s)
+            load += _session_tonnage(s)
             cnt += 1
             seen.add(s.program_day_id)
             last_date = s.session_date
@@ -949,7 +949,7 @@ def program_load(profile_id: int | None = Query(None), db: Session = Depends(get
     return {"programs": result}
 
 
-def _session_tonnage_val(s: models.WorkoutSession) -> float:
+def _session_tonnage(s: models.WorkoutSession) -> float:
     tonnage = 0.0
     for we in s.exercises:
         top_w = max((st.weight for st in we.sets if st.completed), default=0.0)

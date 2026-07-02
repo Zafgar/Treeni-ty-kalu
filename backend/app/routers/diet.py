@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from .. import engine, models
 from ..database import get_db
+from .stats import _latest_bodyweight, _session_tonnage
 
 router = APIRouter(prefix="/api/diet", tags=["diet"])
 
@@ -140,12 +141,7 @@ def _strength_trend(db: Session, profile_id: int, ref_date: date) -> dict | None
     )
     recent, prev = [], []
     for s in sessions:
-        tonnage = 0.0
-        for we in s.exercises:
-            top_w = max((st.weight for st in we.sets if st.completed), default=0.0)
-            tonnage += sum(st.weight * st.reps for st in we.sets if st.completed)
-            if we.missed_reps:
-                tonnage = max(0.0, tonnage - we.missed_reps * top_w)
+        tonnage = _session_tonnage(s)
         age = (ref_date - s.session_date).days
         if 0 <= age < 14:
             recent.append(tonnage)
@@ -234,11 +230,7 @@ def _training_profile(db: Session, profile_id: int, ref_date: date) -> tuple[int
     return per_week, kcal_avg
 
 
-def _latest_bodyweight(db: Session, profile_id: int) -> float | None:
-    b = (db.query(models.BodyEntry)
-         .filter(models.BodyEntry.profile_id == profile_id, models.BodyEntry.bodyweight.isnot(None))
-         .order_by(models.BodyEntry.entry_date.desc()).first())
-    return b.bodyweight if b else None
+
 
 
 @router.get("/status")
