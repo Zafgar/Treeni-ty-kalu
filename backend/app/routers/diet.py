@@ -123,6 +123,81 @@ def _avg_daily_steps_kcal(db: Session, profile_id: int, ref_date: date, days: in
     return round(avg_steps * per_step)
 
 
+def _macro_style(db: Session, profile_id: int, ref_date: date, days: int = 14) -> dict | None:
+    """Käyttäjän toteutunut makrojako viim. N päivältä (vain kirjatut päivät).
+    Palauttaa osuudet kaloreista + keskimääräiset grammat/pv, jos kirjattuja
+    päiviä on tarpeeksi (>= 5) luotettavaan kuvaan syömistyylistä."""
+    start = ref_date - timedelta(days=days - 1)
+    logs = (db.query(models.FoodLog)
+            .filter(models.FoodLog.profile_id == profile_id,
+                    models.FoodLog.entry_date >= start,
+                    models.FoodLog.entry_date <= ref_date).all())
+    by_day: dict[date, dict] = {}
+    for fl in logs:
+        d = by_day.setdefault(fl.entry_date, {"kcal": 0.0, "p": 0.0, "c": 0.0, "f": 0.0,
+                                              "veg_g": 0.0, "treat_kcal": 0.0})
+        k = fl.grams / 100.0
+        d["kcal"] += fl.food.kcal * k
+        d["p"] += fl.food.protein_g * k
+        d["c"] += fl.food.carbs_g * k
+        d["f"] += fl.food.fat_g * k
+        cat = (fl.food.category or "").lower()
+        if cat in ("vihannekset", "hedelmät & marjat"):
+            d["veg_g"] += fl.grams
+        if cat in ("herkut", "alkoholi"):
+            d["treat_kcal"] += fl.food.kcal * k
+    n = len(by_day)
+    if n < 5:
+        return None
+    days_list = list(by_day.values())
+    avg = {k: sum(d[k] for d in days_list) / n for k in ("kcal", "p", "c", "f", "veg_g", "treat_kcal")}
+    if avg["kcal"] <= 0:
+        return None
+    return {
+        "n_days": n,
+        "kcal": round(avg["kcal"]),
+        "protein_g": round(avg["p"]),
+        "carbs_g": round(avg["c"]),
+        "fat_g": round(avg["f"]),
+        "veg_g": round(avg["veg_g"]),
+        "protein_share": round(avg["p"] * 4 / avg["kcal"], 2),
+        "carb_share": round(avg["c"] * 4 / avg["kcal"], 2),
+        "fat_share": round(avg["f"] * 9 / avg["kcal"], 2),
+        "treat_share": round(avg["treat_kcal"] / avg["kcal"], 2),
+    }
+
+
+def _food_notes(style: dict | None, bw: float, goal: str) -> list[str]:
+    """Ruokaehdotukset kun kirjatusta datasta näkyy jotain selvästi
+    epäedullista. Vain kun dataa on tarpeeksi (style != None) — ei arvailua."""
+    if not style or not bw:
+        return []
+    notes = []
+    p_per_kg = style["protein_g"] / bw
+    if p_per_kg < 1.4:
+        notes.append(
+            f"Proteiinia kertyy ~{style['protein_g']} g/pv (~{p_per_kg:.1f} g/kg) — treenaavalle "
+            f"suositus on ~1.6–2.2 g/kg. Helppoja lisiä: maitorahka, raejuusto, kana, tonnikala, skyr.")
+    f_per_kg = style["fat_g"] / bw
+    if f_per_kg < 0.6:
+        notes.append(
+            f"Rasvaa vain ~{style['fat_g']} g/pv (~{f_per_kg:.1f} g/kg) — hormonitoiminta tarvitsee "
+            f"~0.8–1 g/kg. Lisää pähkinöitä, oliiviöljyä, lohta tai avokadoa.")
+    if style["veg_g"] < 300:
+        notes.append(
+            f"Kasviksia ja hedelmiä ~{style['veg_g']} g/pv — tavoite on ~500 g/pv "
+            f"(vitamiinit, kuitu, kylläisyys). Helpointa: lisää joka aterialle jotain vihreää tai marjoja.")
+    if style["treat_share"] >= 0.25:
+        notes.append(
+            f"Herkut ja alkoholi ovat ~{round(style['treat_share']*100)} % kaloreistasi — "
+            f"pudota ~10–15 %:iin, niin {'vaje' if goal == 'cut' else 'tavoite'} on paljon helpompi pitää.")
+    if goal == "cut" and style["carb_share"] > 0.55:
+        notes.append(
+            "Hiilarit ovat yli puolet kaloreistasi — dieetillä proteiinin nostaminen hiilarin tilalle "
+            "auttaa kylläisyyteen ja lihasten säilymiseen.")
+    return notes
+
+
 def _daily_kcal(db: Session, profile_id: int) -> dict[date, float]:
     out: dict[date, float] = {}
     for fl in db.query(models.FoodLog).filter(models.FoodLog.profile_id == profile_id).all():
@@ -288,7 +363,41 @@ def diet_status(profile_id: int = Query(...), db: Session = Depends(get_db)):
     low_carb = bool(next((m for m in DIET_MODELS
                           if phase and m["name"] == phase.model and m.get("low_carb")), None))
     targets = engine.macro_targets(week_avg, goal, tdee, target_rate, low_carb=low_carb)
+
+    # Jos ruokaa EI kirjata: päättele syönti painokehityksestä. Paino vakaa
+    # -> henkilö söi ~ylläpidon verran; järjestelmä elää ilman ruokakirjausta.
+    intake_estimated = False
+    n_intake_days = len(intake_days)
+    if (avg_intake is None or n_intake_days < 5) and trend is not None and tdee:
+        avg_intake = tdee + trend * engine.KCAL_PER_KG / 7.0
+        intake_estimated = True
+
+    # Jos ruokaa kirjataan: mukauta rasva/hiilari-jako käyttäjän omaan
+    # syömistyyliin (proteiini pysyy vähintään tavoitteessa). Ei pakoteta
+    # tiettyä jakoa, jos oma tyyli on toimiva.
+    style = _macro_style(db, profile_id, ref_date)
+    if style and not low_carb:
+        kcal_t = targets["kcal"]
+        fat_share = max(0.22, min(0.45, style["fat_share"]))
+        prot_g = max(targets["protein_g"], min(round(week_avg * 2.6), style["protein_g"]))
+        fat_g = round(kcal_t * fat_share / 9)
+        carb_g = round(max(0.0, (kcal_t - prot_g * 4 - fat_g * 9) / 4))
+        targets.update({"protein_g": prot_g, "fat_g": fat_g, "carbs_g": carb_g,
+                        "style_adapted": True,
+                        "style_note": (f"Makrojako mukautettu omaan syömistyyliisi "
+                                       f"(rasvaa ~{round(fat_share*100)} % kaloreista, "
+                                       f"{style['n_days']} kirjattua päivää).")})
+
     recommendation = engine.diet_recommendation(goal, target_rate, trend, avg_intake, targets)
+    if intake_estimated and trend is not None:
+        if abs(trend) <= 0.15 and goal == "maintain":
+            recommendation = (f"Et kirjaa ruokaa, mutta paino on vakaa — syöt siis ~ylläpidon verran "
+                              f"(~{round(avg_intake)} kcal/pv). Ei muutostarvetta; jatka samaan malliin.")
+        else:
+            recommendation = (f"Syöntisi arvioitu painokehityksestä ~{round(avg_intake)} kcal/pv "
+                              f"(ruokaa ei kirjattu). ") + recommendation
+
+    food_notes = _food_notes(style, week_avg, goal)
 
     # Vyötärö (viimeisin) bulk-rajaa varten
     waist = (
@@ -333,6 +442,9 @@ def diet_status(profile_id: int = Query(...), db: Session = Depends(get_db)):
         "week_avg_weight": week_avg,
         "trend_kg_per_week": trend,
         "intake_avg_kcal": round(avg_intake) if avg_intake else None,
+        "intake_estimated": intake_estimated,
+        "macro_style": style,
+        "food_notes": food_notes,
         "targets": targets,
         "day_targets": day_targets,
         "weekly_review": review,

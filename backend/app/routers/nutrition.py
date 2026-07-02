@@ -105,12 +105,13 @@ def recent_foods(profile_id: int = Query(...), limit: int = Query(12), db: Sessi
 
 
 @router.post("/logs", response_model=schemas.FoodLogOut, status_code=201)
-def create_log(profile_id: int, payload: schemas.FoodLogCreate, db: Session = Depends(get_db)):
+def create_log(profile_id: int, payload: schemas.FoodLogCreate,
+               on_date: date | None = Query(None), db: Session = Depends(get_db)):
     if not db.get(models.Food, payload.food_id):
         raise HTTPException(status_code=404, detail="Ruokaa ei löytynyt.")
     log = models.FoodLog(
         profile_id=profile_id,
-        entry_date=payload.entry_date or date.today(),
+        entry_date=payload.entry_date or on_date or date.today(),
         food_id=payload.food_id,
         grams=payload.grams,
     )

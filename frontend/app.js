@@ -2510,30 +2510,63 @@ document.getElementById("new-meal-btn").addEventListener("click", async () => {
   editor.innerHTML = "";
   const name = el("input", { placeholder: "Aterian nimi (esim. Smoothie)" });
   const items = []; // {food_id, grams}
-  const itemsBox = el("div", {});
+  const itemsBox = el("div", { class: "list", style: "margin-top:8px" });
+  const totals = el("div", { class: "muted", style: "margin-top:4px" });
   const allFoods = await api.get("/api/nutrition/foods");
+  const byId = {};
+  allFoods.forEach((f) => (byId[f.id] = f));
+
+  function renderTotals() {
+    let kcal = 0, prot = 0;
+    items.forEach((it) => { const f = byId[it.food_id]; kcal += f.kcal * it.grams / 100; prot += f.protein_g * it.grams / 100; });
+    totals.textContent = items.length ? `Yhteensä ~${Math.round(kcal)} kcal · ${Math.round(prot)} g proteiinia` : "";
+  }
   function renderItems() {
     itemsBox.innerHTML = "";
     items.forEach((it, i) => {
-      const sel = el("select", { onchange: (e) => (it.food_id = +e.target.value) });
-      allFoods.forEach((f) => sel.append(el("option", { value: f.id }, f.name)));
-      sel.value = it.food_id;
-      const g = el("input", { type: "number", value: it.grams, style: "width:75px", oninput: (e) => (it.grams = +e.target.value) });
-      itemsBox.append(el("div", { class: "btn-row" }, sel, g, el("span", { class: "muted" }, "g"),
+      const f = byId[it.food_id];
+      const g = el("input", { type: "number", value: it.grams, style: "width:75px",
+        oninput: (e) => { it.grams = +e.target.value || 0; renderTotals(); } });
+      itemsBox.append(el("div", { class: "btn-row", style: "align-items:center" },
+        el("strong", { style: "flex:1;min-width:120px" }, f.name), g, el("span", { class: "muted" }, "g"),
         el("button", { class: "small danger", onclick: () => { items.splice(i, 1); renderItems(); } }, "x")));
     });
+    renderTotals();
   }
+
+  // Haku: kirjoita -> osumat listana -> klikkaa lisätäksesi (ei scrollattavaa valikkoa)
+  const search = el("input", { placeholder: "Hae ja lisää ruoka (esim. kaura, kana)…", style: "flex:1;min-width:160px" });
+  const results = el("div", { class: "list", style: "max-height:220px;overflow:auto;margin-top:6px" });
+  function renderResults() {
+    const q = search.value.trim().toLowerCase();
+    results.innerHTML = "";
+    if (!q) return;
+    const hits = allFoods.filter((f) => f.name.toLowerCase().includes(q)).slice(0, 12);
+    if (!hits.length) { results.append(el("p", { class: "muted" }, "Ei osumia — voit lisätä oman ruoan alempaa.")); return; }
+    hits.forEach((f) => {
+      results.append(el("div", { class: "item", style: "cursor:pointer", onclick: () => {
+        items.push({ food_id: f.id, grams: f.default_grams || 100 });
+        search.value = ""; renderResults(); renderItems(); search.focus();
+      } },
+        el("div", { class: "row-between" },
+          el("span", {}, f.name),
+          el("span", { class: "muted" }, `${f.kcal} kcal/100g · lisää +`))));
+    });
+  }
+  search.addEventListener("input", renderResults);
+
   editor.append(el("div", { class: "card" },
-    el("label", {}, "Nimi", name), itemsBox,
+    el("label", {}, "Nimi", name),
+    el("div", { class: "btn-row", style: "margin-top:8px" }, search),
+    results, itemsBox, totals,
     el("div", { class: "btn-row", style: "margin-top:8px" },
-      el("button", { class: "small", onclick: () => { items.push({ food_id: allFoods[0].id, grams: 100 }); renderItems(); } }, "+ Ruoka"),
       el("button", { class: "success", onclick: async () => {
         if (!name.value.trim() || !items.length) return alert("Anna nimi ja vähintään yksi ruoka.");
         await api.post(`/api/nutrition/meals?profile_id=${currentProfileId}`, { name: name.value.trim(), items });
         editor.classList.add("hidden"); renderMeals();
       } }, "Tallenna ateria"),
       el("button", { class: "small", onclick: () => editor.classList.add("hidden") }, "Peruuta"))));
-  renderItems();
+  search.focus();
 });
 
 document.getElementById("nf-save").addEventListener("click", async () => {
@@ -2651,8 +2684,21 @@ async function renderDietStatus() {
     el("h3", {}, "Kehitys (viikkokeskiarvo)"),
     el("div", { class: "muted" },
       `Paino ${s.week_avg_weight ?? "—"} kg · trendi ${s.trend_kg_per_week != null ? (s.trend_kg_per_week >= 0 ? "+" : "") + s.trend_kg_per_week + " kg/vk" : "—"}` +
-      (s.intake_avg_kcal ? ` · keskisyönti ${s.intake_avg_kcal} kcal` : "")),
+      (s.intake_avg_kcal ? ` · keskisyönti ${s.intake_avg_kcal} kcal${s.intake_estimated ? " (arvioitu painokehityksestä)" : ""}` : "")),
     el("div", { class: "result-box", style: "margin-top:10px" }, s.recommendation)));
+
+  // Makrojako mukautettu omaan syömistyyliin
+  if (s.targets && s.targets.style_note) {
+    div.append(el("div", { class: "muted", style: "margin-top:6px" }, "🍽 " + s.targets.style_note));
+  }
+
+  // Ruokavalion huomiot (vain kun kirjattua dataa on tarpeeksi)
+  if (s.food_notes && s.food_notes.length) {
+    const card = el("div", { class: "card" }, el("h3", {}, "Ruokavalion huomiot"));
+    s.food_notes.forEach((n) => card.append(el("div", { class: "item", style: "border-left:3px solid #f59e0b" },
+      el("div", { class: "muted" }, n))));
+    div.append(card);
+  }
 
   // Kardio-/lämmittelyvinkki tavoitteen mukaan
   if (s.cardio_tip) {
