@@ -60,6 +60,13 @@
           nostaa esiin asiat joihin kannattaa reagoida — vain kun dataa on tarpeeksi.</p>
         <div id="coach-notices"></div>
       </div>
+      <div class="card" id="direction-card" style="display:none">
+        <h3>🧭 Kokonaiskuva — mihin olet menossa</h3>
+        <p class="muted">Paino, vyötärö, lihasmitat, raudat ja lepo yhdistettynä yhdeksi
+          suunnaksi. Esim. paino vakaa + vyötärö kaventuu = kehon koostumus paranee.
+          Arvio annetaan vain tekijöistä joista on tarpeeksi dataa.</p>
+        <div id="direction-content"></div>
+      </div>
       <div id="overview-cards" class="grid"></div>
       <div class="card">
         <h3>Tämänhetkiset ennätykset (pääliikkeet)</h3>
@@ -86,6 +93,24 @@
         <p class="muted">Yhdistää HRV:n, leposykkeen, unen ja treenikuorman
           (akuutti vs. krooninen). Varoittaa jos keho alkaa ylirasittua.</p>
         <div id="readiness-content"></div>
+      </div>
+
+      <div class="card">
+        <h3>Treenaanko tänään?</h3>
+        <p class="muted">Kerro miltä kehossa tuntuu — järjestelmä arvioi kerätystä datasta
+          (valmius, kuorma, uni) kannattaako tänään treenata, keventää vai levätä.</p>
+        <div class="btn-row">
+          <button id="tt-ok" class="primary">Olen palautunut</button>
+          <button id="tt-sore">Lihakset yhä kipeät</button>
+        </div>
+        <div id="tt-result" style="margin-top:10px"></div>
+        <div class="btn-row" style="margin-top:12px;align-items:center">
+          <span class="muted">Pikakirjaa lihashuolto:</span>
+          <button class="small care-btn" data-act="venyttely" data-min="15">Venyttely 15 min</button>
+          <button class="small care-btn" data-act="foam roll" data-min="10">Foam roll 10 min</button>
+          <button class="small care-btn" data-act="liikkuvuus" data-min="15">Liikkuvuus 15 min</button>
+        </div>
+        <div id="care-status" class="muted" style="margin-top:4px"></div>
       </div>
 
       <div class="card">

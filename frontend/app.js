@@ -470,6 +470,31 @@ async function refreshKcalPerMin() {
   } catch (e) { _kcalPerMinCache = null; }
 }
 
+// Treenin tuntuma -kysymys kuittauksen jälkeen: mukauttaa järjestelmää
+// koettuun kuormaan (helppo -> uskalla nostaa; väsynyt toistuvasti -> kevennä).
+// Kysymys muotoillaan sen mukaan menikö kaikki sarjat.
+function askWorkoutFeeling(workoutId, w) {
+  const allDone = (w.exercises || []).length > 0 &&
+    w.exercises.every((we) => (we.sets || []).every((s) => s.completed) || we.done);
+  const title = allDone ? "Kaikki sarjat menivät — miltä treeni tuntui?" : "Miltä treeni tuntui?";
+  const overlay = el("div", { class: "pr-celebrate" });
+  const pick = async (feeling, note) => {
+    await api.patch(`/api/workouts/${workoutId}`, { feeling, feeling_note: note });
+    overlay.remove(); loadWorkouts();
+  };
+  overlay.append(el("div", { class: "pr-card" },
+    el("h3", { style: "margin:4px 0 10px" }, title),
+    el("div", { class: "muted", style: "margin-bottom:10px" },
+      "Tuntuma auttaa järjestelmää mukautumaan: helppo → ehdotetaan lisää, raskas toistuvasti → kevennystä."),
+    el("div", { class: "btn-row", style: "justify-content:center;flex-wrap:wrap" },
+      el("button", { class: "small success", onclick: () => pick("positive", "helppo") }, "💪 Helppo"),
+      el("button", { class: "small", onclick: () => pick("neutral", "sopiva") }, "👍 Sopiva"),
+      el("button", { class: "small", onclick: () => pick("negative", "raskas") }, "🥵 Raskas"),
+      el("button", { class: "small", onclick: () => pick("negative", "väsynyt") }, "😮‍💨 Olin väsynyt"),
+      el("button", { class: "small", onclick: () => overlay.remove() }, "Ohita"))));
+  document.body.append(overlay);
+}
+
 // Ennätysjuhla: banneri + kevyt konfetti kun treeni rikkoo aiemman parhaan
 function celebratePR(lines) {
   const overlay = el("div", { class: "pr-celebrate" },
@@ -602,6 +627,7 @@ async function openWorkoutEditor(id) {
           const lines = res.new_prs.map((p) => `🏆 ${p.exercise_name}: uusi ennätys ~${p.new_1rm} kg (aiempi ${p.previous_best}, +${p.improvement} kg)`);
           celebratePR(lines);
         }
+        if (!w.feeling) askWorkoutFeeling(id, w);
         loadWorkouts(); openWorkoutEditor(id);
       } }, "✓ Kuittaa valmiiksi"),
       el("button", { class: "small", onclick: async () => {
@@ -1053,8 +1079,42 @@ async function loadCoachNotices() {
   });
 }
 
+async function loadDirection() {
+  const card = document.getElementById("direction-card");
+  const div = document.getElementById("direction-content");
+  if (!card) return;
+  const d = await api.get(pq("/api/coach/direction"));
+  if (!d.enough_data) {
+    if (d.data_needs && d.data_needs.length) {
+      card.style.display = "";
+      div.innerHTML = "";
+      div.append(el("p", { class: "muted" },
+        "Kokonaiskuvaan tarvitaan lisää dataa. Kirjaa: " + d.data_needs.join(", ") + "."));
+    } else card.style.display = "none";
+    return;
+  }
+  card.style.display = "";
+  div.innerHTML = "";
+  const tone = { excellent: "var(--accent-2)", good: "var(--accent-2)", neutral: "#f59e0b", bad: "#ef4444", no_data: "var(--muted)" };
+  const icon = { excellent: "🚀", good: "📈", neutral: "➖", bad: "⚠️" };
+  div.append(el("div", { class: "result-box" },
+    el("div", { class: "big", style: `color:${tone[d.verdict]}` }, `${icon[d.verdict] || ""} ${d.label}`)));
+  const fTone = { good: "var(--accent-2)", warn: "#f59e0b", bad: "#ef4444" };
+  const fIcon = { good: "✅", warn: "⚠️", bad: "🔻" };
+  d.factors.forEach((f) => {
+    div.append(el("div", { class: "item", style: `border-left:3px solid ${fTone[f.status] || "var(--border)"}` },
+      el("strong", {}, `${fIcon[f.status] || ""} ${f.title}`),
+      el("div", { class: "muted", style: "margin-top:3px" }, f.text)));
+  });
+  if (d.data_needs && d.data_needs.length) {
+    div.append(el("div", { class: "muted", style: "margin-top:6px" },
+      "Tarkempaan kuvaan: kirjaa myös " + d.data_needs.join(", ") + "."));
+  }
+}
+
 async function loadOverview() {
   loadCoachNotices();
+  loadDirection();
   const o = await api.get(pq("/api/stats/overview"));
   const cards = document.getElementById("overview-cards");
   cards.innerHTML = "";
@@ -2818,6 +2878,29 @@ async function loadCardio() {
         } }, "Poista"))));
   });
 }
+
+async function askTrainToday(sore) {
+  const box = document.getElementById("tt-result");
+  box.innerHTML = "";
+  const r = await api.get(pq("/api/recovery/train-today") + "&sore=" + (sore ? "true" : "false"));
+  const tone = { go: "var(--accent-2)", light: "#f59e0b", rest: "#ef4444" }[r.level] || "var(--muted)";
+  box.append(el("div", { class: "item", style: `border-left:3px solid ${tone}` },
+    el("strong", { style: `color:${tone}` }, r.verdict +
+      (r.readiness_score != null ? ` (valmius ${r.readiness_score}/100)` : "")),
+    el("div", { class: "muted", style: "margin-top:4px" }, r.detail),
+    r.data_note ? el("div", { class: "muted", style: "margin-top:4px;font-style:italic" }, r.data_note) : ""));
+}
+document.getElementById("tt-ok").addEventListener("click", () => askTrainToday(false));
+document.getElementById("tt-sore").addEventListener("click", () => askTrainToday(true));
+
+document.querySelectorAll(".care-btn").forEach((b) => b.addEventListener("click", async () => {
+  await api.post(`/api/recovery/cardio?profile_id=${currentProfileId}`, {
+    activity: b.dataset.act, duration_min: +b.dataset.min,
+  });
+  document.getElementById("care-status").textContent =
+    `${b.dataset.act} ${b.dataset.min} min kirjattu — hyvä! Lihashuolto antaa plussaa valmiuspisteisiin.`;
+  loadCardio(); loadReadiness();
+}));
 
 document.getElementById("cardio-save").addEventListener("click", async () => {
   const v = (id) => document.getElementById(id).value;

@@ -155,6 +155,210 @@ def coach_notices(profile_id: int = Query(...), db: Session = Depends(get_db)):
     except Exception:  # noqa: BLE001
         pass
 
+    # ---- Treenin tuntuma: mukaudu koettuun (väh. 3 fiiliskirjausta) ----
+    workouts = (db.query(models.WorkoutSession)
+                .filter(models.WorkoutSession.profile_id == profile_id,
+                        models.WorkoutSession.status == "completed")
+                .order_by(models.WorkoutSession.session_date.desc()).limit(6).all())
+    feels = [w.feeling for w in workouts if w.feeling]
+    if len(feels) >= 3:
+        neg = sum(1 for f in feels if f == "negative")
+        pos = sum(1 for f in feels if f == "positive")
+        try:
+            from .recovery import readiness as _rd3
+            rd3 = _rd3(profile_id, db)
+            rd_ok = rd3.get("has_data") and rd3["score"] >= 75
+            rd_low = rd3.get("has_data") and rd3["score"] < 60
+        except Exception:  # noqa: BLE001
+            rd_ok = rd_low = False
+        if pos >= 3 and rd_ok:
+            notices.append({
+                "id": "feels-easy", "level": "info", "category": "kuormitus",
+                "title": "Treenit tuntuvat helpoilta — nosta rohkeasti",
+                "message": ("Viimeisimmät treenit ovat tuntuneet hyviltä ja palautumismittarit ovat "
+                            "kunnossa. Keho kestäisi enemmän: nosta painoja askel tai lisää 1–2 sarjaa "
+                            "pääliikkeisiin. Autoprogressio ohjelmassa tekee tämän puolestasi."),
+            })
+        elif neg >= 3:
+            notices.append({
+                "id": "feels-hard", "level": "warn", "category": "kuormitus",
+                "title": "Treenit tuntuneet raskailta",
+                "message": ("Useampi treeni putkeen on tuntunut raskaalta tai väsyneeltä" +
+                            (" — ja palautumismittarit vahvistavat saman" if rd_low else "") +
+                            ". Kevennä paria seuraavaa treeniä ~15 % tai pidä ylimääräinen lepopäivä, "
+                            "ja panosta uneen. Tuntuma on dataa siinä missä mittaritkin."),
+            })
+
+    # ---- Tekemättä jääneet: vanhat suunnitellut + vajaat treenit ----
+    old_planned = (db.query(models.WorkoutSession)
+                   .filter(models.WorkoutSession.profile_id == profile_id,
+                           models.WorkoutSession.status == "planned",
+                           models.WorkoutSession.session_date <= today - timedelta(days=4))
+                   .count())
+    if old_planned:
+        notices.append({
+            "id": "unfinished", "level": "info", "category": "treenit",
+            "title": "Suunniteltuja treenejä odottaa",
+            "message": (f"{old_planned} suunniteltua treeniä on jäänyt tekemättä yli 4 päivää sitten. "
+                        "Tee tai skippaa ne, niin seuranta (volyymi, kuormasuhde, ohjelman yhteenveto) "
+                        "pysyy totuudenmukaisena."),
+        })
+    skipped_ex = 0
+    for w in workouts[:4]:
+        skipped_ex += sum(1 for we in w.exercises if not we.done)
+    if skipped_ex >= 4:
+        notices.append({
+            "id": "partial", "level": "info", "category": "treenit",
+            "title": "Liikkeitä jää tekemättä treeneissä",
+            "message": (f"Viime treeneissä on jäänyt yhteensä {skipped_ex} liikettä tekemättä. "
+                        "Jos syy on aikapula, lyhennä ohjelmaa (vähemmän liikkeitä, tehty kokonaan on "
+                        "parempi kuin puoliksi). Jos jaksaminen, kevennä kuormaa tai katso palautuminen."),
+        })
+
     order = {"alert": 0, "warn": 1, "info": 2}
     notices.sort(key=lambda n: order.get(n["level"], 3))
     return {"notices": notices, "count": len(notices)}
+
+
+@router.get("/direction")
+def direction(profile_id: int = Query(...), db: Session = Depends(get_db)):
+    """Kokonaiskuva: mihin keho on menossa. Yhdistää painon, vyötärön,
+    lihasmitat, raudat ja levon — jokainen tekijä vain jos dataa on tarpeeksi.
+
+    Ydinidea: paino vakaa + vyötärö kaventuu + mitat/raudat kasvavat =
+    kehon koostumus paranee (syöminen onnistunut). Paino vakaa + vyötärö
+    kasvaa = rasvaa kertyy vaikka vaaka ei näytä sitä.
+    """
+    today = date.today()
+    factors = []
+    data_needs = []
+    score = 0
+
+    # --- Paino (viikkokeskiarvotrendi) ---
+    entries = (db.query(models.BodyEntry)
+               .filter(models.BodyEntry.profile_id == profile_id,
+                       models.BodyEntry.bodyweight.isnot(None))
+               .order_by(models.BodyEntry.entry_date).all())
+    w_pts = [(e.entry_date, e.bodyweight) for e in entries]
+    w_recent = [p for p in w_pts if (today - p[0]).days <= 28]
+    weight_trend = None
+    if len(w_recent) >= 4 and (w_recent[-1][0] - w_recent[0][0]).days >= 10:
+        weight_trend = engine.weight_trend(w_pts, max(d for d, _ in w_pts))
+    else:
+        data_needs.append("painoa ~3×/vk parin viikon ajan")
+
+    # --- Mitat: vyötärö + lihaskohdat (tahti cm/vk viim. ~8 vk) ---
+    meas = (db.query(models.Measurement)
+            .filter(models.Measurement.profile_id == profile_id)
+            .order_by(models.Measurement.entry_date).all())
+    by_site: dict[str, list] = {}
+    for m in meas:
+        if (today - m.entry_date).days <= 90:
+            by_site.setdefault(m.site, []).append((m.entry_date, m.value_cm))
+
+    def site_rate(site):
+        pts = by_site.get(site, [])
+        if len(pts) >= 2 and (pts[-1][0] - pts[0][0]).days >= 14:
+            return engine.recent_rate_per_week(pts)
+        return None
+
+    waist_rate = site_rate("vyötärö")
+    if waist_rate is None and "vyötärö" not in by_site:
+        data_needs.append("vyötärömitta ~2 vk välein")
+    muscle_sites = ["hauis", "reisi", "rintakehä", "hartia", "pohje", "lantio"]
+    muscle_rates = {s: r for s in muscle_sites if (r := site_rate(s)) is not None}
+    growing = [s for s, r in muscle_rates.items() if r > 0.05]
+    shrinking = [s for s, r in muscle_rates.items() if r < -0.05]
+
+    # --- Raudat (kokonaiskuorman trendi 14 vs 14 pv) ---
+    from .diet import _strength_trend
+    strength = _strength_trend(db, profile_id, today)
+
+    # --- Uni (14 pv, väh. 5 kirjausta) ---
+    sleep_vals = [e.sleep_hours for e in entries
+                  if e.sleep_hours is not None and (today - e.entry_date).days <= 14]
+    sleep_avg = sum(sleep_vals) / len(sleep_vals) if len(sleep_vals) >= 5 else None
+    if sleep_avg is None:
+        data_needs.append("unta useampana yönä viikossa")
+
+    # --- Tulkinta: rasva vs lihas (ydinlogiikka) ---
+    stable = weight_trend is not None and abs(weight_trend) <= 0.2
+    if weight_trend is not None and waist_rate is not None:
+        if stable and waist_rate <= -0.08:
+            score += 3
+            factors.append({"status": "good", "title": "Kehon koostumus paranee (recomp)",
+                            "text": (f"Paino vakaa ({weight_trend:+.1f} kg/vk) mutta vyötärö kaventuu "
+                                     f"({waist_rate:.2f} cm/vk) — rasva vähenee ja tilalle tulee lihasta. "
+                                     "Syöminen on onnistunut erinomaisesti.")})
+        elif stable and waist_rate >= 0.08:
+            score -= 2
+            factors.append({"status": "bad", "title": "Rasvaa kertyy vaikka paino ei nouse",
+                            "text": (f"Paino vakaa mutta vyötärö kasvaa ({waist_rate:+.2f} cm/vk) — "
+                                     "koostumus heikkenee. Tarkista ruokavalion laatu (herkut/alkoholi), "
+                                     "uni ja arkiliikunta.")})
+        elif weight_trend < -0.2 and waist_rate <= -0.05:
+            score += 2
+            factors.append({"status": "good", "title": "Paino ja vyötärö laskevat yhdessä",
+                            "text": f"Pudotus etenee oikein ({weight_trend:+.1f} kg/vk, vyötärö {waist_rate:.2f} cm/vk)."})
+        elif weight_trend > 0.2 and waist_rate >= 0.12:
+            factors.append({"status": "warn", "title": "Massa tulee rasvapitoisena",
+                            "text": (f"Paino nousee {weight_trend:+.1f} kg/vk ja vyötärö {waist_rate:+.2f} cm/vk — "
+                                     "hidasta nousua (~0.2 kg/vk) niin isompi osa on lihasta.")})
+
+    if growing and (waist_rate is None or waist_rate <= 0.05):
+        score += 2
+        factors.append({"status": "good", "title": "Lihasmitat kasvavat",
+                        "text": (", ".join(growing) + " kasvaa ilman vyötärön kasvua — "
+                                 "todennäköisesti aitoa lihasta.")})
+    if shrinking and weight_trend is not None and weight_trend < -0.3:
+        factors.append({"status": "warn", "title": "Mitat pienenevät pudotuksessa",
+                        "text": (", ".join(shrinking) + " pienenee — nopeassa pudotuksessa osa voi olla "
+                                 "lihasta. Pidä proteiini korkealla ja raudat raskaana.")})
+
+    if strength:
+        if strength["change_pct"] > 3:
+            score += 2
+            factors.append({"status": "good", "title": "Raudat kasvavat",
+                            "text": f"Kokonaiskuorma +{strength['change_pct']} % — oikeita asioita tapahtuu."})
+        elif strength["change_pct"] < -8:
+            score -= 1
+            factors.append({"status": "warn", "title": "Raudat laskussa",
+                            "text": f"Kokonaiskuorma {strength['change_pct']} % — katso lepo ja syöminen."})
+    else:
+        data_needs.append("treenejä säännöllisesti (raudat-trendiin)")
+
+    if sleep_avg is not None:
+        if sleep_avg >= 7.2:
+            score += 1
+            factors.append({"status": "good", "title": "Lepo tukee kehitystä",
+                            "text": f"Unta ~{sleep_avg:.1f} h/yö — palautuminen ja koostumus hyötyvät."})
+        elif sleep_avg < 6.5:
+            score -= 1
+            factors.append({"status": "warn", "title": "Lepo rajoittaa",
+                            "text": (f"Unta vain ~{sleep_avg:.1f} h/yö — vähäinen uni heikentää sekä lihaskasvua "
+                                     "että rasvanpolttoa. Tämä voi selittää hitaan kehityksen.")})
+
+    # Lihashuolto viim. 7 pv (pieni plussa kokonaisuuteen)
+    care_acts = ("venyttely", "foam roll", "liikkuvuus", "lämmittely")
+    care_n = (db.query(models.CardioSession)
+              .filter(models.CardioSession.profile_id == profile_id,
+                      models.CardioSession.activity.in_(care_acts),
+                      models.CardioSession.session_date >= today - timedelta(days=7)).count())
+    if care_n:
+        score += min(1, care_n // 2)
+        factors.append({"status": "good", "title": "Lihashuolto plussaa",
+                        "text": f"Lihashuoltoa {care_n} krt viikossa — tukee palautumista ja liikkuvuutta."})
+
+    enough = len(factors) >= 2
+    if not enough:
+        verdict, label = "no_data", "Ei vielä tarpeeksi dataa kokonaiskuvaan"
+    elif score >= 4:
+        verdict, label = "excellent", "Erinomainen suunta — jatka juuri näin"
+    elif score >= 2:
+        verdict, label = "good", "Hyvä suunta"
+    elif score >= 0:
+        verdict, label = "neutral", "Vakaa tilanne"
+    else:
+        verdict, label = "bad", "Suunta vaatii huomiota"
+    return {"verdict": verdict, "label": label, "score": score, "factors": factors,
+            "data_needs": data_needs, "enough_data": enough}

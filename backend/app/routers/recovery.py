@@ -153,6 +153,18 @@ def readiness(profile_id: int = Query(...), db: Session = Depends(get_db)):
         neg_feeling_ratio=neg_ratio, feeling_n=len(recent_feel),
         nutrition_deficit_pct=nutrition_deficit, nutrition_n=nutrition_n)
     result["acwr"] = acwr_info
+
+    # Lihashuolto (venyttely/foam roll/liikkuvuus) viim. 7 pv -> pieni bonus
+    care_acts = ("venyttely", "foam roll", "liikkuvuus", "lämmittely")
+    care_n = sum(1 for c in cardio
+                 if c.activity in care_acts and 0 <= (today - c.session_date).days < 7)
+    if care_n:
+        bonus = min(6, care_n * 2)
+        result["score"] = min(100, result["score"] + bonus)
+        result["factors"].append({"name": "Lihashuolto", "recent": f"{care_n} krt/vk",
+                                  "baseline": "2–3 krt/vk", "change_pct": None,
+                                  "enough_data": True, "bonus": f"+{bonus}"})
+    result["care_sessions_week"] = care_n
     result["has_data"] = bool(result["factors"])
 
     # Deload-suositus: matalat valmiuspisteet TAI selvä kuormapiikki
@@ -188,3 +200,60 @@ def _nutrition_deficit(db: Session, profile_id: int, today: date):
     need = bw * 32
     deficit = max(0.0, (need - avg_intake) / need)
     return round(deficit, 2), n
+
+
+@router.get("/train-today")
+def train_today(profile_id: int = Query(...), sore: bool = Query(False),
+                db: Session = Depends(get_db)):
+    """Kannattaako tänään treenata? Arvio kerätystä datasta (valmiuspisteet,
+    kuorma, uni) + käyttäjän ilmoitus lihasten kipeydestä. Rehellinen siitä,
+    kuinka paljon dataa arvion takana on."""
+    rd = readiness(profile_id, db)
+    score = rd.get("score", 0)
+    has_data = rd.get("has_data", False)
+
+    # Tuoreimmat lihasryhmät: mitä EI ole treenattu lähipäivinä -> ehdotus
+    fresh = []
+    try:
+        from .stats import coverage as _coverage
+        cov = _coverage(profile_id, db)
+        fresh = [g["group"] for g in cov["groups"]
+                 if g["days_since"] is None or g["days_since"] >= 2][:3]
+    except Exception:  # noqa: BLE001
+        pass
+
+    data_note = None
+    if not has_data:
+        data_note = ("Palautumisdataa (uni/HRV/leposyke) on vielä vähän — arvio on karkea. "
+                     "Kirjaa näitä säännöllisesti, niin arvio tarkentuu.")
+
+    if sore:
+        if has_data and score < 55:
+            verdict, level = "Lepopäivä tai vain lihashuolto", "rest"
+            detail = ("Lihakset kipeät JA palautumismittarit matalalla — keho ei ole valmis. "
+                      "Kevyt kävely, venyttely tai foam roll auttaa palautumista enemmän kuin treeni.")
+        elif has_data and score >= 75:
+            verdict, level = "Voit treenata — eri lihasryhmä", "light"
+            detail = ("Palautumismittarit ovat hyvät, joten kipeys on paikallista. Treenaa lihasryhmää "
+                      "jota EI kipeytetty" + (f" (esim. {', '.join(fresh)})" if fresh else "") +
+                      " tai tee kevyt tekniikkatreeni. Älä kuormita kipeitä lihaksia raskaasti.")
+        else:
+            verdict, level = "Kevyt treeni eri lihasryhmälle tai lihashuolto", "light"
+            detail = ("Lihakset kipeät — jos treenaat, valitse eri lihasryhmä ja kevennä ~20 %. "
+                      "Kova kipu = lepoa; lievä jäykkyys usein helpottaa kevyellä liikkeellä.")
+    else:
+        if has_data and score >= 80:
+            verdict, level = "Hyvä päivä treenata", "go"
+            detail = ("Keho on palautunut hyvin — voit treenata täysillä. Jos treeni tuntuu helpolta, "
+                      "uskalla nostaa painoa: nyt on hyvä päivä progressiolle.")
+        elif has_data and score < 55:
+            verdict, level = "Kevennä tai lepää", "rest"
+            detail = ("Palautumismittarit ovat matalalla vaikka lihakset eivät ole kipeät — kuormitus tai "
+                      "univaje painaa. Kevyt treeni (-30 %) tai lepopäivä on parempi sijoitus kuin väkisin veto.")
+        else:
+            verdict, level = "Treenaa normaalisti", "go"
+            detail = "Ei estettä treenille. Kuuntele tuntumaa lämmittelysarjoissa ja säädä sen mukaan."
+
+    return {"verdict": verdict, "level": level, "detail": detail,
+            "readiness_score": score if has_data else None,
+            "suggest_groups": fresh, "data_note": data_note}
