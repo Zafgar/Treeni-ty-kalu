@@ -338,3 +338,28 @@ def test_muscle_load(client):
     assert data["cns"] is not None and "score" in data["cns"]
     sug_areas = {s["area"] for s in data["suggestions"]}
     assert sug_areas, "vajaille alueille pitää tulla ehdotuksia"
+
+
+def test_onboarding_guidance(client):
+    # Ilman kyselyä -> ei saatavilla, kertoo mitä puuttuu
+    p0 = client.post("/api/profiles", json={"name": "Tyhjä"}).json()
+    d0 = client.get(f"/api/coach/onboarding?profile_id={p0['id']}").json()
+    assert d0["available"] is False and "kokemustaso" in d0["missing"]
+    # Aloittelija ohjataan aloittelijapohjaan tavoitteesta riippumatta
+    p1 = client.post("/api/profiles", json={"name": "Uusi", "experience": "aloittelija",
+        "goal": "voima", "days_per_week": 4}).json()
+    d1 = client.get(f"/api/coach/onboarding?profile_id={p1['id']}").json()
+    assert d1["available"] is True
+    assert d1["program"]["plan"] == "aloittelija" and d1["program"]["days_per_week"] == 4
+    assert d1["cycle"]["weeks_min"] >= 6
+    # Kokenut + voima -> voimanosto-ohjelma, lyhyemmät blokit
+    p2 = client.post("/api/profiles", json={"name": "Konkari", "experience": "kokenut",
+        "goal": "voima", "days_per_week": 4, "training_years": 10}).json()
+    d2 = client.get(f"/api/coach/onboarding?profile_id={p2['id']}").json()
+    assert d2["program"]["plan"] == "voimanosto"
+    assert d2["cycle"]["weeks_max"] <= 6
+    # Palaava saa ennätysten kirjausvinkin ensimmäisenä
+    p3 = client.post("/api/profiles", json={"name": "Paluu", "experience": "palaava",
+        "goal": "lihasmassa"}).json()
+    d3 = client.get(f"/api/coach/onboarding?profile_id={p3['id']}").json()
+    assert "ennätykse" in d3["tips"][0].lower()

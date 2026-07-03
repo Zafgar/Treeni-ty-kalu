@@ -1112,7 +1112,76 @@ async function loadDirection() {
   }
 }
 
+// Aloitusopas: taustakyselystä johdettu suunnitelma uusille/vähädataisille
+// profiileille. Piilotetaan kun treenejä on kertynyt reilusti (rutiini löytyi).
+async function loadOnboarding() {
+  const card = document.getElementById("onboarding-card");
+  const div = document.getElementById("onboarding-content");
+  let data;
+  try { data = await api.get(pq("/api/coach/onboarding")); }
+  catch { card.style.display = "none"; return; }
+  div.innerHTML = "";
+  const prof = profilesCache.find((p) => p.id === currentProfileId);
+  const workoutCount = data.workout_count ?? (prof ? prof.workouts : 0);
+  if (!data.available) {
+    // Kysely täyttämättä: kehota vain jos profiili on vielä tuore
+    if ((prof ? prof.workouts : 0) >= 10) { card.style.display = "none"; return; }
+    card.style.display = "";
+    div.append(
+      el("p", { class: "muted" },
+        "Täytä lyhyt taustakysely (treenitausta ja tavoite), niin saat henkilökohtaisen " +
+        "ohjelmasuosituksen, jaksojen pituudet ja realistiset kehitysodotukset. " +
+        "Puuttuu: " + (data.missing || []).join(", ") + "."),
+      el("button", { class: "primary small", onclick: () => {
+        document.querySelector('nav#tabs button[data-tab="profiles"]').click();
+        setTimeout(() => { if (prof) openProfileForm(prof); }, 200);
+      } }, "Täytä taustakysely"));
+    return;
+  }
+  // Kysely täytetty: näytä opas kunnes rutiini on syntynyt (~20 treeniä)
+  if (workoutCount >= 20 && data.program.has_program) { card.style.display = "none"; return; }
+  card.style.display = "";
+  const a = data.answers;
+  const planNames = { aloittelija: "Aloittelijan ohjelma", bodaus: "Lihasmassaohjelma",
+    voimanosto: "Voimanosto-ohjelma", olympia: "Olympianosto-ohjelma" };
+  div.append(el("div", { class: "muted", style: "margin-bottom:6px" },
+    `${a.experience_label}` + (a.training_years ? ` · ${a.training_years} treenivuotta` : "") +
+    ` · tavoite: ${a.goal}` + (a.days_per_week ? ` · ${a.days_per_week} pv/vk` : "")));
+  // Ohjelmasuositus
+  const progBox = el("div", { class: "result-box", style: "margin-bottom:8px" },
+    el("div", { class: "row-between" },
+      el("strong", {}, `📋 Suositus: ${planNames[data.program.plan] || data.program.plan} ${data.program.days_per_week}×/vk`),
+      data.program.has_program ? el("span", { class: "tag status-done" }, "ohjelma luotu") : ""),
+    el("div", { class: "muted", style: "margin-top:4px" }, data.program.why));
+  if (!data.program.has_program) {
+    progBox.append(el("button", { class: "success small", style: "margin-top:8px", onclick: async (ev) => {
+      ev.target.disabled = true;
+      try {
+        await api.post("/api/templates/generate", {
+          plan: data.program.plan, days_per_week: data.program.days_per_week,
+          profile_id: currentProfileId });
+        alert("Ohjelma luotu! Löydät sen Ohjelmat-välilehdeltä — sieltä voit käynnistää treenit.");
+        loadOverview();
+      } catch (e) { alert("Virhe: " + e.message); ev.target.disabled = false; }
+    } }, "Luo suositeltu ohjelma"));
+  }
+  div.append(progBox);
+  // Jaksotus ja odotukset
+  div.append(el("div", { style: "margin-bottom:6px" },
+    el("strong", {}, `🗓 Jaksot: ${data.cycle.weeks_min}–${data.cycle.weeks_max} viikkoa`),
+    el("div", { class: "muted" }, data.cycle.note)));
+  div.append(el("div", { style: "margin-bottom:6px" },
+    el("strong", {}, "📈 Mitä odottaa"),
+    el("div", { class: "muted" }, data.expectation)));
+  if (data.tips && data.tips.length) {
+    const tipsBox = el("div", {}, el("strong", {}, "✅ Näillä pääset alkuun"));
+    data.tips.forEach((t) => tipsBox.append(el("div", { class: "muted", style: "margin-top:3px" }, "• " + t)));
+    div.append(tipsBox);
+  }
+}
+
 async function loadOverview() {
+  loadOnboarding();
   loadCoachNotices();
   loadDirection();
   const o = await api.get(pq("/api/stats/overview"));
@@ -1817,18 +1886,49 @@ function openProfileForm(existing) {
   const bd = el("input", { type: "date", value: existing && existing.birthdate ? existing.birthdate : "" });
   const height = el("input", { type: "number", step: "0.5", placeholder: "cm", value: existing && existing.height_cm ? existing.height_cm : "" });
   const color = el("input", { type: "color", value: existing && existing.color ? existing.color : "#4f8cff" });
+  // Taustakysely: kokemus ja tavoite ohjaavat ohjelmasuosituksia ja ennusteita
+  const expSel = el("select", {}, el("option", { value: "" }, "— valitse —"),
+    el("option", { value: "aloittelija" }, "Aloittelija (ei aiempaa salitreeniä)"),
+    el("option", { value: "jonkin_verran" }, "Jonkin verran (alle ~2 v tai epäsäännöllisesti)"),
+    el("option", { value: "kokenut" }, "Kokenut (useita vuosia säännöllisesti)"),
+    el("option", { value: "palaava" }, "Palaava (treenannut ennen, nyt tauolta)"));
+  if (existing && existing.experience) expSel.value = existing.experience;
+  const yearsIn = el("input", { type: "number", step: "0.5", min: "0", placeholder: "esim. 5",
+    value: existing && existing.training_years != null ? existing.training_years : "" });
+  const goalSel = el("select", {}, el("option", { value: "" }, "— valitse —"),
+    el("option", { value: "voima" }, "Voima (isommat raudat)"),
+    el("option", { value: "lihasmassa" }, "Lihasmassa (koko ja muoto)"),
+    el("option", { value: "kunto" }, "Yleiskunto ja terveys"),
+    el("option", { value: "painonpudotus" }, "Painonpudotus (lihakset säilyttäen)"));
+  if (existing && existing.goal) goalSel.value = existing.goal;
+  const daysSel = el("select", {}, ...[2, 3, 4, 5, 6].map((d) =>
+    el("option", { value: String(d) }, `${d} päivää/vk`)));
+  daysSel.value = existing && existing.days_per_week ? String(existing.days_per_week) : "3";
   form.append(
     el("h3", { style: "margin-top:0" }, existing ? `Muokkaa profiilia: ${existing.name}` : "Uusi profiili"),
     el("div", { class: "grid" },
       el("label", {}, "Nimi", name), el("label", {}, "Sukupuoli", sex),
       el("label", {}, "Syntymäaika (ikä lasketaan)", bd), el("label", {}, "Pituus", height),
       el("label", {}, "Väri", color)),
+    el("h4", { style: "margin-bottom:4px" }, "Taustakysely (suositukset & ennusteet)"),
+    el("p", { class: "muted", style: "margin-top:0" },
+      "Vastausten perusteella järjestelmä ehdottaa sopivan ohjelman, jakson pituudet ja " +
+      "realistiset kehitysodotukset — ja kalibroi ennusteet kunnes omaa dataa kertyy."),
+    el("div", { class: "grid" },
+      el("label", {}, "Treenitausta", expSel),
+      el("label", {}, "Treenivuosia yhteensä", yearsIn),
+      el("label", {}, "Päätavoite", goalSel),
+      el("label", {}, "Ehdin treenata", daysSel)),
     el("div", { class: "btn-row" },
       el("button", { class: "success", onclick: async () => {
         if (!name.value.trim()) return alert("Anna nimi.");
         const payload = {
           name: name.value.trim(), sex: sex.value || null, birthdate: bd.value || null,
           height_cm: height.value ? +height.value : null, color: color.value,
+          experience: expSel.value || null,
+          training_years: yearsIn.value !== "" ? +yearsIn.value : null,
+          goal: goalSel.value || null,
+          days_per_week: +daysSel.value,
         };
         if (existing) {
           await api.patch(`/api/profiles/${existing.id}`, payload);

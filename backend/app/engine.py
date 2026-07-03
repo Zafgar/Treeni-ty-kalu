@@ -1577,8 +1577,15 @@ _MUSCLE_RULES = [
     (("vinopenkki",), {"rinta": 1, "olkapäät": 0.5, "ojentajat": 0.45}),
     (("penkkipunnerrus", "rintaprässi"), {"rinta": 1, "ojentajat": 0.5, "olkapäät": 0.35}),
     (("dippi",), {"rinta": 0.8, "ojentajat": 1, "olkapäät": 0.3}),
+    # Ojentajaliikkeet ENNEN yleistä punnerrus-sääntöä ("ojentajan punnerrus",
+    # "ranskalainen punnerrus" ja "taljapunnerrus" ovat ojentajaliikkeitä).
+    (("ranskalainen", "skull", "kickback", "ojentaja", "taljapunnerrus"), {"ojentajat": 1}),
+    # Takaolkapää ENNEN pec deck / flyes -sääntöä (reverse pec deck on takaolkapääliike).
+    (("face pull", "kasvoille", "takaolkapää", "vipunostot taakse", "reverse"), {"olkapäät": 0.8, "yläselkä": 0.5}),
     (("flyes", "vipunostot rinnalle", "pec deck", "taljaristikko", "crossover"), {"rinta": 1, "olkapäät": 0.2}),
     (("punnerrus",), {"rinta": 1, "ojentajat": 0.5, "olkapäät": 0.3, "keskivartalo": 0.3}),
+    # Heilautukset ovat lantiosaranaliikkeitä (takaketju), eivät etureisiliikkeitä.
+    (("heilautus", "swing"), {"pakarat": 1, "takareidet": 0.8, "alaselkä": 0.6, "keskivartalo": 0.3, "olkapäät": 0.2}),
     (("romanialainen", "takareisikoukistus", "jalkojen koukistus"), {"takareidet": 1, "pakarat": 0.6, "alaselkä": 0.4}),
     (("maastaveto",), {"pakarat": 1, "takareidet": 0.8, "alaselkä": 1, "yläselkä": 0.6, "kyynärvarret": 0.6, "etureidet": 0.4, "keskivartalo": 0.4}),
     (("tempaus", "rinnalleveto", "työntö telineestä"), {"etureidet": 0.8, "takareidet": 0.5, "pakarat": 0.8, "alaselkä": 0.8, "yläselkä": 0.6, "olkapäät": 0.6, "kyynärvarret": 0.4, "keskivartalo": 0.5, "pohkeet": 0.3}),
@@ -1593,13 +1600,11 @@ _MUSCLE_RULES = [
     (("leuanveto", "ylätalja"), {"yläselkä": 1, "hauis": 0.5, "kyynärvarret": 0.4, "olkapäät": 0.15}),
     (("pystysoutu",), {"olkapäät": 0.9, "yläselkä": 0.4, "hauis": 0.2, "kyynärvarret": 0.3}),
     (("soutu", "alatalja", "t-tanko"), {"yläselkä": 1, "hauis": 0.4, "kyynärvarret": 0.35, "alaselkä": 0.25, "olkapäät": 0.25}),
-    (("face pull", "kasvoille", "takaolkapää", "vipunostot taakse", "reverse"), {"olkapäät": 0.8, "yläselkä": 0.5}),
     (("sivunosto", "vipunostot sivulle", "taljavipunostot", "etunosto"), {"olkapäät": 1}),
     (("vasarakääntö", "zottman"), {"hauis": 1, "kyynärvarret": 0.6}),
-    (("hauiskääntö", "curl", "scott", "spider", "keskitetty"), {"hauis": 1, "kyynärvarret": 0.4}),
-    (("ranskalainen", "skull", "kickback", "ojentaja", "taljapunnerrus"), {"ojentajat": 1}),
+    (("hauiskääntö", "curl", "scott", "spider", "keskitetty", "taljahauis"), {"hauis": 1, "kyynärvarret": 0.4}),
     (("ranneväännöt", "kyynärvarsi"), {"kyynärvarret": 1}),
-    (("vatsarutistus", "vatsa", "lankku", "plank"), {"keskivartalo": 1}),
+    (("vatsarutistus", "vatsa", "lankku", "plank", "jalannosto", "rutistus"), {"keskivartalo": 1}),
 ]
 
 _MUSCLE_FALLBACK = {
@@ -1613,6 +1618,7 @@ _MUSCLE_FALLBACK = {
     "kädet": {"hauis": 0.6, "ojentajat": 0.6, "kyynärvarret": 0.3},
     "pohkeet": {"pohkeet": 1},
     "keskivartalo": {"keskivartalo": 1},
+    "vatsa": {"keskivartalo": 1},
     "olympia": {"etureidet": 0.8, "pakarat": 0.8, "alaselkä": 0.8, "yläselkä": 0.5,
                 "olkapäät": 0.5, "takareidet": 0.5, "keskivartalo": 0.4},
 }
@@ -1643,3 +1649,22 @@ MUSCLE_WEEKLY_TARGETS = {
     "kyynärvarret": (4, 15), "etureidet": (8, 18), "takareidet": (6, 16),
     "pakarat": (6, 18), "pohkeet": (6, 16), "keskivartalo": (4, 16),
 }
+
+
+# ---------- Kokemustaso: ennusteen kalibrointi kun omaa dataa on vähän ----------
+# Aloittelija kehittyy nopeasti, kokenut hitaasti. Vaikutus painotetaan
+# luottamuksen käänteisarvolla: kun omaa dataa kertyy, oma toteutunut tahti
+# syrjäyttää taustaoletuksen kokonaan.
+EXPERIENCE_RATE_FACTOR = {
+    "aloittelija": 1.25,
+    "jonkin_verran": 1.0,
+    "kokenut": 0.75,
+    "palaava": 1.1,
+}
+
+
+def experience_rate_calibration(experience: str | None, confidence: float) -> float:
+    """Kerroin ennusteen tahtiin kokemustason mukaan, häipyy datan karttuessa."""
+    f = EXPERIENCE_RATE_FACTOR.get(experience or "", 1.0)
+    conf = max(0.0, min(1.0, confidence))
+    return 1.0 + (f - 1.0) * (1.0 - conf)

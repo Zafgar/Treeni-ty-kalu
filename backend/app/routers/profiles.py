@@ -25,6 +25,9 @@ def _profile_summary(db: Session, p: models.Profile) -> dict:
         "id": p.id, "name": p.name, "sex": p.sex,
         "birthdate": p.birthdate.isoformat() if p.birthdate else None,
         "age": age, "height_cm": p.height_cm, "color": p.color, "notes": p.notes,
+        "creatine": bool(p.creatine),
+        "experience": p.experience, "training_years": p.training_years,
+        "goal": p.goal, "days_per_week": p.days_per_week,
         "workouts": workouts, "programs": programs,
         "latest_bodyweight": last_body.bodyweight if last_body else None,
     }

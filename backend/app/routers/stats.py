@@ -192,11 +192,11 @@ def exercise_history(
     is_main = bool(lift_key) or (ex.is_main_lift if ex else False)
     valid_pts = [p for p in points if p["estimated_1rm"] > 0]
     if forecast and is_main and len(valid_pts) >= 2:
+        profile = db.get(models.Profile, profile_id) if profile_id else None
         # Katto naturaalinostajan realistisesta huipusta (jos paino tunnetaan)
         ceiling = None
         bw = _latest_bodyweight(db, profile_id)
         if lift_key and bw:
-            profile = db.get(models.Profile, profile_id) if profile_id else None
             ceiling = engine.natural_ceiling(lift_key, bw, profile.sex if profile else None)
         # Luottamus datan määrästä ja painotrendi dieetin vaikutusta varten
         span_days = (valid_pts[-1]["date"] - valid_pts[0]["date"]).days
@@ -209,6 +209,11 @@ def exercise_history(
         # datasta (ennusta joka piste aiemmista ja mittaa virhe).
         bt = engine.backtest_forecast(history)
         calib = max(0.6, min(1.4, calib * bt["rate_ratio"]))
+        # Kokemustaso (taustakysely) ohjaa tahtia kun omaa dataa on vähän;
+        # vaikutus häipyy kun luottamus nousee ja oma toteuma ottaa vallan.
+        exp_calib = engine.experience_rate_calibration(
+            profile.experience if profile else None, conf)
+        calib = max(0.6, min(1.5, calib * exp_calib))
         # Lihasmuisti: aiempi huippu -> paluu siihen on nopeaa, ylitys haastavampaa
         best_ever = max(p["estimated_1rm"] for p in valid_pts)
         prior_best = best_ever if best_ever > valid_pts[-1]["estimated_1rm"] + 0.5 else None
@@ -229,6 +234,12 @@ def exercise_history(
             elif bt["rate_ratio"] <= 0.7:
                 calib_note += "Kehitys on tasaantunut mallin ennustamaa hitaammaksi — tahti laskettu. "
             calib_note += "Haarukka perustuu omien ennustevirheidesi kokoon (kapenee kun data on tasaista). "
+        if abs(exp_calib - 1.0) > 0.03:
+            exp_lbl = {"aloittelija": "aloittelija", "kokenut": "kokenut",
+                       "palaava": "tauolta palaava"}.get(profile.experience if profile else "", "")
+            calib_note += (f"Taustakyselyn kokemustaso ({exp_lbl}) "
+                           f"{'nostaa' if exp_calib > 1 else 'laskee'} arvioitua tahtia "
+                           "kunnes omaa dataa kertyy tarpeeksi. ")
         forecast_meta = {
             "confidence": conf, "confidence_label": conf_label,
             "bodyweight_trend": bw_trend, "sessions": len(valid_pts), "calibration": calib,

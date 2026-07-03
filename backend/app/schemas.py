@@ -231,6 +231,11 @@ class ProfileBase(BaseModel):
     height_cm: float | None = None
     color: str | None = None
     creatine: bool = False
+    # Aloituskysely: tausta ja tavoite -> paremmat suositukset ja ennusteet
+    experience: str | None = None  # aloittelija/jonkin_verran/kokenut/palaava
+    training_years: float | None = None
+    goal: str | None = None  # voima/lihasmassa/kunto/painonpudotus
+    days_per_week: int | None = None
     notes: str | None = None
 
 
@@ -245,6 +250,10 @@ class ProfileUpdate(BaseModel):
     height_cm: float | None = None
     color: str | None = None
     creatine: bool | None = None
+    experience: str | None = None
+    training_years: float | None = None
+    goal: str | None = None
+    days_per_week: int | None = None
     notes: str | None = None
 
 

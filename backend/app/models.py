@@ -48,6 +48,13 @@ class Profile(Base):
     color: Mapped[str | None] = mapped_column(String(20), nullable=True)
     # Onko kreatiini käytössä -> osa painosta on lihasvettä, ei rasvaa
     creatine: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    # Aloituskysely: treenitausta ja tavoite ohjaavat suosituksia ja ennusteita.
+    # experience: "aloittelija" / "jonkin_verran" / "kokenut" / "palaava"
+    experience: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    training_years: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # goal: "voima" / "lihasmassa" / "kunto" / "painonpudotus"
+    goal: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    days_per_week: Mapped[int | None] = mapped_column(Integer, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 

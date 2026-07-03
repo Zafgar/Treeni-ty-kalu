@@ -362,3 +362,137 @@ def direction(profile_id: int = Query(...), db: Session = Depends(get_db)):
         verdict, label = "bad", "Suunta vaatii huomiota"
     return {"verdict": verdict, "label": label, "score": score, "factors": factors,
             "data_needs": data_needs, "enough_data": enough}
+
+
+# ---------- Aloitusopas: taustakyselystä konkreettinen suunnitelma ----------
+
+# Kokemustason vaikutus ennusteeseen ja ohjaukseen. rate = odotettu kehitys-
+# kerroin (aloittelija etenee nopeasti, kokenut hitaasti), cycle = suositeltu
+# ohjelmajakson pituus viikkoina ennen vaihtoa/kevennystä.
+EXPERIENCE_PROFILES = {
+    "aloittelija": {
+        "label": "Aloittelija",
+        "cycle_weeks": (8, 12),
+        "cycle_note": ("Pidä sama ohjelma 8–12 viikkoa ja lisää painoa pienin askelin "
+                       "(1.25–2.5 kg) aina kun kaikki sarjat onnistuvat. Aloittelijana "
+                       "kehityt joka viikko — ohjelman vaihtelu vain hidastaisi. "
+                       "Kevennysviikko vasta jos kehitys pysähtyy 2–3 treeniä putkeen."),
+        "expectation": ("Ensimmäisinä kuukausina isot liikkeet nousevat tyypillisesti "
+                        "1.25–2.5 kg VIIKOSSA (kyykky/mave nopeammin, penkki/pystypunnerrus "
+                        "hitaammin). Tämä on normaalia eikä jatku ikuisesti — nauti siitä."),
+    },
+    "jonkin_verran": {
+        "label": "Jonkin verran treenannut",
+        "cycle_weeks": (6, 10),
+        "cycle_note": ("Pidä ohjelma 6–10 viikkoa. Lisää painoa kun sarjat onnistuvat, "
+                       "ja pidä kevennysviikko (~60–70 % painoista) noin joka 7.–8. viikko "
+                       "tai kun treenit alkavat tuntua jatkuvasti raskailta."),
+        "expectation": ("Isot liikkeet nousevat tyypillisesti 2.5–5 kg KUUKAUDESSA kun "
+                        "treeni, uni ja ruoka ovat kunnossa. Viikkotason heittely on "
+                        "normaalia — seuraa kuukausitrendiä."),
+    },
+    "kokenut": {
+        "label": "Kokenut (useita vuosia)",
+        "cycle_weeks": (4, 6),
+        "cycle_note": ("Jaksota 4–6 viikon blokkeihin: volyymiblokki -> voimablokki -> "
+                       "kevennys. Maksimiyritykset vasta blokin lopussa. Kokeneena "
+                       "palautuminen ratkaisee — hermostollinen kuorma kannattaa pitää "
+                       "silmällä (Kehitys-välilehden Lihaskuormitus-kortti)."),
+        "expectation": ("Kehitys on hidasta mutta todellista: 1RM +2–5 kg per 2–3 kk on "
+                        "hyvä tahti. Ennusteet kalibroituvat omaan dataasi muutamassa "
+                        "viikossa."),
+    },
+    "palaava": {
+        "label": "Palaava (tauolta)",
+        "cycle_weeks": (6, 8),
+        "cycle_note": ("Ensimmäiset 6–8 viikkoa: aloita ~60–70 %:sta vanhoista painoista "
+                       "ja nosta reippaasti (jopa 5 kg/vk isoissa) niin kauan kuin tekniikka "
+                       "pitää. Lihasmuisti tuo vanhat tulokset takaisin moninkertaisesti "
+                       "nopeammin kuin ne alun perin tulivat."),
+        "expectation": ("Paluu vanhalle tasolle on nopeaa (viikkoja–kuukausia, ei vuosia). "
+                        "Kirjaa vanhat ennätykset järjestelmään (Kehitys -> vanhan tuloksen "
+                        "kirjaus), niin ennuste ja paluusuunnitelma osaavat huomioida ne."),
+    },
+}
+
+GOAL_PLANS = {
+    # tavoite -> (ensisijainen ohjelmapohja kokeneemmille, perustelu)
+    "voima": ("voimanosto", "Voimatavoitteeseen sopii kyykky/penkki/mave-painotteinen ohjelma."),
+    "lihasmassa": ("bodaus", "Lihasmassatavoitteeseen sopii isompi volyymi ja lihasryhmäjako."),
+    "kunto": ("aloittelija", "Kuntotavoitteeseen sopii koko kehon ohjelma + kardio kylkeen."),
+    "painonpudotus": ("bodaus", "Painonpudotuksessa lihasmassa suojataan isolla volyymilla ja "
+                       "riittävällä proteiinilla — kalorivaje tulee ruoasta, ei treenistä."),
+}
+
+
+@router.get("/onboarding")
+def onboarding(profile_id: int = Query(...), db: Session = Depends(get_db)):
+    """Aloitusopas: profiilin taustakyselyn vastauksista konkreettinen suunnitelma.
+
+    Kertoo mikä ohjelmapohja kannattaa luoda, kuinka pitkiä jaksoja treenataan,
+    mitä kehitystä on realistista odottaa ja mitä dataa kannattaa kirjata.
+    Erityisen tärkeä uusille profiileille joilla ei vielä ole omaa dataa.
+    """
+    profile = db.get(models.Profile, profile_id)
+    if not profile:
+        return {"available": False, "missing": ["profiili"]}
+    missing = []
+    if not profile.experience:
+        missing.append("kokemustaso")
+    if not profile.goal:
+        missing.append("tavoite")
+    if missing:
+        return {"available": False, "missing": missing,
+                "note": "Täytä taustakysely profiilin muokkauksessa, niin saat "
+                        "henkilökohtaiset suositukset."}
+
+    exp = EXPERIENCE_PROFILES.get(profile.experience, EXPERIENCE_PROFILES["jonkin_verran"])
+    days = profile.days_per_week or 3
+    # Aloittelija ohjataan aina aloittelijapohjaan tavoitteesta riippumatta —
+    # perusliikkeet ja rutiini ensin, erikoistuminen myöhemmin.
+    if profile.experience == "aloittelija":
+        plan_id, plan_why = "aloittelija", ("Aloittelijana tärkeintä on oppia perusliikkeet "
+                                            "ja rakentaa rutiini — erikoistuminen kannattaa "
+                                            "vasta ~6–12 kk päästä.")
+    else:
+        plan_id, plan_why = GOAL_PLANS.get(profile.goal, GOAL_PLANS["kunto"])
+    from .templates import PLAN_BLUEPRINTS
+    bp = PLAN_BLUEPRINTS.get(plan_id, {})
+    day_options = sorted(bp.get("days", {}).keys())
+    plan_days = min(day_options, key=lambda x: abs(x - days)) if day_options else days
+
+    has_program = (db.query(models.Program)
+                   .filter(models.Program.profile_id == profile_id).count()) > 0
+    workout_count = (db.query(models.WorkoutSession)
+                     .filter(models.WorkoutSession.profile_id == profile_id,
+                             models.WorkoutSession.status == "completed").count())
+
+    tips = [
+        "Kirjaa kehon paino aamuisin pari kertaa viikossa — moni arvio (kaloritarve, "
+        "voimatasot, ennusteet) tarkentuu sen mukana.",
+        "Merkitse treenin tuntuma (helppo/raskas) treenin jälkeen — järjestelmä oppii "
+        "milloin kuormaa voi nostaa ja milloin kevennetään.",
+    ]
+    if profile.experience == "palaava":
+        tips.insert(0, "Kirjaa vanhat ennätyksesi (Kehitys -> vanhan tuloksen kirjaus "
+                       "vuoden kanssa) — paluusuunnitelma ja ennusteet rakentuvat niiden päälle.")
+    if profile.goal == "painonpudotus":
+        tips.append("Punnitse säännöllisesti: dieetin onnistumista seurataan painotrendistä, "
+                    "eikä ruokapäiväkirjaa tarvita jos paino kehittyy oikeaan suuntaan.")
+    if profile.goal in ("voima", "lihasmassa"):
+        tips.append("Uni on tärkein yksittäinen palautumistekijä — kirjaa unitunnit jos "
+                    "mahdollista, niin valmentaja osaa erottaa treeniongelman uniongelmasta.")
+
+    lo, hi = exp["cycle_weeks"]
+    return {
+        "available": True,
+        "answers": {"experience": profile.experience, "experience_label": exp["label"],
+                    "training_years": profile.training_years, "goal": profile.goal,
+                    "days_per_week": profile.days_per_week},
+        "program": {"plan": plan_id, "days_per_week": plan_days, "why": plan_why,
+                    "guidance": bp.get("guidance"), "has_program": has_program},
+        "cycle": {"weeks_min": lo, "weeks_max": hi, "note": exp["cycle_note"]},
+        "expectation": exp["expectation"],
+        "tips": tips,
+        "workout_count": workout_count,
+    }

@@ -76,6 +76,10 @@ def ensure_columns():
         ("foods", "fiber_g", "FLOAT DEFAULT 0"),
         ("foods", "sugar_g", "FLOAT DEFAULT 0"),
         ("foods", "sodium_mg", "FLOAT DEFAULT 0"),
+        ("profiles", "experience", "VARCHAR(20)"),
+        ("profiles", "training_years", "FLOAT"),
+        ("profiles", "goal", "VARCHAR(20)"),
+        ("profiles", "days_per_week", "INTEGER"),
     ]
     inspector = inspect(engine)
     existing_tables = set(inspector.get_table_names())
@@ -470,6 +474,146 @@ EXERCISE_DESCRIPTIONS = {
         "yläosaan kyynärpäät ulos, purista lapoja yhteen. Selkä suorana, ei kiskomista alaselällä.",
     "Ylätalja leveä": "Idea: selän leveys (V-malli). Leveä ote, vedä tanko rintaan lapaa alas ja taakse "
         "vetäen, kyynärpäät alas. Palauta täyteen venytykseen hallitusti.",
+    "Alatalja soutu": "Idea: yläselän paksuus istuen. Selkä suorana, vedä kahva vatsaa kohti "
+        "lapoja yhteen puristaen, palauta käsivarret suoriksi hallitusti.",
+    "Alatalja soutu (kapea)": "Idea: yläselän keskiosa ja paksuus. Kapea ote, vedä kahva alavatsaan "
+        "kyynärpäät kylkiä pitkin, purista lapoja, palauta venytykseen.",
+    "Askelkyykky": "Idea: etureiden ja pakaran yksijalkatyö + tasapaino. Astu pitkä askel eteen, "
+        "laske takapolvi lähelle lattiaa, työnnä etujalalla takaisin. Paino = lisäpaino yhteensä.",
+    "Bulgarialainen askelkyykky käsipaino": "Idea: yhden jalan etureisi/pakaraliike. Takajalka penkillä, "
+        "laske hallitusti etujalan varassa, työnnä ylös. Paino = per käsipaino. Tehokas myös tasapainolle.",
+    "Bulgarian askelkyykky": "Idea: yhden jalan etureisi/pakaraliike. Takajalka penkillä, laske "
+        "hallitusti etujalan varassa, työnnä kantapäällä ylös. Kova pakaralle pienelläkin painolla.",
+    "Etukyykky": "Idea: etureisipainotteinen kyykky pystymmällä selällä. Tanko etuhartioilla, "
+        "kyynärpäät ylös, kyykkää syvään keskivartalo tiukkana. Kevyempi alaselälle kuin takakyykky.",
+    "Etunostot": "Idea: olkapään etuosan eristävä liike. Nosta paino suorin käsin eteen hartiatasoon, "
+        "laske hallitusti. Yleensä riittää vähän — etuolkapää saa työtä punnerruksistakin.",
+    "Face pull": "Idea: takaolkapää ja lapaa tukevat lihakset — ryhdin paras kaveri. Vedä köysi "
+        "kasvoja kohti kyynärpäät ylhäällä ja ulkona, käännä kädet taakse. Kevyt paino, iso hyöty.",
+    "Flyes käsipaino (vipunostot rinnalle)": "Idea: rinnan eristävä venyttävä liike. Selinmakuulla vie "
+        "käsipainot kaarella sivuille kevyt kyynärtaivutus, tunne venytys rinnassa, tuo yhteen kaarella.",
+    "Hack-kyykky (kone)": "Idea: etureiden ohjattu massaliike. Selkä tuettuna kelkkaa vasten, laske "
+        "syvään hallitusti, työnnä lukitsematta polvia. Turvallinen tapa kuormittaa reidet raskaasti.",
+    "Hauiskääntö käsipaino": "Idea: hauiksen perusliike vapailla painoilla. Kyynärpäät kyljissä, käännä "
+        "painot ylös (halutessa kierrolla), laske hallitusti. Paino = per käsipaino.",
+    "Hauiskääntö taljassa": "Idea: hauis tasaisella vastuksella koko liikeradalla. Kyynärpäät paikallaan, "
+        "käännä kahva ylös, jarruta paluu. Talja pitää jännityksen myös ala-asennossa.",
+    "Jalkojen koukistus": "Idea: takareiden eristävä liike koneessa. Koukista kantapäät pakaroita kohti "
+        "hallitusti, purista huipulla, laske jarruttaen.",
+    "Jalkojen ojennus": "Idea: etureiden eristävä liike koneessa. Ojenna polvet hallitusti suoriksi, "
+        "pieni tauko huipulla, laske jarruttaen.",
+    "Kahvakuulaheilautus": "Idea: takaketjun (pakarat, takareidet) räjähtävä lantiosarana. Heilauta kuula "
+        "lantion työnnöllä hartiatasoon — kädet ovat vain koukut, voima tulee lantiosta. Hyvä myös kunnolle.",
+    "Kapea penkki": "Idea: ojentajapainotteinen penkkipunnerrus. Ote hartioita kapeampi, kyynärpäät "
+        "lähellä kylkiä, tanko alarintaan ja työnnä ylös. Vahvistaa penkin lukko-osaa.",
+    "Käsipainokyykky (goblet)": "Idea: kyykkytekniikan opettelu ja etureisi/pakaratyö. Pidä käsipainoa "
+        "pystyssä rintaa vasten, kyykkää syvään kyynärpäät polvien sisäpuolelle, työnnä ylös.",
+    "Käsipainosoutu": "Idea: yläselän vetoliike käsipainoilla. Etunojassa vedä painot alavatsaa kohti "
+        "lapoja puristaen, laske hallitusti. Paino = per käsipaino.",
+    "Käsipainosoutu (yhden käden)": "Idea: yläselän yksipuolinen veto — tukikäsi penkillä sallii raskaan "
+        "kuorman turvallisesti. Vedä paino lonkkaa kohti kiertämättä vartaloa, laske venytykseen.",
+    "Lankku": "Idea: keskivartalon tukilihasten staattinen pito. Kyynärnoja, vartalo suorana kuin lauta, "
+        "pakara ja vatsa tiukkana. Kirjaa kesto sekunteina toistoihin.",
+    "Lantionnosto": "Idea: pakaran pääliike (hip thrust). Yläselkä penkkiä vasten, työnnä lantio ylös "
+        "pakaraa puristaen täyteen ojennukseen, laske hallitusti. Leuka rintaan, ei selän notkoa.",
+    "Loitonnus (kone, pakara/lonkka)": "Idea: keskipakaran eristävä liike. Työnnä polvia ulospäin vastusta "
+        "vasten istuen, palauta hallitusti. Tukee lonkan hallintaa kyykyissä ja juoksussa.",
+    "Lähennys (kone, sisäreisi)": "Idea: sisäreiden eristävä liike. Purista polvet yhteen vastusta vasten "
+        "hallitusti, palauta jarruttaen. Tasapainottaa reiden kuormitusta.",
+    "Ojentajan punnerrus köysi": "Idea: ojentajan eristävä liike köydellä. Kyynärpäät kyljissä, ojenna "
+        "köysi alas ja levitä päät alhaalla, palauta hallitusti kyynärpäät paikallaan.",
+    "Ojentajapotku (kickback, käsipaino)": "Idea: ojentajan huippusupistus. Etunojassa olkavarsi vaakatasossa, "
+        "ojenna kyynärnivel suoraksi ja purista, palauta hallitusti. Kevyt paino, tarkka suoritus.",
+    "Ojentajapunnerrus taljassa (köysi)": "Idea: ojentajan perusliike taljassa. Kyynärpäät kyljissä "
+        "paikallaan, ojenna köysi alas, levitä päät ala-asennossa, jarruta paluu.",
+    "Olkapääprässi (kone)": "Idea: olkapäiden ohjattu punnerrus — helppo kuormittaa turvallisesti. "
+        "Työnnä kahvat ylös täyteen ojennukseen, laske hallitusti korvien tasolle.",
+    "Pakaralaite / lonkan ojennus (kone)": "Idea: pakaran eristävä ojennus koneessa. Työnnä jalka/lantio "
+        "taakse-ylös pakaraa puristaen, palauta hallitusti.",
+    "Penkkipunnerrus käsipaino": "Idea: rinnan punnerrus vapailla painoilla — pidempi liikerata ja "
+        "tasapainotyö. Laske painot rinnan tasolle, työnnä ylös ja hieman yhteen. Paino = per käsipaino.",
+    "Penkkipunnerrus käsipainoilla": "Idea: rinnan punnerrus vapailla painoilla — pidempi liikerata ja "
+        "tasapainotyö kuin tangolla. Laske rinnan tasolle, työnnä ylös ja hieman yhteen. Paino = per käsipaino.",
+    "Pohjenousu (kone)": "Idea: pohkeen eristävä liike lisäkuormalla. Nouse varpaille täydellä radalla, "
+        "tauko huipulla, laske kantapää alas venytykseen asti.",
+    "Punnerrus": "Idea: rinnan ja ojentajan kehonpainoliike. Vartalo suorana, laske rinta lähelle lattiaa, "
+        "työnnä ylös. Kirjaa lisäpaino jos käytät levyä selässä; muuten paino 0.",
+    "Pystypunnerrus käsipaino": "Idea: olkapäiden punnerrus käsipainoilla — vapaampi rata ja enemmän "
+        "tukilihastyötä kuin tangolla. Työnnä painot hartioilta ylös, laske korvien tasolle. Paino = per käsipaino.",
+    "Pystypunnerrus käsipainoilla": "Idea: olkapäiden punnerrus käsipainoilla — vapaampi rata ja enemmän "
+        "tukilihastyötä kuin tangolla. Työnnä painot hartioilta ylös pään yli. Paino = per käsipaino.",
+    "Pystysoutu": "Idea: olkapään sivuosa ja epäkäslihas vetoliikkeenä. Vedä tanko/kahva leukaa kohti "
+        "kyynärpäät edellä hartiatasoon. Pidä ote reilun hartianlevyisenä olkapäiden säästämiseksi.",
+    "Ranneväännöt (kyynärvarsi)": "Idea: kyynärvarren ja puristusvoiman eristävä liike. Kyynärvarret "
+        "tuettuna, väännä rannetta ylös hallitusti, laske jarruttaen. Kevyt paino, paljon toistoja.",
+    "Ranskalainen punnerrus": "Idea: ojentajan pitkän pään venyttävä liike. Selinmakuulla tai istuen "
+        "laske paino pään taakse kyynärpäät paikallaan, ojenna ylös. Hallittu tempo suojaa kyynärniveliä.",
+    "Ranskalainen punnerrus käsipaino": "Idea: ojentajan pitkä pää käsipainolla. Laske paino pään taakse "
+        "kyynärpäät ylhäällä paikallaan, ojenna ylös. Voi tehdä istuen tai maaten.",
+    "Riipunnasta tempaus": "Idea: tempauksen osaharjoite ilman lattiavetoa — tanko aloittaa reisiltä. "
+        "Räjähtävä lantion ojennus ja nopea alituki. Opettaa vedon loppuosan tekniikkaa.",
+    "Riipunta jalannosto": "Idea: alavatsan haastava kehonpainoliike. Riipu tangosta, nosta jalat "
+        "(tai polvet) hallitusti ylös heilumatta, laske jarruttaen.",
+    "Rinnallevedon veto": "Idea: rinnallevedon voimaosa ilman alitukea — veto ylös räjähtävästi ja "
+        "hallittu lasku. Kehittää vetovoimaa tekniikkaa kuormittamatta.",
+    "Rinnalleveto": "Idea: olympianoston ensimmäinen osa — tanko lattialta rinnalle räjähtävällä "
+        "lantion ojennuksella ja nopealla alituella. Tekniikka ennen kuormaa.",
+    "Rintaprässi (kone)": "Idea: rinnan ohjattu punnerrus — turvallinen tapa kuormittaa raskaasti ilman "
+        "avustajaa. Työnnä kahvat eteen täyteen ojennukseen, palauta hallitusti.",
+    "Selän ojennus (kone/penkki)": "Idea: alaselän ja pakaran ojentava liike. Taivuta vartalo alas "
+        "selkä suorana, ojenna ylös pakaralla ja selän ojentajilla — älä yliojenna.",
+    "Soutu (kone)": "Idea: yläselän ohjattu vetoliike. Rinta tukea vasten, vedä kahvat taakse lapoja "
+        "puristaen, palauta hallitusti venytykseen.",
+    "Spider curl": "Idea: hauiksen lyhyt pää huippusupistuksessa. Rinta vinopenkkiä vasten, olkavarret "
+        "roikkuvat suoraan alas, käännä paino ylös ilman heijausta.",
+    "T-tankosoutu": "Idea: yläselän paksuuden raskas vetoliike. Etunoja tangon yli, vedä kahva rintaa "
+        "kohti lapoja puristaen, laske hallitusti. Pidä selkä suorana koko ajan.",
+    "Takaolkapää (reverse pec deck)": "Idea: takaolkapään eristävä liike koneessa. Vie kahvat kaarella "
+        "taakse hartiatasossa lapoja puristaen, palauta hallitusti. Tärkeä olkapään tasapainolle.",
+    "Taljahauis": "Idea: hauis taljassa tasaisella jännityksellä. Kyynärpäät kyljissä paikallaan, käännä "
+        "kahva ylös, jarruta paluu ala-asentoon asti.",
+    "Taljan crossover (rinta)": "Idea: rinnan eristävä liike ristikkäistaljassa. Tuo kahvat kaarella "
+        "yhteen rinnan edessä, purista, palauta venytykseen hallitusti. Jännitys säilyy koko radalla.",
+    "Taljapunnerrus": "Idea: ojentajan perusliike taljassa. Kyynärpäät kyljissä paikallaan, paina kahva "
+        "alas täyteen ojennukseen, jarruta paluu.",
+    "Taljaristikko": "Idea: rinnan eristävä liike ristikkäistaljassa. Tuo kahvat yhteen kaarella rinnan "
+        "edessä, purista huipulla, palauta hallitusti venytykseen.",
+    "Taljarutistus": "Idea: vatsalihasten kuormitettava rutistus. Polvillaan köysi niskan takana, rutista "
+        "vartalo alas vatsalla pyöristäen — älä vedä käsillä. Lisää painoa kun toistot ylittyvät.",
+    "Taljaveto kasvoille (face pull)": "Idea: takaolkapää ja lavan tukilihakset. Vedä köysi kasvoja kohti "
+        "kyynärpäät ylhäällä, käännä kädet taakse. Kevyt paino, hallittu suoritus — ryhtiliike.",
+    "Taljavipunostot sivulle": "Idea: olkapään sivuosa taljassa — jännitys myös ala-asennossa. Nosta "
+        "kahva sivulle hartiatasoon hallitusti, jarruta paluu.",
+    "Tempauskyykky (overhead squat)": "Idea: tempauksen vastaanottoasennon voima ja liikkuvuus. Tanko "
+        "suorilla käsillä pään yllä leveällä otteella, kyykkää syvään tanko lapaluiden päällä linjassa.",
+    "Tempausveto": "Idea: tempauksen voimaosa ilman alitukea. Vedä tanko räjähtävästi lantion ojennuksella "
+        "ylös leveällä otteella, hallittu lasku. Kehittää vedon voimaa turvallisesti.",
+    "Työntö telineestä": "Idea: työnnön harjoittelu ilman rinnallevetoa — tanko telineestä hartioilta. "
+        "Pieni jalkojen dippi ja räjähtävä työntö pään yli, jalat ottavat vastaan.",
+    "Vasarakääntö": "Idea: hauis + kyynärvarren pitkät lihakset. Käännä painot ylös peukalot ylöspäin "
+        "(vasaraote), kyynärpäät paikallaan. Kasvattaa käsivarren paksuutta.",
+    "Vasarakääntö käsipaino": "Idea: hauis + kyynärvarsi vasaraotteella (peukalot ylös). Käännä painot "
+        "ylös kyynärpäät kyljissä, laske hallitusti. Paino = per käsipaino.",
+    "Vatsarutistus": "Idea: vatsalihasten perusliike. Selinmakuulla rutista lapaluut irti lattiasta "
+        "vatsalla — älä vedä niskasta. Hidas ja hallittu tehoaa kevyelläkin.",
+    "Vatsarutistus (kone)": "Idea: vatsalihasten kuormitettava rutistus koneessa. Rutista vartalo eteen "
+        "vatsalla pyöristäen, palauta hallitusti. Lisää painoa maltillisesti.",
+    "Vinopenkki käsipaino": "Idea: ylärinnan punnerrus käsipainoilla — pitkä liikerata. Penkki ~30–45°, "
+        "laske painot ylärinnan tasolle, työnnä ylös ja hieman yhteen. Paino = per käsipaino.",
+    "Vinopenkki käsipainoilla": "Idea: ylärinnan punnerrus käsipainoilla — pitkä liikerata ja tasapainotyö. "
+        "Penkki ~30–45°, laske ylärinnan tasolle, työnnä ylös. Paino = per käsipaino.",
+    "Vinopenkki tanko": "Idea: ylärinnan ja etuolkapään punnerrus. Penkki ~30–45°, tanko solisluiden "
+        "tasolle hallitusti, työnnä ylös. Täydentää tasapenkkiä ylärinnan osalta.",
+    "Vipunostot rinnalle (pec deck)": "Idea: rinnan eristävä liike koneessa. Tuo kahvat kaarella yhteen "
+        "rinnan edessä, purista huipulla, palauta hallitusti venytykseen.",
+    "Vipunostot taakse": "Idea: takaolkapään eristävä liike. Etunojassa nosta painot kaarella sivuille-taakse "
+        "lapoja puristaen, laske hallitusti. Kevyt paino, tarkka suoritus.",
+    "Yhden käden ojentajapunnerrus käsipaino": "Idea: ojentajan yksipuolinen liike — paljastaa puolierot. "
+        "Ojenna käsipaino pään yltä suoraksi kyynärpää paikallaan, laske pään taakse hallitusti.",
+    "Ylätalja kapea/myötäote": "Idea: selän leveys + hauis mukana vahvasti. Kapea myötäote, vedä kahva "
+        "rintaan kyynärpäät edessä alas, palauta täyteen venytykseen.",
+    "Zottman-kääntö": "Idea: hauis + kyynärvarret yhdessä liikkeessä. Käännä ylös hauiskäännöllä "
+        "(kämmenet ylös), käännä ranteet huipulla ja laske vasaraotteella hitaasti — lasku kuormittaa kyynärvarsia.",
 }
 
 

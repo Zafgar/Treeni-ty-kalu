@@ -557,3 +557,36 @@ def test_estimate_total():
     t = engine.estimate_total(lifts)
     assert t.total_low < t.total_mid < t.total_high
     assert "kyykky" in t.per_lift
+
+
+def test_muscle_map_tricky_names():
+    """Regressio: nimet joissa yleinen avainsana osuisi väärään sääntöön."""
+    from app import engine
+    # Ojentajaliikkeet eivät saa mennä rinta-sääntöön "punnerrus"-sanasta
+    for name in ("Ranskalainen punnerrus", "Ojentajan punnerrus köysi",
+                 "Taljapunnerrus", "Yhden käden ojentajapunnerrus käsipaino"):
+        m = engine.exercise_muscle_map(name)
+        assert m.get("ojentajat") == 1 and "rinta" not in m, name
+    # Reverse pec deck on takaolkapää, ei rinta
+    m = engine.exercise_muscle_map("Takaolkapää (reverse pec deck)")
+    assert m.get("olkapäät", 0) >= 0.8 and "rinta" not in m
+    # Heilautus on takaketjuliike, ei etureisiliike
+    m = engine.exercise_muscle_map("Kahvakuulaheilautus", "jalat")
+    assert m.get("pakarat") == 1 and m.get("takareidet", 0) >= 0.5
+    # Vatsa-kategoria ilman nimiosumaa -> keskivartalo
+    assert engine.exercise_muscle_map("Riipunta jalannosto", "vatsa") == {"keskivartalo": 1}
+    # Penkki ja pystypunnerrus pysyvät oikein
+    assert engine.exercise_muscle_map("Penkkipunnerrus")["rinta"] == 1
+    assert engine.exercise_muscle_map("Pystypunnerrus")["olkapäät"] == 1
+
+
+def test_experience_rate_calibration():
+    from app import engine
+    # Aloittelija nostaa tahtia kun dataa vähän, kokenut laskee
+    assert engine.experience_rate_calibration("aloittelija", 0.0) > 1.2
+    assert engine.experience_rate_calibration("kokenut", 0.0) < 0.8
+    # Vaikutus häipyy kun luottamus (oma data) kasvaa
+    assert abs(engine.experience_rate_calibration("aloittelija", 1.0) - 1.0) < 1e-9
+    assert abs(engine.experience_rate_calibration("kokenut", 1.0) - 1.0) < 1e-9
+    # Tuntematon/ei vastausta -> neutraali
+    assert engine.experience_rate_calibration(None, 0.2) == 1.0
