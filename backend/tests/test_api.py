@@ -309,3 +309,32 @@ def test_physique_in_body_summary(client):
     summary = client.get(f"/api/body/summary?profile_id={pid}").json()
     assert summary["composition"]["ffmi"] is not None
     assert summary["physique"]["level"] is not None
+
+
+def test_muscle_load(client):
+    from datetime import date, timedelta
+    today = date.today()
+    bench = client.post("/api/exercises", json={"name": "Penkkipunnerrus", "category": "rinta"}).json()
+    squat = client.post("/api/exercises", json={"name": "Takakyykky", "category": "jalat"}).json()
+    curl = client.post("/api/exercises", json={"name": "Hauiskääntö tanko", "category": "kädet"}).json()
+    # Kaksi treeniä tällä 7 pv jaksolla -> datavaroitus poistuu
+    for days_ago, ex, w in ((5, bench, 100), (2, squat, 140)):
+        client.post("/api/workouts", json={"profile_id": 1,
+            "session_date": (today - timedelta(days=days_ago)).isoformat(),
+            "exercises": [{"exercise_id": ex["id"],
+                "sets": [{"set_index": i, "reps": 5, "weight": w, "completed": True} for i in range(4)]}]})
+    data = client.get("/api/stats/muscle-load?profile_id=1").json()
+    areas = {a["area"]: a for a in data["areas"]}
+    # Penkki jakaa kuorman rinnalle JA ojentajille/olkapäille
+    assert areas["rinta"]["effective_sets"] == 4.0
+    assert areas["ojentajat"]["effective_sets"] == 2.0
+    assert areas["olkapäät"]["effective_sets"] > 0
+    # Kyykky kuormittaa etureisiä täysillä ja pakaroita osittain
+    assert areas["etureidet"]["effective_sets"] == 4.0
+    assert areas["pakarat"]["effective_sets"] > 2
+    # Hauista ei treenattu -> vajaa/ei kuormaa ja ehdotus löytyy
+    assert areas["hauis"]["status"] in ("low", "none")
+    assert data["workouts_week"] == 2
+    assert data["cns"] is not None and "score" in data["cns"]
+    sug_areas = {s["area"] for s in data["suggestions"]}
+    assert sug_areas, "vajaille alueille pitää tulla ehdotuksia"

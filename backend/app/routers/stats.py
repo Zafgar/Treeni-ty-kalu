@@ -1111,3 +1111,258 @@ def overview(profile_id: int | None = Query(None), db: Session = Depends(get_db)
         "recent_workouts": recent,
         "flagged_feelings": flagged,
     }
+
+
+# ---------- Älykäs lihaskuormitus: teholliset sarjat per alue + hermosto ----------
+
+def _cns_set_points(rel: float, contrib_sum: float) -> float:
+    """Hermostokuorma yhdestä sarjasta: intensiteetti suhteessa 1RM:ään ×
+    liikkeen koko (moninivelinen raskas veto/kyykky rasittaa enemmän kuin
+    penkki, eristävät eivät juuri lainkaan)."""
+    if rel >= 0.925:
+        base = 2.0
+    elif rel >= 0.85:
+        base = 1.2
+    elif rel >= 0.775:
+        base = 0.5
+    else:
+        return 0.0
+    # Liikkeen "koko": kontribuutioiden summa ~1 (eristävä) ... ~4+ (maastaveto)
+    size = max(0.7, min(1.6, contrib_sum / 2.5))
+    return base * size
+
+
+@router.get("/muscle-load")
+def muscle_load(profile_id: int = Query(...), db: Session = Depends(get_db)):
+    """Lihaskuormitus alueittain (7 pv vs. edelliset 7 pv).
+
+    Jokainen liike jakaa kuormansa usealle alueelle osuuskertoimin (penkki ->
+    rinta + ojentajat + etuolkapäät; kapea penkki -> pääosin ojentajat;
+    taljavedot -> myös hauis + kyynärvarret; kyykyt -> pakarat/pohkeet mukana).
+    Lisäksi lasketaan hermostollinen kuorma (raskaat lähimaksimisarjat isoissa
+    moninivelliikkeissä) ja peilataan se palautumismittareihin ja tuntumaan.
+    Ehdotukset vajaille alueille poimitaan ensisijaisesti omasta aktiivisesta
+    ohjelmasta.
+    """
+    today = date.today()
+    this_start = today - timedelta(days=6)
+    prev_start = today - timedelta(days=13)
+
+    sessions = (db.query(models.WorkoutSession)
+                .filter(models.WorkoutSession.profile_id == profile_id,
+                        models.WorkoutSession.status == "completed")
+                .all())
+    if not sessions:
+        return {"message": "Kirjaa treenejä, niin näet lihaskohtaisen kuormituksen.",
+                "areas": [], "cns": None, "suggestions": []}
+
+    # Per-alue teholliset sarjat & tonnage tälle ja edelliselle 7 pv jaksolle,
+    # sekä viimeisin treenipäivä per alue (merkittävä kuorma, kerroin >= 0.5).
+    eff_week = {a: 0.0 for a in engine.MUSCLE_AREAS}
+    eff_prev = {a: 0.0 for a in engine.MUSCLE_AREAS}
+    ton_week = {a: 0.0 for a in engine.MUSCLE_AREAS}
+    last_by_area: dict[str, date] = {}
+    workouts_week = 0
+    workouts_prev = 0
+
+    # Hermostokuorma: tarvitaan tuore 1RM-arvio raskaille moniniveliikkeille.
+    one_rm_cache: dict[int, float | None] = {}
+
+    def _current_1rm(ex_id: int) -> float | None:
+        if ex_id not in one_rm_cache:
+            rec = _records_for_exercise(
+                _exercise_session_points(db, ex_id, profile_id), DEFAULT_WINDOW_DAYS)
+            one_rm_cache[ex_id] = rec["current_1rm"] if rec else None
+        return one_rm_cache[ex_id]
+
+    cns_week = 0.0
+    cns_prev = 0.0
+    heavy_sets = 0
+    very_heavy_sets = 0
+
+    for s in sessions:
+        in_week = s.session_date >= this_start
+        in_prev = prev_start <= s.session_date < this_start
+        if in_week:
+            workouts_week += 1
+        elif in_prev:
+            workouts_prev += 1
+        for we in s.exercises:
+            ex = we.exercise
+            if not ex:
+                continue
+            mapping = engine.exercise_muscle_map(ex.name, ex.category, ex.muscle_group)
+            if not mapping:
+                continue
+            done = [st for st in we.sets if st.completed and st.reps > 0]
+            if not done:
+                continue
+            n_sets = len(done)
+            tonnage = sum(st.weight * st.reps for st in done)
+            # Viimeksi treenattu (merkittävä osuus)
+            for area, f in mapping.items():
+                if f >= 0.5 and (area not in last_by_area or s.session_date > last_by_area[area]):
+                    last_by_area[area] = s.session_date
+            if not (in_week or in_prev):
+                continue
+            for area, f in mapping.items():
+                if in_week:
+                    eff_week[area] += n_sets * f
+                    ton_week[area] += tonnage * f
+                else:
+                    eff_prev[area] += n_sets * f
+            # Hermostokuorma vain isoista moninivelliikkeistä (kontribuutio-
+            # summa >= 2), suhteessa tämänhetkiseen 1RM:ään.
+            contrib_sum = sum(mapping.values())
+            if contrib_sum >= 2.0 and any(st.weight > 0 for st in done):
+                one_rm = _current_1rm(ex.id)
+                if one_rm and one_rm > 0:
+                    for st in done:
+                        rel = st.weight / one_rm
+                        pts = _cns_set_points(rel, contrib_sum)
+                        if pts <= 0:
+                            continue
+                        if in_week:
+                            cns_week += pts
+                            if rel >= 0.925:
+                                very_heavy_sets += 1
+                            elif rel >= 0.85:
+                                heavy_sets += 1
+                        else:
+                            cns_prev += pts
+
+    # ---- Aluekohtaiset statukset (datavaroitus jos viikko vajaa) ----
+    enough_data = workouts_week >= 2
+    areas = []
+    for a in engine.MUSCLE_AREAS:
+        lo, hi = engine.MUSCLE_WEEKLY_TARGETS[a]
+        sw = round(eff_week[a], 1)
+        sp = round(eff_prev[a], 1)
+        last = last_by_area.get(a)
+        days_since = (today - last).days if last else None
+        if sw >= hi * 1.15:
+            status, note = "high", f"Reilusti yli suositushaarukan ({lo}–{hi} sarjaa/vk) — varmista palautuminen."
+        elif sw >= lo:
+            status, note = "ok", "Hyvällä alueella."
+        elif sw > 0:
+            if enough_data:
+                status, note = "low", f"Alle suositushaarukan ({lo}–{hi} tehollista sarjaa/vk)."
+            else:
+                status, note = "info", "Viikko vielä kesken — liian aikaista arvioida."
+        else:
+            status = "none" if enough_data else "info"
+            note = ("Ei kuormaa tällä viikolla." if enough_data
+                    else "Viikko vielä kesken — liian aikaista arvioida.")
+        areas.append({
+            "area": a, "effective_sets": sw, "prev_sets": sp,
+            "tonnage": round(ton_week[a]), "target_min": lo, "target_max": hi,
+            "status": status, "days_since": days_since, "note": note,
+        })
+    order = {"low": 0, "none": 1, "high": 2, "ok": 3, "info": 4}
+    areas_sorted = sorted(areas, key=lambda x: (order.get(x["status"], 9), -x["effective_sets"]))
+
+    # ---- Hermosto: pisteet + peilaus palautumiseen ja tuntumaan ----
+    cns_score = round(cns_week, 1)
+    if cns_score >= 18:
+        cns_verdict, cns_label = "very_high", "erittäin korkea"
+    elif cns_score >= 11:
+        cns_verdict, cns_label = "high", "korkea"
+    elif cns_score >= 4:
+        cns_verdict, cns_label = "moderate", "kohtalainen"
+    else:
+        cns_verdict, cns_label = "low", "kevyt"
+
+    # Palautumis-cross-check: readiness + viime treenien tuntuma
+    rd_score = None
+    try:
+        from .recovery import readiness as _rd
+        rd = _rd(profile_id, db)
+        if rd.get("has_data"):
+            rd_score = rd.get("score")
+    except Exception:  # noqa: BLE001
+        pass
+    recent_feels = [s.feeling for s in sorted(sessions, key=lambda x: x.session_date, reverse=True)[:5]
+                    if s.feeling]
+    neg_feels = sum(1 for f in recent_feels if f == "negative")
+
+    cns_note = (f"Raskaita lähimaksimisarjoja ({heavy_sets + very_heavy_sets} kpl, joista "
+                f"{very_heavy_sets} yli ~92 % maksimista) isoissa moninivelliikkeissä. ")
+    if cns_verdict in ("high", "very_high"):
+        if (rd_score is not None and rd_score < 60) or neg_feels >= 2:
+            cns_verdict = "overreach"
+            cns_note += ("Palautumismittarit/tuntuma vahvistavat rasituksen: hermosto ei ehdi palautua. "
+                         "Pidä 1–2 kevyempää päivää tai pudota pääliikkeiden painoja ~10 % hetkeksi.")
+        elif rd_score is not None and rd_score >= 75:
+            cns_note += ("Hermostokuorma on korkea mutta palautumismittarit kunnossa — kestät tämän nyt. "
+                         "Älä kuitenkaan pinoa montaa maksimipäivää peräkkäin.")
+        else:
+            cns_note += ("Useampi raskas pääliikepäivä viikossa verottaa hermostoa, vaikka eri "
+                         "lihakset olisivat vuorossa. Jätä maksimiyritysten väliin 2–3 päivää.")
+    elif cns_verdict == "moderate":
+        cns_note += "Sopiva määrä raskasta työtä — voimakehitykselle hyvä taso."
+    else:
+        cns_note += ("Vähän lähimaksimityötä: hyvä palautusviikoksi, mutta voima kehittyy varmimmin "
+                     "kun isoissa liikkeissä käydään säännöllisesti 85 %:n tuntumassa.")
+
+    cns = {
+        "score": cns_score, "prev_score": round(cns_prev, 1),
+        "heavy_sets": heavy_sets, "very_heavy_sets": very_heavy_sets,
+        "verdict": cns_verdict, "label": cns_label, "readiness_score": rd_score,
+        "note": cns_note,
+    }
+
+    # ---- Ehdotukset vajaille alueille: ensin omasta aktiivisesta ohjelmasta ----
+    suggestions = []
+    # Suurin vaje ensin: suhde tavoitteen alarajaan (0 = ei kuormaa lainkaan)
+    lacking_rows = sorted((a for a in areas_sorted if a["status"] in ("low", "none")),
+                          key=lambda a: a["effective_sets"] / max(1, a["target_min"]))
+    lacking = [a["area"] for a in lacking_rows][:3]
+    if lacking:
+        prog = (db.query(models.Program)
+                .filter(models.Program.profile_id == profile_id,
+                        models.Program.is_active.is_(True)).first())
+        prog_exercises = []
+        if prog:
+            seen_ids = set()
+            for d in prog.days:
+                for pe in d.exercises:
+                    if pe.exercise and pe.exercise.id not in seen_ids:
+                        seen_ids.add(pe.exercise.id)
+                        prog_exercises.append(pe.exercise)
+        library = None
+        for area in lacking:
+            pick = None
+            in_program = False
+            best_f = 0.0
+            for ex in prog_exercises:
+                f = engine.exercise_muscle_map(ex.name, ex.category, ex.muscle_group).get(area, 0.0)
+                if f >= 0.6 and f > best_f:
+                    pick, best_f, in_program = ex, f, True
+            if not pick:
+                if library is None:
+                    library = db.query(models.Exercise).all()
+                for ex in library:
+                    f = engine.exercise_muscle_map(ex.name, ex.category, ex.muscle_group).get(area, 0.0)
+                    if f >= 0.8 and f > best_f:
+                        pick, best_f = ex, f
+            if pick:
+                suggestions.append({
+                    "area": area, "exercise_id": pick.id, "exercise_name": pick.name,
+                    "in_program": in_program,
+                    "note": (f"{pick.name} on jo ohjelmassasi — lisää siihen 1–2 sarjaa tai tee se useammin."
+                             if in_program else
+                             f"Lisää esim. {pick.name} (ei vielä ohjelmassasi) paikkaamaan aluetta."),
+                })
+
+    data_note = None
+    if not enough_data:
+        data_note = (f"Tällä 7 pv jaksolla vasta {workouts_week} treeni(ä) — vaje-arviot näytetään "
+                     "vasta kun viikossa on vähintään 2 treeniä, ettei kesken viikon hälytetä turhaan.")
+
+    return {
+        "window": {"this_start": this_start.isoformat(), "prev_start": prev_start.isoformat(),
+                   "ref_date": today.isoformat()},
+        "workouts_week": workouts_week, "workouts_prev": workouts_prev,
+        "areas": areas_sorted, "cns": cns, "suggestions": suggestions,
+        "data_note": data_note,
+    }

@@ -1195,8 +1195,7 @@ async function loadProgress() {
   await loadTargetWeights();
   renderBackfill();
   await loadForecastAccuracy();
-  await loadVolume();
-  await loadCoverage();
+  await loadMuscleLoad();
   await loadLevels();
   await loadComeback();
   await loadSports();
@@ -1204,24 +1203,65 @@ async function loadProgress() {
   await loadRecordsTable();
 }
 
-async function loadCoverage() {
-  const div = document.getElementById("coverage-content");
-  const data = await api.get(pq("/api/stats/coverage"));
+async function loadMuscleLoad() {
+  const div = document.getElementById("muscle-load-content");
+  const data = await api.get(pq("/api/stats/muscle-load"));
   div.innerHTML = "";
-  const tone = { ok: "var(--accent-2)", low: "#f59e0b", none: "#ef4444" };
-  data.groups.forEach((g) => {
-    const info = g.days_since != null ? `${g.sets_window} sarjaa · viimeksi ${g.days_since} pv sitten` : "ei koskaan treenattu";
-    div.append(el("div", { class: "item" },
-      el("div", { class: "row-between" },
-        el("strong", { style: "text-transform:capitalize" }, g.group),
-        el("span", { class: "tag", style: `color:${tone[g.status]};border-color:${tone[g.status]}` }, g.label)),
-      el("div", { class: "muted" }, info)));
+  if (!data.areas || !data.areas.length) {
+    div.append(el("p", { class: "muted" }, data.message || "Ei dataa.")); return;
+  }
+  const tone = { low: "#f59e0b", none: "#ef4444", high: "#e66767", ok: "var(--accent-2)", info: "var(--muted)" };
+  const statusLabel = { low: "vajaa", none: "ei kuormaa", high: "paljon", ok: "hyvä", info: "kesken" };
+  div.append(el("div", { class: "muted", style: "margin-bottom:8px" },
+    `${data.workouts_week} treeniä tällä 7 pv jaksolla (edellinen: ${data.workouts_prev}). ` +
+    "Teholliset sarjat sisältävät myös epäsuoran kuorman (esim. penkki kerryttää ojentajia). " +
+    "Värillinen palkki = tehty, vihreä vyöhyke = suositushaarukka."));
+  if (data.data_note) {
+    div.append(el("div", { class: "muted", style: "margin-bottom:8px;font-style:italic" }, `ℹ ${data.data_note}`));
+  }
+  // Aluerivit: nimi + palkki (tavoitehaarukka varjostettuna) + sarjat + tila
+  data.areas.forEach((a) => {
+    const scaleMax = a.target_max * 1.3;
+    const pct = Math.min(100, a.effective_sets / scaleMax * 100);
+    const zoneLeft = a.target_min / scaleMax * 100;
+    const zoneWidth = (a.target_max - a.target_min) / scaleMax * 100;
+    const trend = a.prev_sets > 0 ? (a.effective_sets >= a.prev_sets * 1.15 ? " ↑" : (a.effective_sets <= a.prev_sets * 0.85 ? " ↓" : "")) : "";
+    const last = a.days_since != null ? `pääkuormaa viimeksi ${a.days_since} pv sitten`
+      : (a.tonnage > 0 ? "vain epäsuoraa kuormaa" : "ei kuormaa");
+    div.append(el("div", { style: "margin-bottom:7px" },
+      el("div", { class: "row-between", style: "font-size:0.9em" },
+        el("span", {}, el("strong", { style: "text-transform:capitalize" }, a.area),
+          el("span", { class: "muted" }, ` ${a.effective_sets}${trend} / ${a.target_min}–${a.target_max} sarjaa`)),
+        el("span", { class: "tag", style: `color:${tone[a.status]};border-color:${tone[a.status]}` }, statusLabel[a.status] || a.status)),
+      el("div", { style: "position:relative;height:8px;background:var(--bg);border-radius:4px;overflow:hidden;margin-top:2px" },
+        el("div", { style: `position:absolute;left:${zoneLeft}%;width:${zoneWidth}%;height:100%;background:color-mix(in srgb, var(--accent-2) 22%, transparent)` }),
+        el("div", { style: `position:absolute;left:0;width:${pct}%;height:100%;background:${tone[a.status]};border-radius:4px;opacity:0.85` })),
+      el("div", { class: "muted", style: "font-size:0.78em" }, `${last} · ~${a.tonnage} kg alueelle tällä viikolla`)));
   });
-  if (data.missing.length) {
-    div.append(el("div", { style: "color:#f59e0b;margin-top:8px" },
-      `⚠ Jäänyt väliin: ${data.missing.join(", ")}. Lisää nämä ohjelmaan tasapainon vuoksi.`));
-  } else {
-    div.append(el("div", { class: "muted", style: "margin-top:8px" }, "Koko keho tulee treenattua — hyvä tasapaino."));
+  // Hermostokuorma
+  if (data.cns) {
+    const c = data.cns;
+    const cnsTone = { low: "var(--muted)", moderate: "var(--accent-2)", high: "#f59e0b",
+      very_high: "#ef4444", overreach: "#ef4444" }[c.verdict] || "var(--muted)";
+    div.append(el("div", { class: "result-box", style: "margin-top:10px" },
+      el("div", { class: "row-between" },
+        el("strong", {}, "⚡ Hermostollinen kuorma"),
+        el("span", { class: "tag", style: `color:${cnsTone};border-color:${cnsTone}` },
+          `${c.score} p · ${c.verdict === "overreach" ? "ylikuorma" : c.label}`)),
+      el("div", { class: "muted", style: "margin-top:4px" }, c.note),
+      el("div", { class: "muted", style: "font-size:0.8em;margin-top:3px" },
+        `Edellinen viikko: ${c.prev_score} p` +
+        (c.readiness_score != null ? ` · palautumispisteet ${c.readiness_score}/100` : ""))));
+  }
+  // Ehdotukset vajaimmille alueille
+  if (data.suggestions && data.suggestions.length) {
+    const box = el("div", { style: "margin-top:10px" }, el("strong", {}, "Ehdotukset vajaille alueille:"));
+    data.suggestions.forEach((s) => {
+      box.append(el("div", { class: "muted", style: "margin-top:4px" },
+        el("span", { class: "tag", style: "margin-right:6px;text-transform:capitalize" }, s.area),
+        s.note + (s.in_program ? "" : "")));
+    });
+    div.append(box);
   }
 }
 
@@ -1270,37 +1310,6 @@ async function loadForecastAccuracy() {
     el("td", { class: "tag " + (c.within_band ? "status-done" : "status-skip") },
       `${c.error >= 0 ? "+" : ""}${c.error}`))));
   div.append(tbl);
-}
-
-async function loadVolume() {
-  const div = document.getElementById("volume-content");
-  div.innerHTML = "";
-  const data = await api.get(pq("/api/stats/volume-analysis"));
-  if (!data.categories || !data.categories.length) {
-    div.append(el("p", { class: "muted" }, data.message || "Ei dataa.")); return;
-  }
-  const statusTag = { low: ["Kasvata", "status-planned"], high: ["Kevennä", "status-skip"],
-    ok: ["OK", "status-done"], none: ["—", "status-skip"] };
-  const tbl = el("table", {});
-  tbl.append(el("tr", {}, el("th", {}, "Lihasryhmä"), el("th", {}, "Sarjat (vk)"),
-    el("th", {}, "Edell. vk"), el("th", {}, "Tila"), el("th", {}, "Ehdotus")));
-  data.categories.forEach((c) => {
-    const si = statusTag[c.status] || ["", ""];
-    tbl.append(el("tr", {},
-      el("td", { style: "text-transform:capitalize" }, c.category),
-      el("td", {}, String(c.sets_week)), el("td", { class: "muted" }, String(c.sets_prev)),
-      el("td", {}, el("span", { class: "tag " + si[1] }, si[0])),
-      el("td", { class: "muted" }, data.acknowledged && c.status !== "ok" ? "(kuitattu)" : c.suggestion)));
-  });
-  div.append(el("div", { class: "muted", style: "margin-bottom:6px" }, `Yhteensä ${data.total_sets_week} työsarjaa tällä viikolla.`));
-  div.append(tbl);
-  if (data.acknowledged) {
-    div.append(el("div", { class: "muted", style: "margin-top:8px" }, "✓ Kuittasit tämän viikon — ei muutostarvetta."));
-  } else {
-    div.append(el("button", { class: "small success", style: "margin-top:10px", onclick: async () => {
-      await api.post(pq(`/api/stats/volume-ack?week_key=${data.week_key}`)); loadVolume();
-    } }, "Kuittaa: tilanne OK, ei muutoksia"));
-  }
 }
 
 async function loadLevels() {

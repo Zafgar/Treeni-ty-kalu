@@ -1558,3 +1558,88 @@ def estimate_total(
         total_high=round(high, 1),
         per_lift=per_lift,
     )
+
+
+# ---------- Lihasaluekartta: mihin kukin liike osuu ja kuinka paljon ----------
+# Jokainen liike kuormittaa useaa aluetta osuuskertoimella (1.0 = pääkohde,
+# 0.5 = merkittävä sivukuorma, 0.2-0.3 = kevyt sivukuorma). Näin esim. penkki
+# kerryttää myös ojentajien ja etuolkapään viikkovolyymiä, taljavedot hauista
+# ja kyynärvarsia, kyykyt pakaroita ja pohkeita.
+MUSCLE_AREAS = [
+    "rinta", "yläselkä", "alaselkä", "olkapäät", "hauis", "ojentajat",
+    "kyynärvarret", "etureidet", "takareidet", "pakarat", "pohkeet", "keskivartalo",
+]
+
+# Säännöt käydään järjestyksessä; ensimmäinen osuma voittaa (tarkin ensin).
+_MUSCLE_RULES = [
+    (("pystypunnerrus", "olkapääprässi"), {"olkapäät": 1, "ojentajat": 0.5, "keskivartalo": 0.2}),
+    (("kapea penkki",), {"ojentajat": 1, "rinta": 0.6, "olkapäät": 0.4}),
+    (("vinopenkki",), {"rinta": 1, "olkapäät": 0.5, "ojentajat": 0.45}),
+    (("penkkipunnerrus", "rintaprässi"), {"rinta": 1, "ojentajat": 0.5, "olkapäät": 0.35}),
+    (("dippi",), {"rinta": 0.8, "ojentajat": 1, "olkapäät": 0.3}),
+    (("flyes", "vipunostot rinnalle", "pec deck", "taljaristikko", "crossover"), {"rinta": 1, "olkapäät": 0.2}),
+    (("punnerrus",), {"rinta": 1, "ojentajat": 0.5, "olkapäät": 0.3, "keskivartalo": 0.3}),
+    (("romanialainen", "takareisikoukistus", "jalkojen koukistus"), {"takareidet": 1, "pakarat": 0.6, "alaselkä": 0.4}),
+    (("maastaveto",), {"pakarat": 1, "takareidet": 0.8, "alaselkä": 1, "yläselkä": 0.6, "kyynärvarret": 0.6, "etureidet": 0.4, "keskivartalo": 0.4}),
+    (("tempaus", "rinnalleveto", "työntö telineestä"), {"etureidet": 0.8, "takareidet": 0.5, "pakarat": 0.8, "alaselkä": 0.8, "yläselkä": 0.6, "olkapäät": 0.6, "kyynärvarret": 0.4, "keskivartalo": 0.5, "pohkeet": 0.3}),
+    (("askelkyykky", "bulgarian", "goblet", "käsipainokyykky"), {"etureidet": 1, "pakarat": 0.8, "takareidet": 0.3, "pohkeet": 0.2, "keskivartalo": 0.3}),
+    (("kyykky", "jalkaprässi", "hack"), {"etureidet": 1, "pakarat": 0.7, "takareidet": 0.25, "alaselkä": 0.25, "pohkeet": 0.1}),
+    (("reisiojennus", "jalkojen ojennus"), {"etureidet": 1}),
+    (("lantionnosto", "pakaralaite", "lonkan ojennus"), {"pakarat": 1, "takareidet": 0.4}),
+    (("lähennys",), {"etureidet": 0.4, "pakarat": 0.2}),
+    (("loitonnus",), {"pakarat": 0.8}),
+    (("pohje", "pohkeet", "pohjenousu"), {"pohkeet": 1}),
+    (("selän ojennus",), {"alaselkä": 1, "pakarat": 0.5, "takareidet": 0.4}),
+    (("leuanveto", "ylätalja"), {"yläselkä": 1, "hauis": 0.5, "kyynärvarret": 0.4, "olkapäät": 0.15}),
+    (("pystysoutu",), {"olkapäät": 0.9, "yläselkä": 0.4, "hauis": 0.2, "kyynärvarret": 0.3}),
+    (("soutu", "alatalja", "t-tanko"), {"yläselkä": 1, "hauis": 0.4, "kyynärvarret": 0.35, "alaselkä": 0.25, "olkapäät": 0.25}),
+    (("face pull", "kasvoille", "takaolkapää", "vipunostot taakse", "reverse"), {"olkapäät": 0.8, "yläselkä": 0.5}),
+    (("sivunosto", "vipunostot sivulle", "taljavipunostot", "etunosto"), {"olkapäät": 1}),
+    (("vasarakääntö", "zottman"), {"hauis": 1, "kyynärvarret": 0.6}),
+    (("hauiskääntö", "curl", "scott", "spider", "keskitetty"), {"hauis": 1, "kyynärvarret": 0.4}),
+    (("ranskalainen", "skull", "kickback", "ojentaja", "taljapunnerrus"), {"ojentajat": 1}),
+    (("ranneväännöt", "kyynärvarsi"), {"kyynärvarret": 1}),
+    (("vatsarutistus", "vatsa", "lankku", "plank"), {"keskivartalo": 1}),
+]
+
+_MUSCLE_FALLBACK = {
+    "rinta": {"rinta": 1, "ojentajat": 0.4, "olkapäät": 0.3},
+    "selkä": {"yläselkä": 1, "hauis": 0.4, "kyynärvarret": 0.3},
+    "jalat": {"etureidet": 0.8, "pakarat": 0.6, "takareidet": 0.4},
+    "olkapäät": {"olkapäät": 1, "ojentajat": 0.2},
+    "olkapää": {"olkapäät": 1, "ojentajat": 0.2},
+    "hauis": {"hauis": 1, "kyynärvarret": 0.3},
+    "ojentaja": {"ojentajat": 1},
+    "kädet": {"hauis": 0.6, "ojentajat": 0.6, "kyynärvarret": 0.3},
+    "pohkeet": {"pohkeet": 1},
+    "keskivartalo": {"keskivartalo": 1},
+    "olympia": {"etureidet": 0.8, "pakarat": 0.8, "alaselkä": 0.8, "yläselkä": 0.5,
+                "olkapäät": 0.5, "takareidet": 0.5, "keskivartalo": 0.4},
+}
+
+
+def exercise_muscle_map(name: str | None, category: str | None = None,
+                        muscle_group: str | None = None) -> dict:
+    """Palauta liikkeen kuormitusjakauma lihasalueille {alue: kerroin}."""
+    n = (name or "").lower()
+    for keys, mapping in _MUSCLE_RULES:
+        if any(k in n for k in keys):
+            return dict(mapping)
+    cat = (category or "").lower()
+    if cat in _MUSCLE_FALLBACK:
+        return dict(_MUSCLE_FALLBACK[cat])
+    mg = (muscle_group or "").lower()
+    for key, mapping in _MUSCLE_FALLBACK.items():
+        if key in mg:
+            return dict(mapping)
+    return {}
+
+
+# Viikkotavoite tehollisia sarjoja per alue (sisältää epäsuoran kuorman).
+# Alle min = kehitys jää vajaaksi; yli max = palautuminen voi ylittyä.
+MUSCLE_WEEKLY_TARGETS = {
+    "rinta": (10, 20), "yläselkä": (10, 22), "alaselkä": (4, 12),
+    "olkapäät": (8, 20), "hauis": (8, 18), "ojentajat": (8, 18),
+    "kyynärvarret": (4, 15), "etureidet": (8, 18), "takareidet": (6, 16),
+    "pakarat": (6, 18), "pohkeet": (6, 16), "keskivartalo": (4, 16),
+}
