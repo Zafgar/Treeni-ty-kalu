@@ -180,8 +180,13 @@
         <div class="grid">
           <label>Päivä<input id="b-date" type="date" /></label>
           <label>Paino (kg)<input id="b-weight" type="number" step="0.1" /></label>
-          <label>Rasva-%<input id="b-bf" type="number" step="0.1" /></label>
-          <label>Uni (h)<input id="b-sleep" type="number" step="0.1" /></label>
+          <label title="Jätä tyhjäksi jos olet kirjannut laitemittauksen (InBody tms.) — arvio täytetään automaattisesti siitä johdettuna.">Rasva-% <span class="muted" style="font-weight:normal">(auto jos laitemittaus)</span><input id="b-bf" type="number" step="0.1" placeholder="auto" /></label>
+          <label title="Tunnit ja minuutit erikseen, esim. 7 h 23 min">Uni (h + min)
+            <span style="display:flex;gap:6px">
+              <input id="b-sleep" type="number" min="0" max="23" placeholder="h" style="flex:1;min-width:0" />
+              <input id="b-sleep-min" type="number" min="0" max="59" step="1" placeholder="min" style="flex:1;min-width:0" />
+            </span>
+          </label>
           <label title="Unen laatupisteet esim. älykellosta (0–100). Vapaaehtoinen.">Unipisteet<input id="b-sscore" type="number" /></label>
           <label title="HRV = sykevälivaihtelu (Heart Rate Variability), ms. Korkeampi = parempi palautuminen. Älykellosta.">HRV<input id="b-hrv" type="number" /></label>
           <label title="Leposyke = syke levossa (bpm). Matalampi kertoo usein paremmasta kunnosta/palautumisesta.">Leposyke<input id="b-rhr" type="number" /></label>
@@ -192,6 +197,32 @@
         <p class="muted" style="margin:6px 0 0">Kalorit = koko päivän <strong>syödyt</strong> kalorit (ei treenin
           poltto — sen voit kirjata treenin tietoihin). Tämä auttaa arvioimaan tarpeesi tarkemmin.</p>
         <button id="b-save" class="success">Tallenna kehodata</button>
+      </div>
+
+      <div class="card">
+        <h3>Kehonkoostumusmittaus (InBody tms.)</h3>
+        <p class="muted">Kirjaa salin kehonkoostumuslaitteen tärkeimmät lukemat. Laitteen
+          rasva-% toimii <strong>ankkurina</strong>: sen jälkeen päivittäiset painokirjaukset
+          saavat automaattisen rasva-%-arvion painon ja vyötärön muutoksista, ja laitemittaus
+          ohittaa käsin arvioidut lukemat. Uusi mittaus muutaman kuukauden välein pitää
+          arviot tarkkoina.</p>
+        <div id="bia-estimate"></div>
+        <div class="grid">
+          <label>Mittauspäivä<input id="bia-date" type="date" /></label>
+          <label>Paino laitteella (kg)<input id="bia-weight" type="number" step="0.1" /></label>
+          <label><strong>Rasva-% *</strong><input id="bia-bf" type="number" step="0.1" /></label>
+          <label title="Luustolihasmassa (SMM), laitteen raportista">Lihasmassa (kg)<input id="bia-muscle" type="number" step="0.1" /></label>
+          <label>Rasvamassa (kg)<input id="bia-fatkg" type="number" step="0.1" /></label>
+          <label title="Sisäelinrasvan taso (esim. InBody: alle 10 hyvä)">Sisäelinrasva (taso)<input id="bia-visceral" type="number" step="0.5" /></label>
+          <label title="Laitteen kokonaispisteet (esim. InBody-pisteet)">Kehon pisteet<input id="bia-score" type="number" /></label>
+          <label title="Laitteen arvioima perusaineenvaihdunta">BMR (kcal)<input id="bia-bmr" type="number" /></label>
+          <label>Kädet lihas (kg)<input id="bia-arms" type="number" step="0.1" /></label>
+          <label>Jalat lihas (kg)<input id="bia-legs" type="number" step="0.1" /></label>
+          <label>Keskivartalo lihas (kg)<input id="bia-trunk" type="number" step="0.1" /></label>
+          <label>Laite<input id="bia-device" type="text" placeholder="esim. InBody 770" /></label>
+        </div>
+        <button id="bia-save" class="success">Tallenna laitemittaus</button>
+        <div id="bia-list" class="list" style="margin-top:10px"></div>
       </div>
 
       <div class="card">

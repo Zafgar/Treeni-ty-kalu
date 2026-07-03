@@ -2395,6 +2395,7 @@ async function loadBody() {
   renderBodypartLevels();
   renderBodyFigure(s.measurement_sites, s.height_cm, s.sex, s.composition ? s.composition.body_fat_pct : null);
   loadPhotos();
+  loadBia();
 
   // Koostumus
   const comp = document.getElementById("composition");
@@ -2415,7 +2416,8 @@ async function loadBody() {
     const c = s.composition;
     comp.append(el("div", { class: "result-box" },
       el("div", {}, `Paino ${c.bodyweight} kg · rasva ${c.body_fat_pct}%` +
-        (c.body_fat_estimated ? " (arvioitu mitoista)" : "")),
+        (c.body_fat_source === "bia" ? (c.body_fat_estimated ? " (johdettu laitemittauksesta)" : " (laitemittaus)")
+          : c.body_fat_source === "navy" ? " (arvioitu mitoista)" : "")),
       el("div", { class: "big" }, `Lihasmassa ~${c.lean_mass_kg} kg`),
       el("div", { class: "muted" },
         `Rasvamassa ~${c.fat_mass_kg} kg` +
@@ -2485,11 +2487,17 @@ async function loadBody() {
 
 document.getElementById("b-save").addEventListener("click", async () => {
   const v = (id) => document.getElementById(id).value;
+  // Uni tunteina + minuutteina -> desimaalitunnit (7 h 23 min = 7.38)
+  let sleep = null;
+  if (v("b-sleep") || v("b-sleep-min")) {
+    sleep = (+v("b-sleep") || 0) + (+v("b-sleep-min") || 0) / 60;
+    sleep = Math.round(sleep * 100) / 100;
+  }
   const body = {
     entry_date: v("b-date") || null,
     bodyweight: v("b-weight") ? +v("b-weight") : null,
     body_fat_pct: v("b-bf") ? +v("b-bf") : null,
-    sleep_hours: v("b-sleep") ? +v("b-sleep") : null,
+    sleep_hours: sleep,
     sleep_score: v("b-sscore") ? +v("b-sscore") : null,
     hrv: v("b-hrv") ? +v("b-hrv") : null,
     resting_hr: v("b-rhr") ? +v("b-rhr") : null,
@@ -2497,9 +2505,15 @@ document.getElementById("b-save").addEventListener("click", async () => {
     steps: v("b-steps") ? +v("b-steps") : null,
     water_l: v("b-water") ? +v("b-water") : null,
   };
-  await api.post(pq("/api/body/entries"), body);
-  ["b-weight", "b-bf", "b-sleep", "b-sscore", "b-hrv", "b-rhr", "b-kcal", "b-steps", "b-water"].forEach((id) => (document.getElementById(id).value = ""));
-  loadBody();
+  const saved = await api.post(pq("/api/body/entries"), body);
+  ["b-weight", "b-bf", "b-sleep", "b-sleep-min", "b-sscore", "b-hrv", "b-rhr", "b-kcal", "b-steps", "b-water"].forEach((id) => (document.getElementById(id).value = ""));
+  await loadBody();
+  // Kerro jos rasva-% täyttyi automaattisesti laitemittauksesta
+  if (body.bodyweight && !body.body_fat_pct && saved.body_fat_pct != null) {
+    const est = document.getElementById("bia-estimate");
+    if (est) est.prepend(el("div", { style: "color:var(--accent-2);margin-bottom:6px" },
+      `✓ Rasva-% ${saved.body_fat_pct} % arvioitiin automaattisesti laitemittauksesta painollesi.`));
+  }
 });
 
 document.getElementById("m-save").addEventListener("click", async () => {
@@ -2509,6 +2523,73 @@ document.getElementById("m-save").addEventListener("click", async () => {
     entry_date: v("m-date") || null, site: v("m-site").trim(), value_cm: +v("m-value"),
   });
   document.getElementById("m-value").value = "";
+  loadBody();
+});
+
+// ---- BIA-kehonkoostumusmittaus (InBody tms.) ----
+async function loadBia() {
+  document.getElementById("bia-date").value = new Date().toISOString().slice(0, 10);
+  const estDiv = document.getElementById("bia-estimate");
+  const listDiv = document.getElementById("bia-list");
+  estDiv.innerHTML = ""; listDiv.innerHTML = "";
+  const [est, list] = await Promise.all([
+    api.get(pq("/api/body/bia/estimate")), api.get(pq("/api/body/bia"))]);
+  if (est.available) {
+    const dm = est.muscle_change_kg;
+    const df = est.fat_change_kg;
+    const chg = (est.basis !== "anchor")
+      ? ` · muutos ankkurista: rasva ${df > 0 ? "+" : ""}${df} kg, lihas ${dm > 0 ? "+" : ""}${dm} kg`
+      : "";
+    estDiv.append(el("div", { class: "result-box", style: "margin-bottom:10px" },
+      el("div", { class: "big" }, `Rasva-% nyt ~${est.bf_pct} %`),
+      el("div", { class: "muted" },
+        `Ankkuri ${est.anchor_date}: ${est.anchor_bf_pct} % @ ${est.anchor_weight ?? "?"} kg` +
+        (est.waist_delta_cm != null ? ` · vyötärö ${est.waist_delta_cm > 0 ? "+" : ""}${est.waist_delta_cm} cm` : "") + chg),
+      el("div", { class: "muted", style: "font-size:0.85em;margin-top:3px" }, est.note)));
+  } else {
+    estDiv.append(el("p", { class: "muted" }, est.note));
+  }
+  list.forEach((b) => {
+    const bits = [`rasva ${b.body_fat_pct} %`];
+    if (b.weight_kg) bits.push(`${b.weight_kg} kg`);
+    if (b.muscle_mass_kg) bits.push(`lihas ${b.muscle_mass_kg} kg`);
+    if (b.fat_mass_kg) bits.push(`rasvaa ${b.fat_mass_kg} kg`);
+    if (b.visceral_level != null) bits.push(`sis.rasva ${b.visceral_level}`);
+    if (b.score != null) bits.push(`pisteet ${b.score}`);
+    const seg = [];
+    if (b.muscle_arms_kg) seg.push(`kädet ${b.muscle_arms_kg}`);
+    if (b.muscle_legs_kg) seg.push(`jalat ${b.muscle_legs_kg}`);
+    if (b.muscle_trunk_kg) seg.push(`keskiv. ${b.muscle_trunk_kg}`);
+    listDiv.append(el("div", { class: "item" },
+      el("div", { class: "row-between" },
+        el("strong", {}, `${b.entry_date}${b.device ? " · " + b.device : ""}`),
+        el("button", { class: "small danger", onclick: async () => {
+          if (confirm("Poista laitemittaus?")) { await api.del(`/api/body/bia/${b.id}`); loadBody(); }
+        } }, "Poista")),
+      el("div", { class: "muted" }, bits.join(" · ")),
+      seg.length ? el("div", { class: "muted", style: "font-size:0.85em" }, `Lihasjakauma (kg): ${seg.join(" · ")}`) : ""));
+  });
+}
+
+document.getElementById("bia-save").addEventListener("click", async () => {
+  const v = (id) => document.getElementById(id).value;
+  if (!v("bia-bf")) return alert("Rasva-% on pakollinen (laitteen tärkein lukema).");
+  await api.post(pq("/api/body/bia"), {
+    entry_date: v("bia-date") || null,
+    weight_kg: v("bia-weight") ? +v("bia-weight") : null,
+    body_fat_pct: +v("bia-bf"),
+    muscle_mass_kg: v("bia-muscle") ? +v("bia-muscle") : null,
+    fat_mass_kg: v("bia-fatkg") ? +v("bia-fatkg") : null,
+    visceral_level: v("bia-visceral") ? +v("bia-visceral") : null,
+    score: v("bia-score") ? +v("bia-score") : null,
+    bmr_kcal: v("bia-bmr") ? +v("bia-bmr") : null,
+    muscle_arms_kg: v("bia-arms") ? +v("bia-arms") : null,
+    muscle_legs_kg: v("bia-legs") ? +v("bia-legs") : null,
+    muscle_trunk_kg: v("bia-trunk") ? +v("bia-trunk") : null,
+    device: v("bia-device").trim() || null,
+  });
+  ["bia-weight", "bia-bf", "bia-muscle", "bia-fatkg", "bia-visceral", "bia-score",
+   "bia-bmr", "bia-arms", "bia-legs", "bia-trunk"].forEach((id) => (document.getElementById(id).value = ""));
   loadBody();
 });
 

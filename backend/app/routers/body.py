@@ -27,6 +27,13 @@ def list_entries(profile_id: int = Query(...), db: Session = Depends(get_db)):
 def create_entry(profile_id: int, payload: schemas.BodyEntryCreate, db: Session = Depends(get_db)):
     data = payload.model_dump()
     data["entry_date"] = data.get("entry_date") or date.today()
+    # Kun paino kirjataan ilman rasva-%:a ja laitemittaus (InBody tms.) on
+    # olemassa, täytä rasva-% automaattisesti siitä johdettuna arviona.
+    # Laiteankkuri ohittaa käsin arvaillut lukemat.
+    if data.get("bodyweight") and not data.get("body_fat_pct"):
+        est = bia_estimate_for(db, profile_id, data["bodyweight"], data["entry_date"])
+        if est:
+            data["body_fat_pct"] = est["bf_pct"]
     entry = models.BodyEntry(profile_id=profile_id, **data)
     db.add(entry)
     db.commit()
@@ -115,9 +122,20 @@ def body_summary(profile_id: int = Query(...), db: Session = Depends(get_db)):
     creatine = bool(profile.creatine) if profile else False
     sex = profile.sex if profile else None
 
-    # Jos mitattua rasva-%:a ei ole, arvioi se ympärysmitoista (Navy-kaava)
+    # Rasva-%:n lähdehierarkia: laitemittaus (InBody tms.) ohittaa omat
+    # arviot; ilman kumpaakaan arvioidaan ympärysmitoista (Navy-kaava).
     bf_pct = latest_bf.body_fat_pct if latest_bf else None
     bf_estimated = False
+    bf_source = "entry" if bf_pct is not None else None
+    # Laitemittaus kumoaa käsin syötetyt arviot aina kun sellainen on olemassa
+    bia = _latest_bia(db, profile_id)
+    if bia:
+        est = bia_estimate_for(db, profile_id,
+                               latest_w.bodyweight if latest_w else bia.weight_kg)
+        if est:
+            bf_pct = est["bf_pct"]
+            bf_estimated = est["basis"] != "anchor"
+            bf_source = "bia"
     if bf_pct is None:
         def _latest_site(site):
             m = (db.query(models.Measurement)
@@ -129,12 +147,14 @@ def body_summary(profile_id: int = Query(...), db: Session = Depends(get_db)):
         if est is not None:
             bf_pct = est
             bf_estimated = True
+            bf_source = "navy"
 
     if latest_w and bf_pct is not None:
         composition = engine.body_composition(latest_w.bodyweight, bf_pct, height, creatine=creatine)
         composition["bodyweight"] = latest_w.bodyweight
         composition["body_fat_pct"] = bf_pct
         composition["body_fat_estimated"] = bf_estimated
+        composition["body_fat_source"] = bf_source
         composition["creatine"] = creatine
         # Fysiikkataso (aloittelija → IFBB Pro) FFMI:stä
         physique = engine.physique_level(composition.get("ffmi"), sex)
@@ -199,3 +219,126 @@ def body_summary(profile_id: int = Query(...), db: Session = Depends(get_db)):
         "measurement_forecasts": measurement_forecasts,
         "measurement_insights": measurement_insights,
     }
+
+
+# ---------- BIA-kehonkoostumusmittaus (InBody tms.) ----------
+def _latest_bia(db: Session, profile_id: int) -> models.BiaMeasurement | None:
+    return (db.query(models.BiaMeasurement)
+            .filter(models.BiaMeasurement.profile_id == profile_id)
+            .order_by(models.BiaMeasurement.entry_date.desc(),
+                      models.BiaMeasurement.id.desc())
+            .first())
+
+
+def _waist_near(db: Session, profile_id: int, target: date, max_days: int = 21) -> float | None:
+    """Vyötärömitta lähimpänä annettua päivää (±max_days)."""
+    rows = (db.query(models.Measurement)
+            .filter(models.Measurement.profile_id == profile_id,
+                    models.Measurement.site == "vyötärö").all())
+    best, best_gap = None, max_days + 1
+    for m in rows:
+        gap = abs((m.entry_date - target).days)
+        if gap < best_gap:
+            best, best_gap = m.value_cm, gap
+    return best
+
+
+def bia_estimate_for(db: Session, profile_id: int, weight: float | None,
+                     on_date: date | None = None) -> dict | None:
+    """BIA-ankkuroitu rasva-%-arvio annetulle painolle/päivälle."""
+    bia = _latest_bia(db, profile_id)
+    if not bia:
+        return None
+    on_date = on_date or date.today()
+    profile = db.get(models.Profile, profile_id)
+    sex = profile.sex if profile else None
+    anchor_w = bia.weight_kg
+    if anchor_w is None:
+        # Laitteen painoa ei kirjattu -> käytä lähintä omaa painokirjausta
+        e = (db.query(models.BodyEntry)
+             .filter(models.BodyEntry.profile_id == profile_id,
+                     models.BodyEntry.bodyweight.isnot(None))
+             .order_by(models.BodyEntry.entry_date.desc(),
+                       models.BodyEntry.id.desc()).first())
+        anchor_w = e.bodyweight if e else None
+    waist_anchor = _waist_near(db, profile_id, bia.entry_date)
+    waist_now = _waist_near(db, profile_id, on_date)
+    waist_delta = (waist_now - waist_anchor) if (waist_anchor is not None and waist_now is not None
+                                                 and waist_anchor != waist_now) else (
+        0.0 if (waist_anchor is not None and waist_now is not None) else None)
+    est = engine.bf_from_bia_anchor(bia.body_fat_pct, anchor_w, weight, waist_delta, sex)
+    if not est:
+        return None
+    days_since = (on_date - bia.entry_date).days
+    basis_txt = {"anchor": "suoraan laitemittauksesta",
+                 "weight": "painonmuutoksesta",
+                 "waist": "vyötärönmuutoksesta",
+                 "weight+waist": "painon ja vyötärön muutoksesta"}[est["basis"]]
+    return {
+        **est,
+        "anchor_date": bia.entry_date.isoformat(),
+        "anchor_bf_pct": bia.body_fat_pct,
+        "anchor_weight": anchor_w,
+        "days_since_anchor": days_since,
+        "waist_delta_cm": round(waist_delta, 1) if waist_delta is not None else None,
+        "note": (f"Arvio johdettu {bia.entry_date.isoformat()} laitemittauksesta "
+                 f"({bia.body_fat_pct} %) {basis_txt}." +
+                 (" Mittaus alkaa olla vanha — uusi laitemittaus tarkentaisi."
+                  if days_since > 120 else "")),
+    }
+
+
+@router.get("/bia", response_model=list[schemas.BiaOut])
+def list_bia(profile_id: int = Query(...), db: Session = Depends(get_db)):
+    return (db.query(models.BiaMeasurement)
+            .filter(models.BiaMeasurement.profile_id == profile_id)
+            .order_by(models.BiaMeasurement.entry_date.desc()).all())
+
+
+@router.post("/bia", response_model=schemas.BiaOut, status_code=201)
+def create_bia(profile_id: int, payload: schemas.BiaCreate, db: Session = Depends(get_db)):
+    data = payload.model_dump()
+    data["entry_date"] = data.get("entry_date") or date.today()
+    m = models.BiaMeasurement(profile_id=profile_id, **data)
+    db.add(m)
+    # Laitemittaus ohittaa omat arviot: päivitä saman päivän (tai uudempien
+    # ilman uudempaa laitemittausta olevien) kirjausten rasva-% laitteen mukaan.
+    same_day = (db.query(models.BodyEntry)
+                .filter(models.BodyEntry.profile_id == profile_id,
+                        models.BodyEntry.entry_date == data["entry_date"]).first())
+    if same_day:
+        same_day.body_fat_pct = data["body_fat_pct"]
+        if data.get("weight_kg") and not same_day.bodyweight:
+            same_day.bodyweight = data["weight_kg"]
+    db.commit()
+    db.refresh(m)
+    return m
+
+
+@router.delete("/bia/{bia_id}", status_code=204)
+def delete_bia(bia_id: int, db: Session = Depends(get_db)):
+    m = db.get(models.BiaMeasurement, bia_id)
+    if not m:
+        raise HTTPException(status_code=404, detail="Mittausta ei löytynyt.")
+    db.delete(m)
+    db.commit()
+
+
+@router.get("/bia/estimate")
+def bia_estimate(profile_id: int = Query(...), weight: float | None = Query(None),
+                 db: Session = Depends(get_db)):
+    """Tämänhetkinen rasva-%-arvio viimeisimmästä laitemittauksesta johdettuna."""
+    w = weight
+    if w is None:
+        e = (db.query(models.BodyEntry)
+             .filter(models.BodyEntry.profile_id == profile_id,
+                     models.BodyEntry.bodyweight.isnot(None))
+             .order_by(models.BodyEntry.entry_date.desc(),
+                       models.BodyEntry.id.desc()).first())
+        w = e.bodyweight if e else None
+    est = bia_estimate_for(db, profile_id, w)
+    if not est:
+        return {"available": False,
+                "note": "Ei laitemittauksia — kirjaa InBody-tyyppinen mittaus, niin "
+                        "rasva-%-arvio ankkuroituu siihen."}
+    return {"available": True, "weight": w, **est}

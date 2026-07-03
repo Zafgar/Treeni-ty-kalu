@@ -363,3 +363,37 @@ def test_onboarding_guidance(client):
         "goal": "lihasmassa"}).json()
     d3 = client.get(f"/api/coach/onboarding?profile_id={p3['id']}").json()
     assert "ennätykse" in d3["tips"][0].lower()
+
+
+def test_bia_anchor_flow(client):
+    from datetime import date, timedelta
+    today = date.today()
+    p = client.post("/api/profiles", json={"name": "BiaT", "sex": "mies", "height_cm": 180}).json()
+    pid = p["id"]
+    # Oma (väärä) arvio ennen laitemittausta
+    client.post(f"/api/body/entries?profile_id={pid}", json={
+        "entry_date": (today - timedelta(days=40)).isoformat(), "bodyweight": 92, "body_fat_pct": 15})
+    # Vyötärö ankkurihetkellä ja nyt (-2 cm)
+    client.post(f"/api/body/measurements?profile_id={pid}", json={
+        "entry_date": (today - timedelta(days=30)).isoformat(), "site": "vyötärö", "value_cm": 95})
+    client.post(f"/api/body/measurements?profile_id={pid}", json={
+        "entry_date": (today - timedelta(days=1)).isoformat(), "site": "vyötärö", "value_cm": 93})
+    # Laitemittaus (ankkuri): 91 kg @ 21 %
+    r = client.post(f"/api/body/bia?profile_id={pid}", json={
+        "entry_date": (today - timedelta(days=30)).isoformat(),
+        "weight_kg": 91, "body_fat_pct": 21, "muscle_mass_kg": 38.5, "score": 82})
+    assert r.status_code == 201
+    # Painokirjaus ilman rasva-%:a -> automaattinen arvio ankkurista
+    e = client.post(f"/api/body/entries?profile_id={pid}", json={
+        "entry_date": today.isoformat(), "bodyweight": 90.5, "sleep_hours": 7.4}).json()
+    assert e["body_fat_pct"] is not None
+    # Vyötärö kaventui + paino laski -> rasva-% alle ankkurin
+    assert e["body_fat_pct"] < 21
+    # Estimate-endpoint kertoo perusteen ja muutokset
+    est = client.get(f"/api/body/bia/estimate?profile_id={pid}").json()
+    assert est["available"] is True and est["basis"] == "weight+waist"
+    assert est["fat_change_kg"] < 0
+    # Summary käyttää laiteankkuria, EI käyttäjän vanhaa 15 % arvausta
+    s = client.get(f"/api/body/summary?profile_id={pid}").json()
+    assert s["composition"]["body_fat_source"] == "bia"
+    assert abs(s["composition"]["body_fat_pct"] - e["body_fat_pct"]) < 0.2

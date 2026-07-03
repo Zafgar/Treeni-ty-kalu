@@ -1668,3 +1668,54 @@ def experience_rate_calibration(experience: str | None, confidence: float) -> fl
     f = EXPERIENCE_RATE_FACTOR.get(experience or "", 1.0)
     conf = max(0.0, min(1.0, confidence))
     return 1.0 + (f - 1.0) * (1.0 - conf)
+
+
+# ---------- BIA-ankkuroitu rasva-%-arvio ----------
+# Laitemittaus (InBody tms.) on luotettavin saatavilla oleva rasva-%-lukema.
+# Sen jälkeen arvio päivittyy painon ja vyötärön muutoksista: vyötärö on
+# vahvin rasvan muutoksen merkki (~0.9 kg rasvaa / cm), painonmuutoksesta
+# tyypillisesti ~70 % on rasvaa kun treeni jatkuu. Näin "paino sama + vyötärö
+# kapenee" -> rasva-% laskee (lihasta tilalle), ilman uutta laitemittausta.
+FAT_KG_PER_WAIST_CM = 0.9
+FAT_SHARE_OF_WEIGHT_CHANGE = 0.7
+
+
+def bf_from_bia_anchor(anchor_bf_pct: float, anchor_weight: float | None,
+                       current_weight: float | None,
+                       waist_delta_cm: float | None = None,
+                       sex: str | None = None) -> dict | None:
+    """Arvioi nykyinen rasva-% BIA-ankkurista painon/vyötärön muutoksilla.
+
+    Palauttaa {bf_pct, fat_change_kg, muscle_change_kg, basis}.
+    basis: "anchor" (ei muutosdataa), "weight", "waist" tai "weight+waist".
+    """
+    if anchor_bf_pct is None:
+        return None
+    if not anchor_weight or not current_weight:
+        return {"bf_pct": round(anchor_bf_pct, 1), "fat_change_kg": 0.0,
+                "muscle_change_kg": 0.0, "basis": "anchor"}
+    fat_anchor = anchor_weight * anchor_bf_pct / 100.0
+    d_w = current_weight - anchor_weight
+    est_from_weight = FAT_SHARE_OF_WEIGHT_CHANGE * d_w
+    if waist_delta_cm is not None:
+        est_from_waist = FAT_KG_PER_WAIST_CM * waist_delta_cm
+        # Vyötärö on informatiivisempi -> 2/3 paino, koska se erottaa
+        # rasvan ja lihaksen (paino ei erota).
+        d_fat = (est_from_weight + 2.0 * est_from_waist) / 3.0
+        basis = "weight+waist" if abs(d_w) > 0.05 else "waist"
+    else:
+        d_fat = est_from_weight
+        basis = "weight" if abs(d_w) > 0.05 else "anchor"
+    # Rasvamuutos ei voi ylittää kokonaispainon muutosta järjettömästi:
+    # rajaa fysiologisesti järkevään ikkunaan.
+    d_fat = max(d_w - 0.6 * abs(d_w) - 1.5, min(d_fat, d_w + 0.6 * abs(d_w) + 1.5))
+    fat_now = fat_anchor + d_fat
+    floor_pct = 5.0 if sex == "mies" else 12.0
+    bf = max(floor_pct, min(60.0, fat_now / current_weight * 100.0))
+    fat_now = bf / 100.0 * current_weight
+    return {
+        "bf_pct": round(bf, 1),
+        "fat_change_kg": round(fat_now - fat_anchor, 1),
+        "muscle_change_kg": round(d_w - (fat_now - fat_anchor), 1),
+        "basis": basis,
+    }

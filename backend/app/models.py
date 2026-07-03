@@ -445,3 +445,34 @@ class DietPhase(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class BiaMeasurement(Base):
+    """Kehonkoostumusmittaus laitteella (InBody tms. bioimpedanssi).
+
+    Laitteen antama rasva-% on luotettavin saatavilla oleva arvio ja toimii
+    ANKKURINA: sen jälkeen päivittäiset painokirjaukset saavat automaattisen
+    rasva-%-arvion (paino- ja vyötärömuutos suhteessa ankkuriin), ja laitteen
+    lukema ohittaa käyttäjän omat arviot.
+    """
+
+    __tablename__ = "bia_measurements"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    profile_id: Mapped[int] = mapped_column(ForeignKey("profiles.id", ondelete="CASCADE"), index=True)
+    entry_date: Mapped[date] = mapped_column(Date, default=date.today, index=True)
+    weight_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    body_fat_pct: Mapped[float] = mapped_column(Float)
+    # Lihasmassa (SMM), rasvamassa, sisäelinrasvataso ja laitteen pisteet
+    muscle_mass_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    fat_mass_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    visceral_level: Mapped[float | None] = mapped_column(Float, nullable=True)
+    score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    bmr_kcal: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Raajakohtainen lihasjakauma (missä lihasta on)
+    muscle_arms_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    muscle_legs_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    muscle_trunk_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    device: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

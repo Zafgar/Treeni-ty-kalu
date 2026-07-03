@@ -326,6 +326,33 @@ class MeasurementOut(MeasurementBase):
     profile_id: int
 
 
+# ---------- BIA-kehonkoostumusmittaus (InBody tms.) ----------
+class BiaBase(BaseModel):
+    entry_date: date | None = None
+    weight_kg: float | None = None
+    body_fat_pct: float
+    muscle_mass_kg: float | None = None
+    fat_mass_kg: float | None = None
+    visceral_level: float | None = None
+    score: float | None = None
+    bmr_kcal: float | None = None
+    muscle_arms_kg: float | None = None
+    muscle_legs_kg: float | None = None
+    muscle_trunk_kg: float | None = None
+    device: str | None = None
+    notes: str | None = None
+
+
+class BiaCreate(BiaBase):
+    pass
+
+
+class BiaOut(BiaBase):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    profile_id: int
+
+
 # ---------- Food ----------
 class FoodBase(BaseModel):
     name: str
