@@ -76,6 +76,7 @@ def ensure_columns():
         ("foods", "fiber_g", "FLOAT DEFAULT 0"),
         ("foods", "sugar_g", "FLOAT DEFAULT 0"),
         ("foods", "sodium_mg", "FLOAT DEFAULT 0"),
+        ("foods", "alcohol_g", "FLOAT DEFAULT 0"),
         ("profiles", "experience", "VARCHAR(20)"),
         ("profiles", "training_years", "FLOAT"),
         ("profiles", "goal", "VARCHAR(20)"),
@@ -1040,3 +1041,90 @@ def ensure_extra_foods():
                      "VALUES (:n, :cat, 0, :k, :p, :c, :f, 0, 0, 0, :g, CURRENT_TIMESTAMP)"),
                 {"n": name, "cat": cat, "k": kcal, "p": prot, "c": carb, "f": fatg, "g": grams},
             )
+
+
+# ---------- Alkoholijuomat (puhtaan alkoholin grammoineen) ----------
+# (nimi, kcal/100, hiilarit/100, rasva/100, ABV-%, annos g/ml). Puhdas
+# alkoholi lasketaan ABV:sta: g/100ml = ABV% * 0.789 (etanolin tiheys).
+# Suomalainen vakioannos = 12 g puhdasta alkoholia. Kattaa myös jo kannassa
+# olevat oluet/viinit, jotta niidenkin alkoholigrammat täydentyvät.
+ALCOHOL_FOODS = [
+    # --- Oluet ---
+    ("Lager vaalea 0.33 l", 42, 3.3, 0, 4.6, 330),
+    ("Lager vaalea 0.5 l", 42, 3.3, 0, 4.6, 500),
+    ("Tumma lager 0.33 l", 47, 4.5, 0, 5.0, 330),
+    ("Pale Ale 0.33 l", 48, 3.8, 0, 5.2, 330),
+    ("IPA 0.33 l", 55, 4.5, 0, 5.6, 330),
+    ("IPA 0.5 l", 58, 4.6, 0, 6.0, 500),
+    ("Tupla-IPA (DIPA) 0.33 l", 80, 6, 0, 8.0, 330),
+    ("Vehnäolut 0.5 l", 45, 4, 0, 5.0, 500),
+    ("Pils 0.5 l", 42, 3.3, 0, 4.7, 500),
+    ("Vahva olut (A) 0.5 l", 63, 4.5, 0, 7.0, 500),
+    ("Stout / portteri 0.33 l", 60, 5.5, 0, 5.5, 330),
+    ("Alkoholiton olut 0.33 l", 25, 5, 0, 0.4, 330),
+    ("Olut (lager) 0.33 l", 43, 3.5, 0, 4.7, 330),   # täydentää vanhan
+    ("Olut (lager) 0.5 l", 43, 3.5, 0, 4.7, 500),
+    ("IPA-olut 0.33 l", 55, 5, 0, 5.6, 330),
+    # --- Siiderit & lonkerot ---
+    ("Siideri (kuiva) 0.33 l", 45, 3, 0, 4.7, 330),
+    ("Siideri (makea) 0.33 l", 55, 8, 0, 4.7, 330),
+    ("Lonkero 0.33 l", 47, 5, 0, 5.5, 330),
+    ("Lonkero (kuiva) 0.33 l", 38, 1.5, 0, 5.5, 330),
+    ("Hard seltzer 0.33 l", 30, 1, 0, 5.0, 330),
+    # --- Viinit ---
+    ("Punaviini (lasi 0.16 l)", 85, 2.6, 0, 13.0, 160),
+    ("Valkoviini (lasi 0.16 l)", 82, 2.6, 0, 12.0, 160),
+    ("Roseeviini (lasi 0.16 l)", 82, 3, 0, 12.0, 160),
+    ("Kuohuviini / samppanja (lasi 0.12 l)", 80, 1.5, 0, 12.0, 120),
+    ("Sangria (lasi 0.2 l)", 90, 11, 0, 10.0, 200),
+    ("Glögi (alkoholillinen, lasi 0.15 l)", 130, 22, 0, 10.0, 150),
+    ("Portviini / jälkiruokaviini (lasi 0.08 l)", 160, 12, 0, 19.0, 80),
+    ("Punaviini (lasi 0.2 l)", 85, 2.6, 0, 13.0, 200),   # täydentää vanhan
+    ("Valkoviini (lasi 0.2 l)", 82, 2.6, 0, 12.0, 200),
+    ("Siideri (kuiva) 0.33 l ", 45, 3, 0, 4.7, 330),
+    # --- Väkevät (4 cl = vakiopaukku) ---
+    ("Viski (4 cl)", 250, 0, 0, 40.0, 40),
+    ("Konjakki (4 cl)", 250, 0, 0, 40.0, 40),
+    ("Vodka (4 cl)", 220, 0, 0, 40.0, 40),
+    ("Gini (4 cl)", 245, 0, 0, 40.0, 40),
+    ("Rommi (4 cl)", 245, 0, 0, 40.0, 40),
+    ("Tequila (4 cl)", 235, 0, 0, 38.0, 40),
+    ("Jaloviina (4 cl)", 225, 1, 0, 38.0, 40),
+    ("Salmiakkikossu / salmari (4 cl)", 235, 20, 0, 32.0, 40),
+    ("Fisu-shotti (4 cl)", 195, 12, 0, 27.0, 40),
+    ("Jägermeister (4 cl)", 235, 24, 0, 35.0, 40),
+    ("Minttuviina (4 cl)", 300, 30, 0, 40.0, 40),
+    ("Likööri (4 cl)", 245, 25, 0, 20.0, 40),
+    ("Baileys (4 cl)", 325, 20, 6, 17.0, 40),
+    # --- Drinkit & cocktailit ---
+    ("Gin tonic (0.33 l)", 90, 8, 0, 8.0, 330),
+    ("Mojito (drinkki)", 180, 20, 0, 12.0, 220),
+    ("Long Island Iced Tea", 220, 24, 0, 15.0, 230),
+    ("Cosmopolitan", 180, 15, 0, 20.0, 120),
+    ("Margarita", 170, 14, 0, 18.0, 150),
+    ("Viski-kola (drinkki)", 100, 10, 0, 7.0, 330),
+    ("Aperol Spritz", 120, 14, 0, 9.0, 200),
+]
+
+
+def ensure_alcohol_foods():
+    """Siemennä alkoholijuomat ja laske puhtaan alkoholin grammat ABV:sta.
+    Täydentää myös jo kannassa olevien alkoholien alcohol_g:n."""
+    from sqlalchemy import text
+    ETHANOL_DENSITY = 0.789
+    with engine.begin() as conn:
+        existing = {r[0] for r in conn.execute(text("SELECT name FROM foods")).fetchall()}
+        for name, kcal, carb, fatg, abv, grams in ALCOHOL_FOODS:
+            alcohol_g = round(abv * ETHANOL_DENSITY, 2)  # per 100 ml
+            if name in existing:
+                # Täydennä vain alkoholigrammat (älä ylikirjoita käyttäjän muokkauksia)
+                conn.execute(text("UPDATE foods SET alcohol_g = :a WHERE name = :n AND "
+                                  "(alcohol_g IS NULL OR alcohol_g = 0)"),
+                             {"a": alcohol_g, "n": name})
+            else:
+                conn.execute(
+                    text("INSERT INTO foods (name, category, is_favorite, kcal, protein_g, "
+                         "carbs_g, fat_g, fiber_g, sugar_g, sodium_mg, alcohol_g, default_grams, "
+                         "created_at) VALUES (:n, 'alkoholi', 0, :k, 0, :c, :f, 0, :c, 0, :a, :g, "
+                         "CURRENT_TIMESTAMP)"),
+                    {"n": name, "k": kcal, "c": carb, "f": fatg, "a": alcohol_g, "g": grams})

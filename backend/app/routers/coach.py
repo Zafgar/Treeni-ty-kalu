@@ -215,6 +215,29 @@ def coach_notices(profile_id: int = Query(...), db: Session = Depends(get_db)):
                         "parempi kuin puoliksi). Jos jaksaminen, kevennä kuormaa tai katso palautuminen."),
         })
 
+    # ---- Alkoholi: iso viimeaikainen ryöppy tai korkea 30 pv kuorma ----
+    try:
+        from .diet import alcohol as _alc
+        al = _alc(profile_id, db)
+        if al.get("any_use"):
+            recent_binge = al.get("binge_days", 0) >= 1 and al.get("max_session_g", 0) >= al.get("binge_threshold_g", 60)
+            if al.get("level") == "korkea":
+                msg = (f"Alkoholia ~{al['drinks_30d']} annosta / 30 pv "
+                       f"({al['weekly_drinks']}/vk, {al['binge_days']} kertaryöppyä). ")
+                if al.get("measured_notes"):
+                    msg += al["measured_notes"][0] + " "
+                msg += "Tämä verottaa palautumista, unta ja treenituloksia. Ks. Dieetti → Alkoholi & vaikutukset."
+                notices.append({"id": "alcohol-high", "level": "warn", "category": "palautuminen",
+                                "title": "Alkoholi vaikuttaa tuloksiin", "message": msg})
+            elif recent_binge:
+                notices.append({"id": "alcohol-binge", "level": "info", "category": "palautuminen",
+                                "title": "Iso kertaryöppy heikentää palautumista",
+                                "message": (f"Viimeisin iso käyttökerta ~{al['max_session_drinks']} annosta — "
+                                            "lihasten palautuminen ja seuraavan päivän treeni kärsivät. "
+                                            "Pidä pari kevyempää päivää ja panosta uneen ja nesteytykseen.")})
+    except Exception:  # noqa: BLE001
+        pass
+
     order = {"alert": 0, "warn": 1, "info": 2}
     notices.sort(key=lambda n: order.get(n["level"], 3))
     return {"notices": notices, "count": len(notices)}

@@ -1890,3 +1890,121 @@ def waist_weight_direction(weight_change_kg_month: float | None,
                          "kevennä hieman ruokaa. Seuraa muutamaa mittausta lisää ennen isoja muutoksia."),
                 "action": False}
     return None
+
+
+# ---------- Alkoholin vaikutusten seuranta (tutkimuspohjainen) ----------
+# Idea: ei absolutistisia kaavoja vaan yleinen ymmärrys. Keho sietää pieniä
+# määriä silloin tällöin paremmin kuin ison kerta-annoksen (lauantai/juhannus).
+# Seurataan puhtaan alkoholin grammoja, 30 pv kuormaa ja OMAA mitattua vastetta
+# (uni/HRV/leposyke krapula-aamuina vs. selvinä). Vakioannos = 12 g.
+STANDARD_DRINK_G = 12.0
+
+# Kertakäytön binge-raja (NIAAA ~5/4 annosta): miehet ~60 g, naiset ~48 g.
+def _binge_threshold(sex: str | None) -> float:
+    return 48.0 if (sex or "").lower().startswith("nain") else 60.0
+
+
+def _widmark_r(sex: str | None) -> float:
+    return 0.55 if (sex or "").lower().startswith("nain") else 0.68
+
+
+def alcohol_assessment(events: list, nights: dict, sex: str | None,
+                       bodyweight: float | None, today) -> dict | None:
+    """events: [(date, grams_alkoholia)] viim. 30 pv juomapäivät.
+    nights: {date: {"hrv","rhr","sleep"}} viim. ~35 pv (aamun mittaukset).
+    Palauttaa 30 pv kuorman, rytmiarvion, oman mitatun vasteen ja ohjeen."""
+    from datetime import timedelta as _td
+    if not events:
+        return {"available": True, "any_use": False,
+                "note": "Ei kirjattua alkoholia viim. 30 pv. Jos käytät, kirjaa juomat "
+                        "niin näet miten se vaikuttaa uneen, sykkeeseen ja treeneihin."}
+    # Yhdistä saman päivän annokset
+    by_day: dict = {}
+    for d, g in events:
+        by_day[d] = by_day.get(d, 0.0) + g
+    total_g = sum(by_day.values())
+    drinking_days = len(by_day)
+    drinks = total_g / STANDARD_DRINK_G
+    binge_thr = _binge_threshold(sex)
+    binge_days = sum(1 for g in by_day.values() if g >= binge_thr)
+    max_session = max(by_day.values())
+    weekly_drinks = round(drinks / 30 * 7, 1)
+
+    # Rytmiarvio: sama kokonaismäärä jaettuna on parempi kuin isot kertaryöpyt.
+    avg_per_drinking_day = total_g / drinking_days
+    if binge_days >= 2:
+        pattern, pattern_txt = "binge", ("Painottuu isoihin kertaryöppyihin (humalajuominen). "
+            "Tutkimusten mukaan iso kerta-annos rasittaa unta, sykettä ja palautumista selvästi "
+            "enemmän kuin sama määrä jaettuna — juuri tämä on haitallisin rytmi.")
+    elif avg_per_drinking_day <= binge_thr * 0.5 and binge_days == 0:
+        pattern, pattern_txt = "spread", ("Käyttö on maltillista ja jakautunutta — keho sietää "
+            "pieniä määriä silloin tällöin selvästi paremmin kuin kertaryöppyjä.")
+    else:
+        pattern, pattern_txt = "moderate", "Käyttö on kohtalaista; vältä isoja kertaryöppyjä."
+
+    # OMA mitattu vaste: aamut juomapäivän JÄLKEEN vs. selvät aamut
+    def _response(metric):
+        after, base = [], []
+        for d, m in nights.items():
+            v = m.get(metric)
+            if v is None:
+                continue
+            drank_prev = (d - _td(days=1)) in by_day
+            (after if drank_prev else base).append(v)
+        if len(after) >= 3 and len(base) >= 3:
+            a = sum(after) / len(after); b = sum(base) / len(base)
+            return {"after": round(a, 1), "sober": round(b, 1),
+                    "delta_pct": round((a - b) / b * 100, 1) if b else None,
+                    "n_after": len(after), "n_sober": len(base)}
+        return None
+    resp = {m: _response(m) for m in ("hrv", "rhr", "sleep")}
+    resp = {k: v for k, v in resp.items() if v}
+    measured_notes = []
+    for m, r in resp.items():
+        if m == "hrv" and r["delta_pct"] is not None and r["delta_pct"] <= -5:
+            measured_notes.append(f"HRV on juomisen jälkeisinä aamuina ~{abs(r['delta_pct'])} % matalampi "
+                                  f"({r['after']} vs. {r['sober']} selvinä) — palautuminen kärsii mitattavasti.")
+        if m == "rhr" and r["delta_pct"] is not None and r["delta_pct"] >= 3:
+            measured_notes.append(f"Leposyke on juomisen jälkeen ~{r['delta_pct']} % koholla "
+                                  f"({r['after']} vs. {r['sober']}) — merkki kuormittuneesta palautumisesta.")
+        if m == "sleep" and r["delta_pct"] is not None and r["delta_pct"] <= -5:
+            measured_notes.append(f"Unta kertyy juomisen jälkeen ~{abs(r['delta_pct'])} % vähemmän "
+                                  f"({r['after']} h vs. {r['sober']} h).")
+
+    # Henkilökohtainen matalan vaikutuksen määrä (EI absoluuttinen raja):
+    # ~0.3 g/kg/kerta on useimmilla vähäinen vaikutus; naisilla keho sietää
+    # vähemmän (pienempi jakautumistilavuus). Ilmaistaan annoksina.
+    low_impact_g = (bodyweight or 75) * (0.28 if (sex or "").lower().startswith("nain") else 0.35)
+    low_impact_drinks = max(1, round(low_impact_g / STANDARD_DRINK_G))
+    # Suurimman ryöpyn karkea "selviämisaika" (metabolia ~0.10 g/kg/h)
+    hours_sober = round(max_session / ((bodyweight or 75) * 0.10), 1)
+
+    # Kokonaisarvio
+    if binge_days >= 2 or weekly_drinks >= 14:
+        level, label = "korkea", "Käyttö vaikuttaa palautumiseen ja tuloksiin"
+    elif weekly_drinks >= 7 or binge_days == 1:
+        level, label = "kohtalainen", "Kohtalaista — kannattaa seurata vaikutuksia"
+    else:
+        level, label = "matala", "Maltillista käyttöä"
+
+    guidance = (
+        f"Sinun kokoisellesi (~{round(bodyweight or 75)} kg"
+        f"{', nainen' if (sex or '').lower().startswith('nain') else ''}) noin "
+        f"{low_impact_drinks} annosta (~{round(low_impact_g)} g) kerralla on tutkimuksen valossa "
+        "vähäinen vaikutus, KUN se ei toistu tiheästi. Ratkaisevaa ei ole yksittäinen ilta vaan "
+        "rytmi: pieniä määriä harvakseltaan on kehon kannalta paljon parempi kuin iso kertaryöppy. "
+        "Vältä juomista treenipäivän iltana ja raskaan treenin aattona — alkoholi heikentää "
+        "lihasten palautumista (proteiinisynteesi) ja seuraavan päivän suoritusta.")
+
+    return {
+        "available": True, "any_use": True,
+        "total_g_30d": round(total_g), "drinks_30d": round(drinks, 1),
+        "weekly_drinks": weekly_drinks, "drinking_days": drinking_days,
+        "binge_days": binge_days, "binge_threshold_g": round(binge_thr),
+        "max_session_g": round(max_session), "max_session_drinks": round(max_session / STANDARD_DRINK_G, 1),
+        "hours_to_sober_max": hours_sober,
+        "pattern": pattern, "pattern_note": pattern_txt,
+        "measured_response": resp, "measured_notes": measured_notes,
+        "low_impact_drinks": low_impact_drinks, "low_impact_g": round(low_impact_g),
+        "level": level, "label": label, "guidance": guidance,
+    }

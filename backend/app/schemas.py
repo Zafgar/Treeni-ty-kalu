@@ -365,6 +365,7 @@ class FoodBase(BaseModel):
     fiber_g: float = 0.0
     sugar_g: float = 0.0
     sodium_mg: float = 0.0
+    alcohol_g: float = 0.0
     default_grams: float | None = None
 
 

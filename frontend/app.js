@@ -3003,6 +3003,38 @@ async function renderDietStatus() {
     div.append(card);
   }
 
+  // Alkoholin vaikutusten seuranta (30 pv kuorma + oma mitattu vaste)
+  try {
+    const al = await api.get(pq("/api/diet/alcohol"));
+    if (al && al.available) {
+      const card = el("div", { class: "card" }, el("h3", {}, "🍺 Alkoholi & vaikutukset"));
+      if (!al.any_use) {
+        card.append(el("div", { class: "muted" }, al.note));
+      } else {
+        const tone = { matala: "var(--accent-2)", kohtalainen: "var(--warn)", korkea: "var(--danger)" }[al.level];
+        card.append(el("div", { class: "result-box", style: `border-color:${tone}` },
+          el("div", { class: "row-between" },
+            el("div", { class: "big", style: `color:${tone}` }, `${al.drinks_30d} annosta / 30 pv`),
+            el("span", { class: "tag", style: `color:${tone};border-color:${tone}` }, al.label)),
+          el("div", { class: "muted", style: "margin-top:4px" },
+            `${al.weekly_drinks} annosta/vk · ${al.total_g_30d} g puhdasta alkoholia · juomapäiviä ${al.drinking_days} · ` +
+            `kertaryöppyjä ${al.binge_days} (raja ${al.binge_threshold_g} g)`),
+          el("div", { class: "muted", style: "margin-top:4px" },
+            `Suurin kerta ~${al.max_session_drinks} annosta (elimistö selviää ~${al.hours_to_sober_max} h).`)));
+        card.append(el("div", { class: "item", style: `border-left:3px solid ${tone};margin-top:8px` },
+          el("strong", {}, "Rytmi: "), el("span", { class: "muted" }, al.pattern_note)));
+        // Oma mitattu vaste (jos dataa)
+        if (al.measured_notes && al.measured_notes.length) {
+          const mb = el("div", { style: "margin-top:8px" }, el("strong", {}, "Oma mitattu vaste:"));
+          al.measured_notes.forEach((n) => mb.append(el("div", { class: "muted", style: "margin-top:3px" }, "📉 " + n)));
+          card.append(mb);
+        }
+        card.append(el("div", { class: "muted", style: "margin-top:8px" }, "💡 " + al.guidance));
+      }
+      div.append(card);
+    }
+  } catch (e) {}
+
   // Kardio-/lämmittelyvinkki tavoitteen mukaan
   if (s.cardio_tip) {
     div.append(el("div", { class: "card" }, el("h3", {}, "Kardio & kulutus"),

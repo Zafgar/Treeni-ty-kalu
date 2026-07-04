@@ -528,3 +528,39 @@ def meal_plan(
         "meals_per_day": meals,
         "meals": plan,
     }
+
+
+@router.get("/alcohol")
+def alcohol(profile_id: int = Query(...), db: Session = Depends(get_db)):
+    """Alkoholin vaikutusten seuranta: 30 pv puhtaan alkoholin kuorma, rytmi
+    (jaettu vs. kertaryöpyt) ja OMA mitattu vaste uneen/HRV:hen/sykkeeseen."""
+    today = date.today()
+    profile = db.get(models.Profile, profile_id)
+    sex = profile.sex if profile else None
+    bw = _latest_bodyweight(db, profile_id)
+
+    # Juomapäivät viim. 30 pv: puhtaan alkoholin grammat (food.alcohol_g > 0)
+    start = today - timedelta(days=30)
+    logs = (db.query(models.FoodLog)
+            .filter(models.FoodLog.profile_id == profile_id,
+                    models.FoodLog.entry_date >= start,
+                    models.FoodLog.entry_date <= today).all())
+    events = []
+    for fl in logs:
+        ag = getattr(fl.food, "alcohol_g", 0) or 0
+        if ag > 0:
+            events.append((fl.entry_date, ag * fl.grams / 100.0))
+
+    # Aamun mittaukset (HRV/leposyke/uni) viim. ~35 pv oman vasteen laskentaan
+    nights = {}
+    for e in (db.query(models.BodyEntry)
+              .filter(models.BodyEntry.profile_id == profile_id,
+                      models.BodyEntry.entry_date >= today - timedelta(days=35)).all()):
+        m = {}
+        if e.hrv is not None: m["hrv"] = e.hrv
+        if e.resting_hr is not None: m["rhr"] = e.resting_hr
+        if e.sleep_hours is not None: m["sleep"] = e.sleep_hours
+        if m:
+            nights[e.entry_date] = m
+
+    return engine.alcohol_assessment(events, nights, sex, bw, today)

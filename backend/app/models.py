@@ -342,6 +342,9 @@ class Food(Base):
     fiber_g: Mapped[float] = mapped_column(Float, default=0.0, server_default="0")
     sugar_g: Mapped[float] = mapped_column(Float, default=0.0, server_default="0")
     sodium_mg: Mapped[float] = mapped_column(Float, default=0.0, server_default="0")
+    # Puhtaan alkoholin määrä per 100 g/ml (0 = ei alkoholia). Käytetään
+    # alkoholiseurannassa (grammat, ei vain kalorit): olut 4.7% ~3.7 g/100ml.
+    alcohol_g: Mapped[float] = mapped_column(Float, default=0.0, server_default="0")
     # Tyypillinen annoskoko grammoina (esim. banaani ~120 g) nopeaa kirjausta varten
     default_grams: Mapped[float | None] = mapped_column(Float, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

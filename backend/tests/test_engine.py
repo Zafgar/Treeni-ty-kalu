@@ -622,3 +622,32 @@ def test_nutrition_quality_and_direction_helpers():
     assert adv and len(adv["tips"]) >= 2
     # Siisti päivä -> ei neuvoja
     assert engine.today_food_advice(2000, 160, 100, 2600, 180) is None
+
+
+def test_alcohol_assessment():
+    from app import engine
+    from datetime import date, timedelta
+    today = date(2026, 6, 30)
+    # 4 juomapäivää, iso kertaryöppy (~72 g = 6 tuoppia)
+    drink_days = [today - timedelta(days=d) for d in (2, 9, 16, 23)]
+    events = [(d, 72.0) for d in drink_days]
+    # Aamut: juomapäivän JÄLKEEN huono HRV/uni/korkea syke, muuten hyvä
+    nights = {}
+    for i in range(30):
+        d = today - timedelta(days=i)
+        after = (d - timedelta(days=1)) in set(drink_days)
+        nights[d] = {"hrv": 45 if after else 62, "rhr": 60 if after else 52,
+                     "sleep": 6.0 if after else 7.6}
+    a = engine.alcohol_assessment(events, nights, "mies", 85, today)
+    assert a["any_use"] and a["binge_days"] == 4 and a["level"] == "korkea"
+    assert a["drinks_30d"] > 20
+    # Oma mitattu vaste tunnistaa HRV-laskun ja sykenousun
+    assert a["measured_response"]["hrv"]["delta_pct"] < -5
+    assert any("HRV" in n for n in a["measured_notes"])
+    assert a["low_impact_drinks"] >= 1
+    # Ei käyttöä -> siisti viesti
+    none = engine.alcohol_assessment([], {}, "mies", 85, today)
+    assert none["any_use"] is False
+    # Nainen sietää vähemmän (matalampi binge-raja)
+    aw = engine.alcohol_assessment(events, {}, "nainen", 62, today)
+    assert aw["binge_threshold_g"] == 48
