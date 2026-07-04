@@ -155,9 +155,12 @@
 
       <div class="card">
         <h3>Uni & palautumisdata</h3>
-        <p class="muted">Vapaaehtoista lisädataa jolla havaitaan treenikehityksen muutoksia.</p>
+        <p class="muted">Vapaaehtoista lisädataa jolla havaitaan treenikehityksen muutoksia.
+          Kun dataa kertyy, näet oman normaalitasosi, suunnan ja hälytysrajat
+          (HRV laskee liikaa / leposyke nousee omasta tasosta).</p>
         <canvas id="recovery-chart" width="840" height="280"></canvas>
         <div id="recovery-legend" class="btn-row"></div>
+        <div id="recovery-insights"></div>
       </div>
       <div class="card">
         <h3>Korrelaatio: vaikuttavatko tekijät toisiinsa?</h3>
@@ -396,11 +399,13 @@
       </div>
 
       <div class="card">
-        <h3>Lihaskuormitus & tasapaino (7 pv)</h3>
+        <h3>Lihaskuormitus & tasapaino</h3>
         <p class="muted">Jokainen liike jakaa kuormansa usealle lihasalueelle: penkki
           kuormittaa myös ojentajia ja etuolkapäitä, vedot hauista ja kyynärvarsia,
-          kyykyt pakaroita ja pohkeita. Teholliset sarjat/alue vs. suositushaarukka +
-          hermostollinen kuorma raskaista pääliikesarjoista.</p>
+          kyykyt pakaroita ja pohkeita. Tahti lasketaan <strong>14 päivän liukuvasta
+          ikkunasta</strong> sarjoina/viikko, jotta arvio ei heilahda päivässä kun
+          yksittäinen treeni putoaa ikkunan reunalta. Hermostokuorma sen sijaan on
+          akuutti (7 pv) — se saakin elää nopeasti.</p>
         <div id="muscle-load-content"></div>
       </div>
 

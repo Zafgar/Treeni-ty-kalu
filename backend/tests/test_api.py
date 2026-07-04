@@ -317,24 +317,26 @@ def test_muscle_load(client):
     bench = client.post("/api/exercises", json={"name": "Penkkipunnerrus", "category": "rinta"}).json()
     squat = client.post("/api/exercises", json={"name": "Takakyykky", "category": "jalat"}).json()
     curl = client.post("/api/exercises", json={"name": "Hauiskääntö tanko", "category": "kädet"}).json()
-    # Kaksi treeniä tällä 7 pv jaksolla -> datavaroitus poistuu
-    for days_ago, ex, w in ((5, bench, 100), (2, squat, 140)):
+    # Kolme treeniä 14 pv liukuvassa ikkunassa -> datavaroitus poistuu.
+    # Ikkuna on 14 pv jaettuna kahdella (sarjaa/vk), jotta arvio ei heilahda
+    # päivässä kun yksittäinen treeni putoaa 7 pv ikkunan reunalta.
+    for days_ago, ex, w in ((12, bench, 100), (5, bench, 100), (2, squat, 140)):
         client.post("/api/workouts", json={"profile_id": 1,
             "session_date": (today - timedelta(days=days_ago)).isoformat(),
             "exercises": [{"exercise_id": ex["id"],
                 "sets": [{"set_index": i, "reps": 5, "weight": w, "completed": True} for i in range(4)]}]})
     data = client.get("/api/stats/muscle-load?profile_id=1").json()
     areas = {a["area"]: a for a in data["areas"]}
-    # Penkki jakaa kuorman rinnalle JA ojentajille/olkapäille
+    # Penkki 2x4 sarjaa / 14 pv = 4.0/vk rinnalle, ojentajille puolet
     assert areas["rinta"]["effective_sets"] == 4.0
     assert areas["ojentajat"]["effective_sets"] == 2.0
     assert areas["olkapäät"]["effective_sets"] > 0
-    # Kyykky kuormittaa etureisiä täysillä ja pakaroita osittain
-    assert areas["etureidet"]["effective_sets"] == 4.0
-    assert areas["pakarat"]["effective_sets"] > 2
+    # Kyykky 4 sarjaa / 14 pv = 2.0/vk etureisille
+    assert areas["etureidet"]["effective_sets"] == 2.0
+    assert areas["pakarat"]["effective_sets"] > 1
     # Hauista ei treenattu -> vajaa/ei kuormaa ja ehdotus löytyy
     assert areas["hauis"]["status"] in ("low", "none")
-    assert data["workouts_week"] == 2
+    assert data["workouts_week"] == 3
     assert data["cns"] is not None and "score" in data["cns"]
     sug_areas = {s["area"] for s in data["suggestions"]}
     assert sug_areas, "vajaille alueille pitää tulla ehdotuksia"
@@ -397,3 +399,48 @@ def test_bia_anchor_flow(client):
     s = client.get(f"/api/body/summary?profile_id={pid}").json()
     assert s["composition"]["body_fat_source"] == "bia"
     assert abs(s["composition"]["body_fat_pct"] - e["body_fat_pct"]) < 0.2
+
+
+def test_recovery_insights_and_acwr_gating(client):
+    from datetime import date, timedelta
+    today = date.today()
+    p = client.post("/api/profiles", json={"name": "RecT"}).json()
+    pid = p["id"]
+    # Ilman dataa -> ei saatavilla
+    d0 = client.get(f"/api/recovery/insights?profile_id={pid}").json()
+    assert d0["available"] is False
+    # 30 pv HRV/leposyke/uni-dataa: vakaa taso, sitten HRV romahtaa ja syke nousee
+    for i in range(30, 7, -1):
+        client.post(f"/api/body/entries?profile_id={pid}", json={
+            "entry_date": (today - timedelta(days=i)).isoformat(),
+            "hrv": 60, "resting_hr": 52, "sleep_hours": 7.5})
+    for i in range(7, 0, -1):
+        client.post(f"/api/body/entries?profile_id={pid}", json={
+            "entry_date": (today - timedelta(days=i)).isoformat(),
+            "hrv": 48, "resting_hr": 58, "sleep_hours": 6.0})
+    d = client.get(f"/api/recovery/insights?profile_id={pid}").json()
+    assert d["available"] is True
+    m = {x["key"]: x for x in d["metrics"]}
+    # HRV -20 % omasta tasosta -> häly; leposyke +11.5 % -> häly; uni 6 h -> häly
+    assert m["hrv"]["status"] == "alert" and m["hrv"]["baseline"] == 60
+    assert m["resting_hr"]["status"] == "alert"
+    assert m["sleep_hours"]["status"] == "alert"
+    assert d["verdict"] == "declining" and len(d["alerts"]) == 3
+    # Hälytysrajat näkyvät (HRV alle 55.2, leposyke yli 54.6)
+    assert m["hrv"]["alert_at"] == 55.2 and m["hrv"]["alert_direction"] == "alle"
+    assert m["resting_hr"]["alert_direction"] == "yli"
+    # Leposykkeen yleistaso luokitellaan
+    assert "erinomainen" in m["resting_hr"]["general_level"] or "urheilijataso" in m["resting_hr"]["general_level"]
+
+    # ACWR: uusi käyttäjä (vain tuoreita treenejä) EI saa kuormapiikkiä
+    ex = client.post("/api/exercises", json={"name": "Kyykky ACWR-testi"}).json()
+    p2 = client.post("/api/profiles", json={"name": "AcwrT"}).json()
+    for days_ago in (1, 3):
+        client.post("/api/workouts", json={"profile_id": p2["id"],
+            "session_date": (today - timedelta(days=days_ago)).isoformat(),
+            "exercises": [{"exercise_id": ex["id"],
+                "sets": [{"set_index": i, "reps": 5, "weight": 100, "completed": True} for i in range(5)]}]})
+    rd = client.get(f"/api/recovery/readiness?profile_id={p2['id']}").json()
+    assert rd["acwr"] is not None and rd["acwr"]["zone"] == "keräysvaihe"
+    assert rd["acwr"]["acwr"] is None
+    assert rd["deload_recommended"] is False

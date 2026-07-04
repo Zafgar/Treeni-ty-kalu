@@ -1145,19 +1145,24 @@ def _cns_set_points(rel: float, contrib_sum: float) -> float:
 
 @router.get("/muscle-load")
 def muscle_load(profile_id: int = Query(...), db: Session = Depends(get_db)):
-    """Lihaskuormitus alueittain (7 pv vs. edelliset 7 pv).
+    """Lihaskuormitus alueittain: 14 pv liukuva ikkuna viikkotahdiksi jaettuna.
 
     Jokainen liike jakaa kuormansa usealle alueelle osuuskertoimin (penkki ->
     rinta + ojentajat + etuolkapäät; kapea penkki -> pääosin ojentajat;
     taljavedot -> myös hauis + kyynärvarret; kyykyt -> pakarat/pohkeet mukana).
-    Lisäksi lasketaan hermostollinen kuorma (raskaat lähimaksimisarjat isoissa
-    moninivelliikkeissä) ja peilataan se palautumismittareihin ja tuntumaan.
+
+    IKKUNA: 14 pv (jaettuna kahdella = sarjaa/vk) eikä tiukka 7 pv, jotta arvio
+    ei heilahda päivässä "liikaa treenattu" -> "vajaa" kun yksittäinen treeni
+    putoaa ikkunan reunalta. Hermostokuorma (CNS) lasketaan silti 7 pv:ltä,
+    koska hermosto palautuu päivissä — se SAA elää nopeasti.
     Ehdotukset vajaille alueille poimitaan ensisijaisesti omasta aktiivisesta
     ohjelmasta.
     """
     today = date.today()
-    this_start = today - timedelta(days=6)
-    prev_start = today - timedelta(days=13)
+    WINDOW = 14
+    this_start = today - timedelta(days=WINDOW - 1)
+    prev_start = today - timedelta(days=2 * WINDOW - 1)
+    cns_start = today - timedelta(days=6)  # hermosto: aidosti akuutti 7 pv
 
     sessions = (db.query(models.WorkoutSession)
                 .filter(models.WorkoutSession.profile_id == profile_id,
@@ -1167,7 +1172,7 @@ def muscle_load(profile_id: int = Query(...), db: Session = Depends(get_db)):
         return {"message": "Kirjaa treenejä, niin näet lihaskohtaisen kuormituksen.",
                 "areas": [], "cns": None, "suggestions": []}
 
-    # Per-alue teholliset sarjat & tonnage tälle ja edelliselle 7 pv jaksolle,
+    # Per-alue teholliset sarjat & tonnage tälle ja edelliselle 14 pv jaksolle,
     # sekä viimeisin treenipäivä per alue (merkittävä kuorma, kerroin >= 0.5).
     eff_week = {a: 0.0 for a in engine.MUSCLE_AREAS}
     eff_prev = {a: 0.0 for a in engine.MUSCLE_AREAS}
@@ -1194,6 +1199,8 @@ def muscle_load(profile_id: int = Query(...), db: Session = Depends(get_db)):
     for s in sessions:
         in_week = s.session_date >= this_start
         in_prev = prev_start <= s.session_date < this_start
+        in_cns = s.session_date >= cns_start
+        in_cns_prev = (cns_start - timedelta(days=7)) <= s.session_date < cns_start
         if in_week:
             workouts_week += 1
         elif in_prev:
@@ -1223,9 +1230,9 @@ def muscle_load(profile_id: int = Query(...), db: Session = Depends(get_db)):
                 else:
                     eff_prev[area] += n_sets * f
             # Hermostokuorma vain isoista moninivelliikkeistä (kontribuutio-
-            # summa >= 2), suhteessa tämänhetkiseen 1RM:ään.
+            # summa >= 2), suhteessa tämänhetkiseen 1RM:ään. Akuutti 7 pv.
             contrib_sum = sum(mapping.values())
-            if contrib_sum >= 2.0 and any(st.weight > 0 for st in done):
+            if (in_cns or in_cns_prev) and contrib_sum >= 2.0 and any(st.weight > 0 for st in done):
                 one_rm = _current_1rm(ex.id)
                 if one_rm and one_rm > 0:
                     for st in done:
@@ -1233,7 +1240,7 @@ def muscle_load(profile_id: int = Query(...), db: Session = Depends(get_db)):
                         pts = _cns_set_points(rel, contrib_sum)
                         if pts <= 0:
                             continue
-                        if in_week:
+                        if in_cns:
                             cns_week += pts
                             if rel >= 0.925:
                                 very_heavy_sets += 1
@@ -1242,13 +1249,14 @@ def muscle_load(profile_id: int = Query(...), db: Session = Depends(get_db)):
                         else:
                             cns_prev += pts
 
-    # ---- Aluekohtaiset statukset (datavaroitus jos viikko vajaa) ----
-    enough_data = workouts_week >= 2
+    # ---- Aluekohtaiset statukset (datavaroitus jos ikkuna vajaa) ----
+    # 14 pv summa jaetaan kahdella -> vertailukelpoinen sarjaa/vk-tahti.
+    enough_data = workouts_week >= 3
     areas = []
     for a in engine.MUSCLE_AREAS:
         lo, hi = engine.MUSCLE_WEEKLY_TARGETS[a]
-        sw = round(eff_week[a], 1)
-        sp = round(eff_prev[a], 1)
+        sw = round(eff_week[a] / 2.0, 1)
+        sp = round(eff_prev[a] / 2.0, 1)
         last = last_by_area.get(a)
         days_since = (today - last).days if last else None
         if sw >= hi * 1.15:
@@ -1259,14 +1267,14 @@ def muscle_load(profile_id: int = Query(...), db: Session = Depends(get_db)):
             if enough_data:
                 status, note = "low", f"Alle suositushaarukan ({lo}–{hi} tehollista sarjaa/vk)."
             else:
-                status, note = "info", "Viikko vielä kesken — liian aikaista arvioida."
+                status, note = "info", "Dataa vielä vähän 14 pv jaksolla — liian aikaista arvioida."
         else:
             status = "none" if enough_data else "info"
-            note = ("Ei kuormaa tällä viikolla." if enough_data
-                    else "Viikko vielä kesken — liian aikaista arvioida.")
+            note = ("Ei kuormaa 14 pv jaksolla." if enough_data
+                    else "Dataa vielä vähän 14 pv jaksolla — liian aikaista arvioida.")
         areas.append({
             "area": a, "effective_sets": sw, "prev_sets": sp,
-            "tonnage": round(ton_week[a]), "target_min": lo, "target_max": hi,
+            "tonnage": round(ton_week[a] / 2.0), "target_min": lo, "target_max": hi,
             "status": status, "days_since": days_since, "note": note,
         })
     order = {"low": 0, "none": 1, "high": 2, "ok": 3, "info": 4}
@@ -1367,12 +1375,12 @@ def muscle_load(profile_id: int = Query(...), db: Session = Depends(get_db)):
 
     data_note = None
     if not enough_data:
-        data_note = (f"Tällä 7 pv jaksolla vasta {workouts_week} treeni(ä) — vaje-arviot näytetään "
-                     "vasta kun viikossa on vähintään 2 treeniä, ettei kesken viikon hälytetä turhaan.")
+        data_note = (f"Viimeisen 14 pv aikana vasta {workouts_week} treeni(ä) — vaje-arviot näytetään "
+                     "vasta kun jaksolla on vähintään 3 treeniä, ettei hälytetä turhaan.")
 
     return {
-        "window": {"this_start": this_start.isoformat(), "prev_start": prev_start.isoformat(),
-                   "ref_date": today.isoformat()},
+        "window": {"days": WINDOW, "this_start": this_start.isoformat(),
+                   "prev_start": prev_start.isoformat(), "ref_date": today.isoformat()},
         "workouts_week": workouts_week, "workouts_prev": workouts_prev,
         "areas": areas_sorted, "cns": cns, "suggestions": suggestions,
         "data_note": data_note,

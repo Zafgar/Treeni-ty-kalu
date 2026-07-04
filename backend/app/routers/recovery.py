@@ -134,8 +134,26 @@ def readiness(profile_id: int = Query(...), db: Session = Depends(get_db)):
         return load
 
     acute = load_in(0, 7)
-    chronic4 = load_in(0, 28) / 4.0  # keskiviikko 4 viikolta
-    acwr_info = engine.acwr_status(acute, chronic4)
+    # Krooninen = EDELTÄVIEN 4 viikon keskiarvo (pv 7-35), EI sisällä akuuttia
+    # viikkoa — muuten piikki laimentaisi omaa vertailutasoaan. Lisäksi ACWR
+    # lasketaan vasta kun historiaa on vähintään ~3 viikkoa: muuten uusi
+    # käyttäjä saisi aina "kuormapiikin" koska vertailujakso on tyhjä.
+    all_dates = ([s.session_date for s in workouts] + [c.session_date for c in cardio])
+    history_days = max(((today - d).days for d in all_dates), default=0)
+    chronic4 = load_in(7, 35) / 4.0
+    acwr_info = None
+    if history_days >= 21 and chronic4 > 0:
+        acwr_info = engine.acwr_status(acute, chronic4)
+        if acwr_info:
+            acwr_info["acute_load"] = round(acute)
+            acwr_info["chronic_weekly_avg"] = round(chronic4)
+            acwr_info["note"] = ("Akuutti = viimeisen 7 pv kuorma (rauta-kg + kardio), "
+                                 "krooninen = edeltävien 4 viikon viikkokeskiarvo (pv 7–35). "
+                                 "Optimi ~0.8–1.3; yli 1.5 = äkillinen kuormapiikki.")
+    elif all_dates:
+        acwr_info = {"acwr": None, "zone": "keräysvaihe",
+                     "note": ("Kuormasuhde (ACWR) lasketaan kun treenihistoriaa on "
+                              "vähintään 3 viikkoa — vertailutaso rakentuu vielä.")}
     acwr = acwr_info["acwr"] if acwr_info else None
 
     # Treenifiilis (huono hymiö) viim. 14 pv — auttaa kun muuta dataa on vähän
@@ -257,3 +275,130 @@ def train_today(profile_id: int = Query(...), sore: bool = Query(False),
     return {"verdict": verdict, "level": level, "detail": detail,
             "readiness_score": score if has_data else None,
             "suggest_groups": fresh, "data_note": data_note}
+
+
+# ---------- Palautumismittarien suunta ja henkilökohtainen taso ----------
+
+# Leposykkeen yleiset tasot (aikuinen, levossa). HRV:lle EI ole yleistä
+# asteikkoa — se on hyvin yksilöllinen (laite, ikä, genetiikka), joten HRV:tä
+# verrataan aina vain omaan pitkän ajan tasoon.
+RHR_GENERAL_LEVELS = [
+    (50, "urheilijataso"), (60, "erinomainen"), (70, "hyvä"),
+    (80, "kohtalainen (koholla)"), (999, "korkea — syytä seurata"),
+]
+
+
+def _median(vals: list[float]) -> float:
+    s = sorted(vals)
+    n = len(s)
+    return s[n // 2] if n % 2 else (s[n // 2 - 1] + s[n // 2]) / 2
+
+
+@router.get("/insights")
+def recovery_insights(profile_id: int = Query(...), db: Session = Depends(get_db)):
+    """Unen/HRV:n/leposykkeen suunta, oma normaalitaso ja hälytykset.
+
+    Oma normaalitaso = pitkän jakson (7-42 pv) mediaani; siihen verrataan
+    tuoretta 7 pv keskiarvoa. Hälytysrajat samat kuin valmiuspisteissä
+    (HRV -8 %, leposyke +5 %), ja ne annetaan vain kun dataa on tarpeeksi
+    (vähintään 10 pitkän jakson ja 3 tuoreen jakson havaintoa).
+    """
+    today = date.today()
+    entries = (db.query(models.BodyEntry)
+               .filter(models.BodyEntry.profile_id == profile_id)
+               .order_by(models.BodyEntry.entry_date).all())
+
+    def _vals(key, d_from, d_to):
+        return [getattr(e, key) for e in entries if getattr(e, key) is not None
+                and d_from <= (today - e.entry_date).days < d_to]
+
+    metrics = []
+    alerts = []
+    good = bad = 0
+
+    specs = [
+        # (kenttä, nimi, yksikkö, isompi parempi)
+        ("hrv", "HRV", "ms", True),
+        ("resting_hr", "Leposyke", "bpm", False),
+        ("sleep_hours", "Uni", "h", True),
+    ]
+    for key, label, unit, higher_better in specs:
+        base = _vals(key, 7, 42)
+        recent = _vals(key, 0, 7)
+        if not base and not recent:
+            continue
+        enough = len(base) >= engine.READINESS_MIN_BASE and len(recent) >= engine.READINESS_MIN_RECENT
+        baseline = round(_median(base), 1) if base else None
+        recent_avg = round(sum(recent) / len(recent), 1) if recent else None
+        change_pct = (round((recent_avg - baseline) / baseline * 100, 1)
+                      if (baseline and recent_avg is not None) else None)
+
+        status, note = "neutral", None
+        if enough and change_pct is not None:
+            if key == "hrv":
+                if change_pct <= -8:
+                    status = "alert"
+                    note = (f"HRV on laskenut {abs(change_pct)} % omasta normaalitasostasi (~{baseline} {unit}) "
+                            "— kertynyttä stressiä/väsymystä. Kevennä ja nuku.")
+                elif change_pct >= 5:
+                    status, note = "good", "HRV omaa tasoa korkeammalla — palautuminen kunnossa."
+                else:
+                    status, note = "ok", "Omalla normaalitasolla."
+            elif key == "resting_hr":
+                if change_pct >= 5:
+                    status = "alert"
+                    note = (f"Leposyke on noussut {change_pct} % omasta tasostasi (~{baseline} {unit}) "
+                            "— keho ei ole palautunut (tai alkava sairastuminen).")
+                elif change_pct <= -3:
+                    status, note = "good", "Leposyke omaa tasoa matalampi — hyvä kunto-/palautumismerkki."
+                else:
+                    status, note = "ok", "Omalla normaalitasolla."
+            else:  # uni
+                if recent_avg is not None and recent_avg < 6.5:
+                    status, note = "alert", f"Uni jäänyt lyhyeksi (~{recent_avg} h/yö) — tavoittele 7–9 h."
+                elif recent_avg is not None and recent_avg >= 7:
+                    status, note = "good", "Unimäärä hyvällä tasolla (suositus 7–9 h)."
+                else:
+                    status, note = "ok", "Hieman alle suosituksen (7–9 h)."
+        elif not enough:
+            note = "Kerää dataa säännöllisesti, niin oma normaalitaso ja hälytysrajat tarkentuvat."
+
+        # Yleistaso: leposykkeelle on olemassa yleinen asteikko, HRV:lle ei
+        general = None
+        if key == "resting_hr" and recent_avg is not None:
+            general = next(lbl for lim, lbl in RHR_GENERAL_LEVELS if recent_avg < lim)
+        elif key == "hrv":
+            general = "yksilöllinen — vertaa vain omaan tasoon"
+        elif key == "sleep_hours":
+            general = "suositus 7–9 h/yö"
+
+        if status == "alert":
+            bad += 1
+            alerts.append(note)
+        elif status == "good":
+            good += 1
+        metrics.append({
+            "key": key, "label": label, "unit": unit,
+            "baseline": baseline, "recent": recent_avg, "change_pct": change_pct,
+            "n_base": len(base), "n_recent": len(recent), "enough_data": enough,
+            "status": status, "note": note, "general_level": general,
+            # Hälytysraja näkyviin: mistä lukemasta häly laukeaisi
+            "alert_at": (round(baseline * 0.92, 1) if (key == "hrv" and baseline) else
+                         round(baseline * 1.05, 1) if (key == "resting_hr" and baseline) else
+                         6.5 if key == "sleep_hours" else None),
+            "alert_direction": "alle" if higher_better else "yli",
+        })
+
+    if not metrics:
+        return {"available": False,
+                "note": "Kirjaa unta, HRV:tä ja leposykettä Keho-välilehdellä, niin näet suunnan ja oman tasosi."}
+    if bad:
+        verdict, verdict_label = "declining", "Suunta heikkenevä — kevennä ja panosta uneen"
+    elif good >= 2:
+        verdict, verdict_label = "improving", "Suunta hyvä — palautuminen toimii"
+    elif good:
+        verdict, verdict_label = "stable", "Vakaa, osin paranee"
+    else:
+        verdict, verdict_label = "stable", "Vakaa"
+    return {"available": True, "metrics": metrics, "alerts": alerts,
+            "verdict": verdict, "verdict_label": verdict_label}

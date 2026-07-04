@@ -1282,9 +1282,9 @@ async function loadMuscleLoad() {
   const tone = { low: "#f59e0b", none: "#ef4444", high: "#e66767", ok: "var(--accent-2)", info: "var(--muted)" };
   const statusLabel = { low: "vajaa", none: "ei kuormaa", high: "paljon", ok: "hyvä", info: "kesken" };
   div.append(el("div", { class: "muted", style: "margin-bottom:8px" },
-    `${data.workouts_week} treeniä tällä 7 pv jaksolla (edellinen: ${data.workouts_prev}). ` +
-    "Teholliset sarjat sisältävät myös epäsuoran kuorman (esim. penkki kerryttää ojentajia). " +
-    "Värillinen palkki = tehty, vihreä vyöhyke = suositushaarukka."));
+    `${data.workouts_week} treeniä viimeisen 14 pv aikana (edellinen 14 pv: ${data.workouts_prev}). ` +
+    "Luvut ovat tehollisia sarjoja/viikko (14 pv keskiarvo), epäsuora kuorma mukana " +
+    "(esim. penkki kerryttää ojentajia). Värillinen palkki = tehty, vihreä vyöhyke = suositushaarukka."));
   if (data.data_note) {
     div.append(el("div", { class: "muted", style: "margin-bottom:8px;font-style:italic" }, `ℹ ${data.data_note}`));
   }
@@ -1300,12 +1300,12 @@ async function loadMuscleLoad() {
     div.append(el("div", { style: "margin-bottom:7px" },
       el("div", { class: "row-between", style: "font-size:0.9em" },
         el("span", {}, el("strong", { style: "text-transform:capitalize" }, a.area),
-          el("span", { class: "muted" }, ` ${a.effective_sets}${trend} / ${a.target_min}–${a.target_max} sarjaa`)),
+          el("span", { class: "muted" }, ` ${a.effective_sets}${trend} / ${a.target_min}–${a.target_max} sarjaa/vk`)),
         el("span", { class: "tag", style: `color:${tone[a.status]};border-color:${tone[a.status]}` }, statusLabel[a.status] || a.status)),
       el("div", { style: "position:relative;height:8px;background:var(--bg);border-radius:4px;overflow:hidden;margin-top:2px" },
         el("div", { style: `position:absolute;left:${zoneLeft}%;width:${zoneWidth}%;height:100%;background:color-mix(in srgb, var(--accent-2) 22%, transparent)` }),
         el("div", { style: `position:absolute;left:0;width:${pct}%;height:100%;background:${tone[a.status]};border-radius:4px;opacity:0.85` })),
-      el("div", { class: "muted", style: "font-size:0.78em" }, `${last} · ~${a.tonnage} kg alueelle tällä viikolla`)));
+      el("div", { class: "muted", style: "font-size:0.78em" }, `${last} · ~${a.tonnage} kg/vk alueelle`)));
   });
   // Hermostokuorma
   if (data.cns) {
@@ -2064,10 +2064,12 @@ function renderBodyFigure(sites, height, sex, bodyFat) {
   const dateSet = new Set();
   siteNames.forEach((s) => sites[s].forEach((p) => dateSet.add(p.date)));
   const dates = [...dateSet].sort();
+  const SITE_ALIAS = { hartia: "hartiat", rintakehä: "rinta", pohje: "pohkeet", reisi: "reidet" };
   function valueAsOf(site, dateStr) {
-    if (!sites[site]) return null;
+    const arr = sites[site] || sites[SITE_ALIAS[site]];
+    if (!arr) return null;
     let v = null;
-    for (const p of sites[site]) { if (p.date <= dateStr) v = p.value; }
+    for (const p of arr) { if (p.date <= dateStr) v = p.value; }
     return v;
   }
 
@@ -2187,7 +2189,12 @@ function renderBodyFigure(sites, height, sex, bodyFat) {
     const R = (c) => c / (2 * Math.PI); // ympärys -> säde (cm)
     const rNeck = R(C("kaula")), rChest = R(C("rintakehä")), rWaist = R(C("vyötärö"));
     const rHip = R(C("lantio")), rArm = R(C("hauis")), rThigh = R(C("reisi")), rCalf = R(C("pohje"));
-    const shoulderHalf = C("hartia") / 3.3 * (female ? 0.95 : 1.0);
+    // Hartiaympärys -> visuaalinen puolileveys: ympärysmitta kiertää rinnan
+    // ja hartiat, joten olkapäiden ulkoleveys on ~ympärys/2.4 (puolikas /4.8).
+    // Aiempi /3.3 venytti hartiat kauas sivuille isoilla mitoilla. Lisäksi
+    // rajataan suhteessa rintakehään ettei mittavirhe riko hahmoa.
+    const shoulderRaw = C("hartia") / 4.8 * (female ? 0.95 : 1.0);
+    const shoulderHalf = Math.max(rChest * 1.25, Math.min(shoulderRaw, rChest * 1.8));
 
     const chestK = female ? 1.15 : 1.26, chestD = female ? 0.9 : 0.8;
     const waistK = 1.1 - 0.12 * fat, waistD = 0.8 + 0.28 * fat;
@@ -3027,9 +3034,13 @@ async function loadReadiness() {
     el("td", {}, f.change_pct != null ? `${f.change_pct > 0 ? "+" : ""}${f.change_pct}%` : "—"))));
   div.append(tbl);
   if (r.acwr) {
+    const a = r.acwr;
     div.append(el("div", { class: "muted", style: "margin-top:6px",
-      title: "Akuutti (tämä viikko) vs. krooninen (4 vk ka.) treenikuorma. 0.8–1.3 = optimaalinen, yli 1.5 = piikki." },
-      `Kuormasuhde ACWR ${r.acwr.acwr} (${r.acwr.zone})`));
+      title: a.note || "Akuutti (viim. 7 pv) vs. krooninen (edeltävien 4 vk ka.) treenikuorma. 0.8–1.3 = optimaalinen, yli 1.5 = piikki." },
+      a.acwr != null
+        ? `Kuormasuhde ACWR ${a.acwr} (${a.zone})` +
+          (a.acute_load != null ? ` · akuutti ${a.acute_load} vs. krooninen ~${a.chronic_weekly_avg}/vk` : "")
+        : `Kuormasuhde ACWR: ${a.note}`));
   }
 }
 
@@ -3107,6 +3118,36 @@ document.getElementById("cardio-save").addEventListener("click", async () => {
   loadCardio(); loadReadiness();
 });
 
+// Palautumismittarien suunta + oma normaalitaso + hälytysrajat
+async function loadRecoveryInsights() {
+  const div = document.getElementById("recovery-insights");
+  if (!div) return;
+  div.innerHTML = "";
+  const d = await api.get(pq("/api/recovery/insights"));
+  if (!d.available) { div.append(el("p", { class: "muted" }, d.note)); return; }
+  const vTone = { improving: "var(--accent-2)", stable: "var(--muted)", declining: "#f59e0b" }[d.verdict];
+  div.append(el("div", { style: `font-weight:600;color:${vTone};margin:8px 0 6px` },
+    (d.verdict === "improving" ? "📈 " : d.verdict === "declining" ? "📉 " : "➡ ") + d.verdict_label));
+  const tone = { good: "var(--accent-2)", ok: "var(--muted)", alert: "#ef4444", neutral: "var(--muted)" };
+  const icon = { good: "✓", ok: "•", alert: "⚠", neutral: "•" };
+  d.metrics.forEach((m) => {
+    const bits = [];
+    if (m.recent != null) bits.push(`nyt ${m.recent} ${m.unit}`);
+    if (m.baseline != null) bits.push(`oma normaali ~${m.baseline} ${m.unit}`);
+    if (m.change_pct != null) bits.push(`${m.change_pct > 0 ? "+" : ""}${m.change_pct} %`);
+    if (m.general_level) bits.push(m.general_level);
+    div.append(el("div", { style: "margin-bottom:6px" },
+      el("div", {},
+        el("span", { style: `color:${tone[m.status]};font-weight:600` }, `${icon[m.status]} ${m.label}: `),
+        el("span", { class: "muted" }, bits.join(" · "))),
+      m.note ? el("div", { class: "muted", style: "font-size:0.82em" }, m.note) : "",
+      (m.enough_data && m.alert_at != null)
+        ? el("div", { class: "muted", style: "font-size:0.78em" },
+            `Häly jos 7 pv keskiarvo ${m.alert_direction} ${m.alert_at} ${m.unit}`)
+        : ""));
+  });
+}
+
 async function loadRecovery() {
   document.getElementById("cardio-date").value = new Date().toISOString().slice(0, 10);
   await loadReadiness();
@@ -3133,6 +3174,7 @@ async function loadRecovery() {
   if (!series.length) legend.append(el("span", { class: "muted" }, "Lisää uni-/HRV-/syke-dataa Keho-välilehdellä."));
   else legend.append(el("span", { class: "muted" }, " · arvot normalisoitu 0–100 vertailtavuuden vuoksi"));
   drawLineChart(document.getElementById("recovery-chart"), series, {});
+  await loadRecoveryInsights();
 
   // Korrelaatiotyökalu
   const metrics = await api.get("/api/stats/correlation/metrics");
