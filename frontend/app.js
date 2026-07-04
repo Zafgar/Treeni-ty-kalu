@@ -3222,7 +3222,37 @@ TAB_LOADERS.diet = loadDiet;
 TAB_LOADERS.profiles = loadProfilesTab;
 
 // ---------- Käynnistys ----------
+// Lucide-ikonisprite (vendoroitu, toimii offline) + välilehtien ikonit
+const TAB_ICONS = {
+  overview: "layout-dashboard", progress: "trending-up", recovery: "heart-pulse",
+  body: "person-standing", workouts: "dumbbell", programs: "calendar-days",
+  exercises: "clipboard-list", nutrition: "apple", diet: "salad",
+  profiles: "users", calc: "calculator",
+};
+
+async function initIcons() {
+  try {
+    const res = await fetch("/static/vendor/icons.svg");
+    const holder = document.createElement("div");
+    holder.innerHTML = await res.text();
+    holder.style.display = "none";
+    document.body.prepend(holder);
+    document.querySelectorAll("nav#tabs button").forEach((b) => {
+      const name = TAB_ICONS[b.dataset.tab];
+      if (!name) return;
+      const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      svg.setAttribute("class", "ico");
+      svg.setAttribute("width", "16"); svg.setAttribute("height", "16");
+      const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
+      use.setAttribute("href", `#i-${name}`);
+      svg.append(use);
+      b.prepend(svg);
+    });
+  } catch { /* ikonit ovat koriste — sovellus toimii ilmankin */ }
+}
+
 (async function init() {
+  initIcons();
   await loadProfiles();
   await loadExercises();
   await loadPrograms();

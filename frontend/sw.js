@@ -7,8 +7,10 @@
 // päivitysten jälkeen.)
 //
 // Versionumeroa nostamalla vanha välimuisti tyhjenee aktivoinnissa.
-const CACHE = "treeni-v13";
-const ASSETS = ["/", "/static/style.css", "/static/app.js", "/static/vendor/three.min.js", "/icon.svg", "/manifest.json"];
+const CACHE = "treeni-v14";
+const ASSETS = ["/", "/static/style.css", "/static/app.js", "/static/vendor/three.min.js",
+  "/static/vendor/icons.svg", "/static/vendor/outfit-latin-wght-normal.woff2",
+  "/static/vendor/inter-latin-wght-normal.woff2", "/icon.svg", "/manifest.json"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting()));
