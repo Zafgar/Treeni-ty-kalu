@@ -1719,3 +1719,174 @@ def bf_from_bia_anchor(anchor_bf_pct: float, anchor_weight: float | None,
         "muscle_change_kg": round(d_w - (fat_now - fat_anchor), 1),
         "basis": basis,
     }
+
+
+# ---------- Ruoan laadun monipäiväinen arvio ----------
+# Kun samat epäedulliset makrot toistuvat useana päivänä (vähän proteiinia,
+# paljon herkkuja, vähän kasviksia), järjestelmä ehdottaa järkevämpää
+# lähestymistä. Huono ruoka ei näy vain vaa'assa: se voi selittää väsyneet
+# treenit, kehityksen pysähtymisen ja rasvan kertymisen. Arvio annetaan vain
+# kun kirjattuja päiviä on tarpeeksi (data edellä).
+def nutrition_quality(style: dict | None, bodyweight: float | None,
+                      goal: str = "maintain") -> dict | None:
+    """Pisteytä toteutunut syömistyyli (0–100) ja anna järkevämpi lähestymistapa.
+
+    style: _macro_style-tyyppinen dict (protein_g, fat_g, carb_share, fat_share,
+    treat_share, veg_g, kcal, n_days). Palauttaa None jos dataa liian vähän.
+    """
+    if not style or not bodyweight or style.get("n_days", 0) < 5:
+        return None
+    score = 100.0
+    issues = []
+    p_per_kg = style["protein_g"] / bodyweight
+    f_per_kg = style["fat_g"] / bodyweight
+    treat = style.get("treat_share", 0.0)
+    veg = style.get("veg_g", 0.0)
+
+    if p_per_kg < 1.2:
+        score -= 24
+        issues.append({"key": "protein", "severity": "high",
+                       "text": f"Proteiinia vain ~{style['protein_g']} g/pv (~{p_per_kg:.1f} g/kg). "
+                               "Treenaavalle tavoite ~1.6–2.2 g/kg. Tämä hidastaa palautumista ja "
+                               "lihasten kehitystä — helppoja lisiä: rahka, raejuusto, kana, tonnikala, skyr."})
+    elif p_per_kg < 1.6:
+        score -= 10
+        issues.append({"key": "protein", "severity": "med",
+                       "text": f"Proteiini ~{p_per_kg:.1f} g/kg — hieman alle optimin (1.6–2.2 g/kg). "
+                               "Lisää yksi proteiinilähde per ateria."})
+    if treat >= 0.35:
+        score -= 30
+        issues.append({"key": "treats", "severity": "high",
+                       "text": f"Herkut ja alkoholi ovat ~{round(treat*100)} % kaloreistasi — tämä on iso osuus. "
+                               "Ne tuovat paljon energiaa mutta vähän ravinteita: seuraus on usein huono "
+                               "palautuminen, väsyneet treenit ja rasvan kertyminen. Pudota ~10–15 %:iin."})
+    elif treat >= 0.25:
+        score -= 16
+        issues.append({"key": "treats", "severity": "med",
+                       "text": f"Herkut/alkoholi ~{round(treat*100)} % kaloreista — hieman paljon. "
+                               "Vaihda osa proteiiniin ja hedelmiin, niin tavoite pysyy helpommin."})
+    if veg < 150:
+        score -= 18
+        issues.append({"key": "veg", "severity": "high",
+                       "text": f"Kasviksia/hedelmiä vain ~{round(veg)} g/pv — tavoite ~500 g/pv. "
+                               "Kuitu ja vitamiinit tukevat vatsaa, kylläisyyttä ja palautumista."})
+    elif veg < 300:
+        score -= 10
+        issues.append({"key": "veg", "severity": "med",
+                       "text": f"Kasviksia ~{round(veg)} g/pv — nosta kohti 500 g. Lisää jotain vihreää joka aterialle."})
+    if f_per_kg < 0.6:
+        score -= 10
+        issues.append({"key": "fat", "severity": "med",
+                       "text": f"Rasvaa vain ~{f_per_kg:.1f} g/kg — hormonitoiminta tarvitsee ~0.8–1 g/kg. "
+                               "Lisää pähkinöitä, oliiviöljyä, lohta tai avokadoa."})
+    if goal == "cut" and style.get("carb_share", 0) > 0.55 and p_per_kg < 1.8:
+        score -= 8
+        issues.append({"key": "carbs_cut", "severity": "low",
+                       "text": "Hiilarit yli puolet kaloreista dieetillä — proteiinin nosto hiilarin tilalle "
+                               "auttaa kylläisyyteen ja lihasten säilymiseen."})
+
+    score = int(max(0, min(100, round(score))))
+    if score >= 75:
+        level, label = "hyva", "Ruokavalio on kunnossa"
+    elif score >= 50:
+        level, label = "kohtalainen", "Ruokavaliossa on parannettavaa"
+    else:
+        level, label = "heikko", "Ruokavalio kaipaa selkeää korjausta"
+
+    # Energiataso-/palautumislippu: toistuva huono ruoka verottaa treenejä
+    energy_flag = (treat >= 0.3) or (p_per_kg < 1.2) or (veg < 150)
+    energy_note = None
+    if energy_flag:
+        energy_note = ("Tämäntyyppinen ruokavalio voi selittää monta asiaa: väsyneet treenit, "
+                       "kehityksen tyssäämisen ja sen ettei ylläpito toteudu (rasvan kertymisen riski). "
+                       "Laadun korjaus näkyy usein nopeasti energiassa ja treeneissä.")
+
+    # Järkevämpi lähestymistapa: 1–2 tärkeintä asiaa tavoitteen mukaan
+    top = [i for i in issues if i["severity"] == "high"][:2] or issues[:1]
+    if top:
+        focus = {"protein": "nosta proteiini joka aterialle",
+                 "treats": "puolita herkut/alkoholi",
+                 "veg": "lisää kasviksia ~500 g/pv",
+                 "fat": "lisää terveitä rasvoja",
+                 "carbs_cut": "siirrä osa hiilareista proteiiniin"}
+        parts = [focus.get(i["key"]) for i in top if focus.get(i["key"])]
+        goal_txt = {"cut": "Dieetillä", "bulk": "Massalla", "maintain": "Ylläpidossa"}.get(goal, "")
+        better_approach = (f"{goal_txt} tärkein korjaus: " + " ja ".join(parts) +
+                           ". Pidä muu ennallaan — pienet muutokset riittävät kun ne toistuvat.")
+    else:
+        better_approach = "Ruokavalio tukee tavoitettasi hyvin — jatka samaan malliin."
+
+    return {
+        "available": True, "score": score, "level": level, "label": label,
+        "n_days": style["n_days"], "issues": issues,
+        "energy_flag": energy_flag, "energy_note": energy_note,
+        "better_approach": better_approach,
+    }
+
+
+def today_food_advice(kcal_today: float, protein_today: float, treat_kcal_today: float,
+                      target_kcal: float | None, target_protein: float | None) -> dict | None:
+    """Saman päivän korjaava ohjaus: jos päivä on jo mennyt herkkuvoittoiseksi tai
+    yli/ali tavoitteen, ehdota konkreettisesti mitä loppupäivänä ja huomenna kannattaa
+    tehdä. Ei nolaa yksittäisestä herkusta — reagoi vasta kun päivä selvästi vinossa."""
+    if kcal_today <= 0:
+        return None
+    tips = []
+    over = (target_kcal and kcal_today > target_kcal + 300)
+    treat_share = treat_kcal_today / kcal_today if kcal_today else 0
+    low_protein = (target_protein and protein_today < target_protein * 0.6)
+
+    if treat_share >= 0.3 and treat_kcal_today >= 400:
+        tips.append("Herkkuja kertyi jo reilusti — jätä loppupäivä herkuitta ja painota proteiinia "
+                    "ja kasviksia (kana, rahka, tonnikala, kananmuna, salaatti).")
+    if over:
+        tips.append(f"Päivä on jo ~{round(kcal_today - target_kcal)} kcal yli tavoitteen. Kevennä "
+                    "loppupäivän ateriat proteiiniin ja kasviksiin (vähän rasvaa/hiilaria) ja juo vettä.")
+        tips.append("Tasoita huominen: pidä se hieman tavoitteen alle — viikon keskiarvo ratkaisee, "
+                    "ei yksittäinen päivä. Yksi runsas päivä ei pilaa mitään jos muut ovat kunnossa.")
+    if low_protein:
+        need = round(target_protein - protein_today)
+        tips.append(f"Proteiinia puuttuu vielä ~{need} g tavoitteesta — lisää illaksi esim. raejuustoa, "
+                    "rahkaa, kanaa tai heraproteiinia.")
+    if not tips:
+        return None
+    return {"tips": tips[:3]}
+
+
+def waist_weight_direction(weight_change_kg_month: float | None,
+                           waist_change_cm_month: float | None,
+                           has_enough: bool) -> dict | None:
+    """Kuukauden mittainen vyötärö+paino-tuomio. EI yliherkkä: pieni heilahdus
+    (turvotus, mittaustarkkuus) ei hälytä. Selvä signaali = paino JA vyötärö
+    nousevat yhdessä kuukauden aikana -> väärä suunta, nopeat korjaukset.
+
+    Vaatii tarpeeksi dataa (has_enough): muuten yksi mittaus ei kerro suuntaa.
+    """
+    if not has_enough or weight_change_kg_month is None or waist_change_cm_month is None:
+        return None
+    w = weight_change_kg_month
+    waist = waist_change_cm_month
+    # Väärä suunta: vyötärö +>=2 cm/kk JA paino noussut (>=0.8 kg/kk) -> rasvaa,
+    # ei turvotusta (turvotus ei nostaisi molempia johdonmukaisesti kuukaudessa).
+    if waist >= 2.0 and w >= 0.8:
+        return {"status": "bad", "title": "Suunta kääntynyt väärään — rasvaa kertyy",
+                "text": (f"Kuukaudessa vyötärö +{waist:.1f} cm ja paino +{w:.1f} kg. Kun MOLEMMAT "
+                         "nousevat yhtä aikaa, kyse ei ole turvotuksesta vaan rasvan kertymisestä. "
+                         "Nopeat korjaukset: leikkaa herkut/alkoholi puoleen, nosta proteiini ja "
+                         "kasvikset, lisää arkiaskeleita/kevyttä kardiota, ja tarkista annoskoot. "
+                         "Tartu nyt — kuukausi lisää samaa on jo useampi kilo."),
+                "action": True}
+    # Hyvä: vyötärö kaventuu, paino vakaa/nousee maltilla -> koostumus paranee
+    if waist <= -1.0 and w <= 1.0:
+        return {"status": "good", "title": "Suunta oikea — koostumus paranee",
+                "text": (f"Kuukaudessa vyötärö {waist:.1f} cm ja paino {w:+.1f} kg — hyvä merkki: "
+                         "rasva vähenee tai tilalle tulee lihasta. Jatka samaan malliin."),
+                "action": False}
+    # Lievä nousu molemmissa mutta alle hälytysrajan -> seuranta, ei paniikkia
+    if waist >= 1.0 and w >= 0.3:
+        return {"status": "watch", "title": "Pidä silmällä",
+                "text": (f"Vyötärö +{waist:.1f} cm ja paino +{w:.1f} kg kuukaudessa — vielä maltillista "
+                         "eikä hälytä (voi olla osin normaalia vaihtelua). Jos sama jatkuu ensi kuun, "
+                         "kevennä hieman ruokaa. Seuraa muutamaa mittausta lisää ennen isoja muutoksia."),
+                "action": False}
+    return None

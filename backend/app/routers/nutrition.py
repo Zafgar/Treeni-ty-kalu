@@ -214,6 +214,7 @@ def summary(
     logs = db.query(models.FoodLog).filter(models.FoodLog.profile_id == profile_id).all()
 
     today_totals = {"kcal": 0.0, "protein_g": 0.0, "carbs_g": 0.0, "fat_g": 0.0}
+    today_treat_kcal = 0.0
     by_date: dict[date, dict] = {}
     for log in logs:
         m = _macros(log.food, log.grams)
@@ -223,6 +224,8 @@ def summary(
         if log.entry_date == target_date:
             for k in today_totals:
                 today_totals[k] += m[k]
+            if (log.food.category or "").lower() in ("herkut", "alkoholi", "pikaruoka"):
+                today_treat_kcal += m["kcal"]
 
     timeline = [
         {"date": d.isoformat(), **{k: round(v) for k, v in by_date[d].items()}}
@@ -241,9 +244,25 @@ def summary(
                 for k in today_totals}
         avg7["days_logged"] = days_logged
         avg7["window_days"] = 7
+    # Saman päivän korjaava ohjaus: jos päivä on jo mennyt herkkuvoittoiseksi tai
+    # yli tavoitteen, ehdota mitä loppupäivänä/huomenna kannattaa tehdä.
+    today_advice = None
+    if today_totals["kcal"] > 0:
+        try:
+            from .diet import _current_targets
+            from .. import engine
+            targets, _ = _current_targets(db, profile_id)
+            if targets:
+                today_advice = engine.today_food_advice(
+                    today_totals["kcal"], today_totals["protein_g"], today_treat_kcal,
+                    targets.get("kcal"), targets.get("protein_g"))
+        except Exception:  # noqa: BLE001
+            pass
+
     return {
         "date": target_date.isoformat(),
         "today": {k: round(v, 1) for k, v in today_totals.items()},
         "avg7": avg7,
+        "today_advice": today_advice,
         "timeline": timeline,
     }

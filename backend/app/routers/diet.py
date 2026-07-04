@@ -398,6 +398,9 @@ def diet_status(profile_id: int = Query(...), db: Session = Depends(get_db)):
                               f"(ruokaa ei kirjattu). ") + recommendation
 
     food_notes = _food_notes(style, week_avg, goal)
+    # Monipäiväinen ruoan laadun arvio (pisteet + järkevämpi lähestymistapa +
+    # palautumis-/energialippu). Vain kun kirjattuja päiviä on tarpeeksi.
+    nutrition_quality = engine.nutrition_quality(style, week_avg, goal)
 
     # Vyötärö (viimeisin) bulk-rajaa varten
     waist = (
@@ -445,6 +448,7 @@ def diet_status(profile_id: int = Query(...), db: Session = Depends(get_db)):
         "intake_estimated": intake_estimated,
         "macro_style": style,
         "food_notes": food_notes,
+        "nutrition_quality": nutrition_quality,
         "targets": targets,
         "day_targets": day_targets,
         "weekly_review": review,

@@ -2711,6 +2711,14 @@ async function renderDayLog() {
   } catch (e) {}
   today.append(box);
 
+  // Saman päivän korjaavat neuvot (herkkuvoittoinen / yli tavoitteen päivä)
+  if (s.today_advice && s.today_advice.tips && s.today_advice.tips.length) {
+    const adv = el("div", { class: "result-box", style: "margin-top:10px;border-color:var(--warn)" },
+      el("strong", {}, "💡 Näin korjaat loppupäivän ja huomisen"));
+    s.today_advice.tips.forEach((t) => adv.append(el("div", { class: "muted", style: "margin-top:4px" }, "• " + t)));
+    today.append(adv);
+  }
+
   const logs = await api.get(pq("/api/nutrition/logs") + "&on_date=" + nDate());
   const log = document.getElementById("today-log");
   log.innerHTML = "";
@@ -2966,8 +2974,29 @@ async function renderDietStatus() {
     div.append(el("div", { class: "muted", style: "margin-top:6px" }, "🍽 " + s.targets.style_note));
   }
 
-  // Ruokavalion huomiot (vain kun kirjattua dataa on tarpeeksi)
-  if (s.food_notes && s.food_notes.length) {
+  // Ruokavalion laadun arvio (monipäiväinen, pisteet + järkevämpi lähestymistapa)
+  const nq = s.nutrition_quality;
+  if (nq && nq.available) {
+    const tone = { hyva: "var(--accent-2)", kohtalainen: "var(--warn)", heikko: "var(--danger)" }[nq.level];
+    const card = el("div", { class: "card" },
+      el("h3", {}, "Ruokavalion laatu"),
+      el("div", { class: "result-box", style: `border-color:${tone}` },
+        el("div", { class: "row-between" },
+          el("div", { class: "big", style: `color:${tone}` }, `${nq.score}/100`),
+          el("span", { class: "tag", style: `color:${tone};border-color:${tone}` }, nq.label)),
+        el("div", { class: "muted", style: "margin-top:6px" }, `Arvio ${nq.n_days} kirjatusta päivästä (toistuvat valinnat).`),
+        el("div", { style: "margin-top:8px" }, el("strong", {}, "Järkevämpi lähestymistapa: "),
+          el("span", {}, nq.better_approach))));
+    if (nq.energy_note)
+      card.querySelector(".result-box").append(
+        el("div", { class: "muted", style: "margin-top:8px;color:var(--warn)" }, "⚡ " + nq.energy_note));
+    if (nq.issues && nq.issues.length) {
+      nq.issues.forEach((i) => card.append(el("div", { class: "item", style: "border-left:3px solid " + tone },
+        el("div", { class: "muted" }, i.text))));
+    }
+    div.append(card);
+  } else if (s.food_notes && s.food_notes.length) {
+    // Vähemmän dataa: näytä yksittäiset huomiot
     const card = el("div", { class: "card" }, el("h3", {}, "Ruokavalion huomiot"));
     s.food_notes.forEach((n) => card.append(el("div", { class: "item", style: "border-left:3px solid #f59e0b" },
       el("div", { class: "muted" }, n))));

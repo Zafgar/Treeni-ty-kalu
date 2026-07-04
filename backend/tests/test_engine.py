@@ -590,3 +590,35 @@ def test_experience_rate_calibration():
     assert abs(engine.experience_rate_calibration("kokenut", 1.0) - 1.0) < 1e-9
     # Tuntematon/ei vastausta -> neutraali
     assert engine.experience_rate_calibration(None, 0.2) == 1.0
+
+
+def test_nutrition_quality_and_direction_helpers():
+    from app import engine
+    # Huono tyyli: vähän proteiinia, paljon herkkuja, vähän kasviksia
+    bad = {"protein_g": 70, "fat_g": 60, "carb_share": 0.5, "fat_share": 0.35,
+           "treat_share": 0.4, "veg_g": 100, "kcal": 2500, "n_days": 6}
+    q = engine.nutrition_quality(bad, 85, "maintain")
+    assert q["level"] == "heikko" and q["energy_flag"] is True
+    assert q["score"] < 50 and q["better_approach"]
+    # Hyvä tyyli
+    good = {"protein_g": 170, "fat_g": 80, "carb_share": 0.4, "fat_share": 0.3,
+            "treat_share": 0.08, "veg_g": 550, "kcal": 2600, "n_days": 7}
+    assert engine.nutrition_quality(good, 85, "maintain")["level"] == "hyva"
+    # Liian vähän dataa -> None
+    assert engine.nutrition_quality({**good, "n_days": 3}, 85) is None
+
+    # Kuukauden suunta: molemmat nousevat selvästi -> väärä suunta
+    v = engine.waist_weight_direction(1.5, 2.5, True)
+    assert v["status"] == "bad" and v["action"] is True
+    # Pieni muutos EI hälytä (turvotus/tarkkuus)
+    assert engine.waist_weight_direction(0.2, 0.5, True) is None
+    # Ei tarpeeksi dataa -> None vaikka luvut isot
+    assert engine.waist_weight_direction(1.5, 2.5, False) is None
+    # Vyötärö kaventuu -> hyvä
+    assert engine.waist_weight_direction(0.3, -1.5, True)["status"] == "good"
+
+    # Saman päivän neuvot: herkkuvoittoinen + proteiinivaje
+    adv = engine.today_food_advice(3200, 40, 1200, 2600, 180)
+    assert adv and len(adv["tips"]) >= 2
+    # Siisti päivä -> ei neuvoja
+    assert engine.today_food_advice(2000, 160, 100, 2600, 180) is None

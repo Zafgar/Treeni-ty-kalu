@@ -265,6 +265,16 @@ def direction(profile_id: int = Query(...), db: Session = Depends(get_db)):
     waist_rate = site_rate("vyötärö")
     if waist_rate is None and "vyötärö" not in by_site:
         data_needs.append("vyötärömitta ~2 vk välein")
+
+    # Kuukauden ABSOLUUTTINEN muutos (turvotus vs. aito suunta). Vaatii ≥2
+    # mittausta jotka kattavat vähintään 21 pv — yksi mittaus ei kerro suuntaa.
+    def month_change(pts):
+        recent = [p for p in pts if (today - p[0]).days <= 40]
+        if len(recent) >= 2 and (recent[-1][0] - recent[0][0]).days >= 21:
+            return round(recent[-1][1] - recent[0][1], 1)
+        return None
+    waist_month = month_change(by_site.get("vyötärö", []))
+    weight_month = month_change(w_pts)
     muscle_sites = ["hauis", "reisi", "rintakehä", "hartia", "pohje", "lantio"]
     muscle_rates = {s: r for s in muscle_sites if (r := site_rate(s)) is not None}
     growing = [s for s, r in muscle_rates.items() if r > 0.05]
@@ -290,10 +300,12 @@ def direction(profile_id: int = Query(...), db: Session = Depends(get_db)):
                             "text": (f"Paino vakaa ({weight_trend:+.1f} kg/vk) mutta vyötärö kaventuu "
                                      f"({waist_rate:.2f} cm/vk) — rasva vähenee ja tilalle tulee lihasta. "
                                      "Syöminen on onnistunut erinomaisesti.")})
-        elif stable and waist_rate >= 0.08:
+        elif stable and waist_rate >= 0.18:
+            # ~0.8 cm/kk asti ei hälytetä (turvotus/mittaustarkkuus); yli sen
+            # johdonmukainen kasvu paino vakaana = rasvaa tilalle.
             score -= 2
             factors.append({"status": "bad", "title": "Rasvaa kertyy vaikka paino ei nouse",
-                            "text": (f"Paino vakaa mutta vyötärö kasvaa ({waist_rate:+.2f} cm/vk) — "
+                            "text": (f"Paino vakaa mutta vyötärö kasvaa selvästi ({waist_rate:+.2f} cm/vk) — "
                                      "koostumus heikkenee. Tarkista ruokavalion laatu (herkut/alkoholi), "
                                      "uni ja arkiliikunta.")})
         elif weight_trend < -0.2 and waist_rate <= -0.05:
@@ -348,6 +360,40 @@ def direction(profile_id: int = Query(...), db: Session = Depends(get_db)):
         score += min(1, care_n // 2)
         factors.append({"status": "good", "title": "Lihashuolto plussaa",
                         "text": f"Lihashuoltoa {care_n} krt viikossa — tukee palautumista ja liikkuvuutta."})
+
+    # --- Kuukauden vyötärö+paino-tuomio (laaja katsaus, ei yliherkkä) ---
+    # Vahvin signaali kun BOTH nousevat kuukaudessa: aito väärä suunta, ei turvotus.
+    mv = engine.waist_weight_direction(weight_month, waist_month,
+                                       has_enough=(weight_month is not None and waist_month is not None))
+    if mv:
+        # Vältä tuplavaroitus jos viikkotason recomp-tekijä jo kertoi saman
+        titles = {f["title"] for f in factors}
+        if mv["title"] not in titles:
+            factors.append(mv)
+            score += {"bad": -3, "watch": 0, "good": 2}.get(mv["status"], 0)
+
+    # --- Ruoan laatu osana kokonaiskuvaa (selittää usein hitaan kehityksen) ---
+    try:
+        from .diet import _macro_style as _ms
+        _style = _ms(db, profile_id, today)
+        _bw = w_pts[-1][1] if w_pts else None
+        nq = engine.nutrition_quality(_style, _bw)
+        if nq:
+            if nq["level"] == "heikko" or nq.get("energy_flag"):
+                score -= 2
+                factors.append({"status": "bad" if nq["level"] == "heikko" else "warn",
+                                "title": "Ruokavalion laatu jarruttaa",
+                                "text": nq["better_approach"] +
+                                        ((" " + nq["energy_note"]) if nq.get("energy_note") else "")})
+            elif nq["level"] == "hyva":
+                score += 1
+                factors.append({"status": "good", "title": "Ruokavalion laatu tukee kehitystä",
+                                "text": f"Syömisen laatu on kunnossa ({nq['score']}/100, {nq['n_days']} pv) — "
+                                        "hyvä pohja tuloksille."})
+        elif not any("ruok" in n.lower() for n in data_needs):
+            data_needs.append("ruokaa säännöllisesti (~5 pv) laatuarvioon")
+    except Exception:  # noqa: BLE001
+        pass
 
     enough = len(factors) >= 2
     if not enough:
