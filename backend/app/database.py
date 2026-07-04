@@ -969,6 +969,60 @@ EXTRA_FOODS += [
     ("Vaalea sämpylä", "leipä & viljat", 265, 9, 50, 3, 70),
 ]
 
+# Käyttäjän toivelista 2: kotitekoinen pizza, pikaruokaketjujen KOKONAISET
+# annokset (yksi klikkaus = koko hampurilainen; grammat = annoksen paino),
+# jaetut limut ja uunituotteet.
+EXTRA_FOODS += [
+    # --- Kotitekoinen pizza (laskettu aineksista) ---
+    # 2 peltiä: pizzapohjat+tomaattisoosi 800 g, juustoraaste 400 g, jauheliha
+    # 10% (400 g raaka -> ~320 g kypsä), pepperoni 120 g -> 1640 g, 4656 kcal.
+    ("Jauheliha-pepperonipizza (kotitekoinen)", "pikaruoka", 284, 16, 24, 14, 410),
+    ("Kotitekoinen pizza (juusto-kinkku)", "pikaruoka", 250, 12, 30, 9, 400),
+    # --- Burger King (koko annos) ---
+    ("Whopper (BK)", "pikaruoka", 233, 10, 18.5, 12.6, 270),
+    ("Tuplawhopper (BK)", "pikaruoka", 240, 12.8, 13.3, 14.9, 375),
+    ("Crispy Chicken (BK)", "pikaruoka", 263, 11, 24, 13, 190),
+    ("Chicken King (BK)", "pikaruoka", 270, 12, 22.6, 14.3, 230),
+    ("Steakhouse (BK)", "pikaruoka", 241, 10.7, 16.6, 14.1, 290),
+    ("Bacon King (BK)", "pikaruoka", 288, 15, 12, 20, 400),
+    ("BK ranskalaiset (keskikok.)", "pikaruoka", 300, 3.6, 38, 14.5, 110),
+    ("BK ranskalaiset (iso)", "pikaruoka", 300, 3.6, 38, 14.5, 150),
+    ("Sipulirenkaat (BK)", "pikaruoka", 410, 5, 46, 22, 90),
+    # --- McDonald's (koko annos) ---
+    ("Quarter Pounder juusto (McD)", "pikaruoka", 260, 15, 21, 13, 200),
+    ("McChicken (McD)", "pikaruoka", 250, 9.4, 25, 12.5, 160),
+    ("McFeast (McD)", "pikaruoka", 235, 12, 20, 12, 215),
+    ("Chicken McNuggets (9 kpl)", "pikaruoka", 277, 16, 16, 16.7, 150),
+    ("Filet-O-Fish (McD)", "pikaruoka", 239, 10.7, 26, 10, 140),
+    ("McDonald's ranskalaiset (keskikok.)", "pikaruoka", 296, 3.5, 37, 14, 115),
+    ("McDonald's ranskalaiset (iso)", "pikaruoka", 296, 3.5, 37, 14, 150),
+    ("McFlurry (Daim)", "pikaruoka", 178, 3.3, 28, 6, 180),
+    # --- Hesburger (koko annos) ---
+    ("Hesburger (perus)", "pikaruoka", 207, 10, 19, 9.3, 140),
+    ("Iso Hesburger", "pikaruoka", 218, 11, 15, 12.3, 220),
+    ("Kolmoishesburger", "pikaruoka", 245, 14, 12, 16, 300),
+    ("Hesburger kana", "pikaruoka", 210, 10.5, 18.4, 10, 190),
+    ("Ruisburger (Hesburger)", "pikaruoka", 213, 10, 18.8, 10, 160),
+    ("Hesburger ranskalaiset", "pikaruoka", 264, 3.6, 34.5, 11.8, 110),
+    ("Hesburger pirtelö (0.4 l)", "pikaruoka", 110, 2.7, 18.3, 2.7, 300),
+    # --- Jaetut limut & juomat (pikaruoka-annokset) ---
+    ("Coca-Cola (iso muki 0.5 l)", "juomat", 42, 0, 10.6, 0, 500),
+    ("Sprite", "juomat", 37, 0, 9, 0, 400),
+    ("Fanta", "juomat", 46, 0, 11, 0, 400),
+    ("Milkshake (vanilja/suklaa)", "juomat", 110, 3, 18, 3, 300),
+    # --- Uunituotteet (helppo lisätä) ---
+    ("Lihapasteija (uuni)", "einekset", 285, 9, 30, 14, 100),
+    ("Kinkkupasteija (uuni)", "einekset", 270, 9, 30, 12, 100),
+    ("Lihapiirakka (pakaste, uuni)", "einekset", 290, 9, 32, 14, 130),
+    ("Uunivalkosipulipatonki (iso)", "leipä & viljat", 330, 7, 45, 13, 100),
+    ("Kinkku-juustocroissant (uuni)", "leipä & viljat", 340, 12, 33, 17, 110),
+    ("Voisarvi (croissant, uuni)", "leipä & viljat", 406, 8, 45, 21, 60),
+    ("Karjalanpiirakka", "leipä & viljat", 235, 6, 40, 5, 80),
+    ("Karjalanpiirakka + munavoi", "leipä & viljat", 290, 7, 30, 15, 100),
+    ("Täytetty sämpylä (kinkku-juusto)", "leipä & viljat", 250, 12, 28, 9, 120),
+    ("Pizzapala (pakaste, uuni)", "pikaruoka", 260, 11, 28, 11, 150),
+]
+
 
 def ensure_extra_foods():
     """Lisää puuttuvat ruoat kirjastoon (idempotentti — myös vanhat kannat
