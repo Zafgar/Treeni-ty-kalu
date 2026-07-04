@@ -651,3 +651,26 @@ def test_alcohol_assessment():
     # Nainen sietää vähemmän (matalampi binge-raja)
     aw = engine.alcohol_assessment(events, {}, "nainen", 62, today)
     assert aw["binge_threshold_g"] == 48
+
+
+def test_set_performance_review():
+    from app import engine
+    inc = 2.5
+    # Romahdus: tavoite 12, tehtiin 12,9,6,4,3 -> laske painoa
+    sets = [{"weight": 60, "reps": r, "completed": True} for r in (12, 9, 6, 4, 3)]
+    r = engine.set_performance_review(sets, 12, inc,
+                                      last_top={"weight": 60, "reps": 12}, last_reps_at_weight=48)
+    assert r["verdict"] == "reduce" and r["ask_reduce"] and r["suggested_weight"] < 60
+    # Tavoitetoistot täyttyivät -> korota +inc
+    sets2 = [{"weight": 55, "reps": 12, "completed": True} for _ in range(4)]
+    r2 = engine.set_performance_review(sets2, 12, inc)
+    assert r2["verdict"] == "increase" and r2["suggested_weight"] == 57.5
+    # Enemmän toistoja samalla painolla kuin viimeksi -> kannustava vertailu
+    sets3 = [{"weight": 50, "reps": r, "completed": True} for r in (10, 10, 9)]
+    r3 = engine.set_performance_review(sets3, 12, inc,
+                                       last_top={"weight": 50, "reps": 8}, last_reps_at_weight=24)
+    assert r3["compare"] and "enemmän" in r3["compare"]
+    # Tasainen suoritus alle tavoitteen mutta ei romahdusta -> hold
+    sets4 = [{"weight": 50, "reps": r, "completed": True} for r in (10, 10, 9, 9)]
+    r4 = engine.set_performance_review(sets4, 12, inc)
+    assert r4["verdict"] == "hold"

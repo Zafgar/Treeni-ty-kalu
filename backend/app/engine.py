@@ -2008,3 +2008,84 @@ def alcohol_assessment(events: list, nights: dict, sex: str | None,
         "low_impact_drinks": low_impact_drinks, "low_impact_g": round(low_impact_g),
         "level": level, "label": label, "guidance": guidance,
     }
+
+
+# ---------- Treenin jälkeinen sarja-analyysi ja painosuositus ----------
+def set_performance_review(sets: list, target_reps: int | None, inc: float,
+                           last_top: dict | None = None,
+                           last_reps_at_weight: int | None = None) -> dict | None:
+    """Analysoi yhden liikkeen suoritus: vertaa edelliseen, tunnista tavoite-
+    toistojen täyttyminen (korota) tai sarjojen romahdus (paino liikaa, laske).
+
+    sets: [{"weight","reps","completed"}]. target_reps: ohjelman tavoitetoistot
+    (maksimitavoite). inc: realistinen korotusaskel. last_top: edellisen kerran
+    raskain sarja {"weight","reps"}. last_reps_at_weight: edellisen kerran
+    toistot samalla työpainolla (vertailuun).
+    """
+    done = [s for s in sets if s.get("completed") and s.get("reps", 0) > 0 and s.get("weight", 0) > 0]
+    if not done:
+        return None
+    top_w = max(s["weight"] for s in done)
+    at_top = [s["reps"] for s in done if abs(s["weight"] - top_w) < 0.001]
+    if not at_top:
+        return None
+    first_reps, last_reps = at_top[0], at_top[-1]
+    avg_reps = sum(at_top) / len(at_top)
+    total_reps_top = sum(at_top)
+    n_working = len(at_top)
+
+    verdict = "hold"
+    suggested = None
+    reason = None
+    ask_increase = False
+    ask_reduce = False
+
+    # Tavoitteen määritys: ohjelman target_reps tai (ilman sitä) 1. sarjan toistot
+    tgt = target_reps if target_reps else first_reps
+
+    # 1) Sarjojen ROMAHDUS -> paino todennäköisesti liian suuri
+    #    (esim. tavoite 12, mutta 12,9,6,4,3). Kriteeri: useampi työsarja,
+    #    keskiarvo selvästi alle tavoitteen JA selvä lasku ekasta vikaan.
+    if n_working >= 3 and avg_reps < tgt * 0.72 and (first_reps - last_reps) >= 3:
+        shortfall = tgt - avg_reps
+        reduction = max(0.05, min(0.20, shortfall * 0.03))  # ~3 %/puuttuva toisto, 5–20 %
+        suggested = round_to_increment(top_w * (1 - reduction), inc)
+        if suggested >= top_w:
+            suggested = round_to_increment(top_w - inc, inc)
+        verdict, ask_reduce = "reduce", True
+        reason = (f"Sarjat romahtivat ({','.join(str(r) for r in at_top)} tavoitteen {tgt} sijaan) — "
+                  f"paino on todennäköisesti liian suuri. Ehdotus ensi kerraksi ~{suggested} kg "
+                  f"(−{round(reduction*100)} %), jolla saat kaikki sarjat lähemmäs tavoitetta.")
+    # 2) Tavoitetoistot TÄYTTYIVÄT kaikissa työsarjoissa -> korota
+    elif target_reps and min(at_top) >= target_reps:
+        suggested = round_to_increment(top_w + inc, inc)
+        verdict, ask_increase = "increase", True
+        reason = (f"Teit tavoitetoistot ({target_reps}) kaikissa työsarjoissa {top_w} kg:lla — "
+                  f"valmis korotukseen. Ehdotus ensi kerraksi +{inc} kg → {suggested} kg.")
+    # 3) Yläraja ylittyi selvästi (esim. tavoite 8, teit 12+) -> korota reilummin
+    elif target_reps and min(at_top) >= target_reps + 3:
+        suggested = round_to_increment(top_w + inc * 2, inc)
+        verdict, ask_increase = "increase", True
+        reason = (f"Ylitit tavoitetoistot selvästi — paino on jo kevyt. Ehdotus +{inc*2:g} kg → {suggested} kg.")
+
+    # Vertailu edelliseen kertaan (kannustava palaute)
+    compare = None
+    if last_top:
+        lw, lr = last_top.get("weight"), last_top.get("reps")
+        if lw and abs(top_w - lw) < 0.001 and last_reps_at_weight:
+            diff = total_reps_top - last_reps_at_weight
+            if diff > 0:
+                compare = f"Teit {diff} toistoa enemmän samalla painolla ({top_w} kg) kuin viimeksi — hyvä eteneminen!"
+            elif diff == 0:
+                compare = f"Sama suoritus kuin viimeksi ({top_w} kg × {total_reps_top} toistoa yhteensä)."
+            else:
+                compare = f"Hieman vähemmän toistoja kuin viimeksi ({diff}) — palautuminen tai kuormitus voi vaikuttaa."
+        elif lw and top_w > lw + 0.001:
+            compare = f"Nostit työpainoa edellisestä ({lw:g} → {top_w:g} kg) — kehitystä!"
+
+    return {
+        "top_weight": top_w, "reps_at_top": at_top, "avg_reps": round(avg_reps, 1),
+        "target_reps": target_reps, "verdict": verdict,
+        "ask_increase": ask_increase, "ask_reduce": ask_reduce,
+        "suggested_weight": suggested, "reason": reason, "compare": compare,
+    }

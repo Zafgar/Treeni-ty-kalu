@@ -362,3 +362,84 @@ def delete_set(set_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Sarjaa ei löytynyt.")
     db.delete(s)
     db.commit()
+
+
+def _last_top_before(db, exercise_id, profile_id, before_date):
+    """Edellisen (ennen annettua päivää) treenin raskain sarja + toistot samalla
+    painolla. Käytetään sarja-analyysin vertailuun."""
+    q = (db.query(models.SetLog, models.WorkoutSession.session_date)
+         .join(models.WorkoutExercise, models.SetLog.workout_exercise_id == models.WorkoutExercise.id)
+         .join(models.WorkoutSession, models.WorkoutExercise.session_id == models.WorkoutSession.id)
+         .filter(models.WorkoutExercise.exercise_id == exercise_id,
+                 models.SetLog.completed.is_(True), models.SetLog.weight > 0,
+                 models.WorkoutSession.status != "skipped",
+                 models.WorkoutSession.session_date < before_date))
+    if profile_id is not None:
+        q = q.filter(models.WorkoutSession.profile_id == profile_id)
+    rows = q.order_by(models.WorkoutSession.session_date.desc()).all()
+    if not rows:
+        return None, None
+    newest = rows[0][1]
+    day_sets = [s for s, d in rows if d == newest]
+    top = max(day_sets, key=lambda s: s.weight)
+    reps_at_top = sum(s.reps for s in day_sets if abs(s.weight - top.weight) < 0.001)
+    return {"weight": top.weight, "reps": top.reps}, reps_at_top
+
+
+@router.get("/{workout_id}/review")
+def workout_review(workout_id: int, db: Session = Depends(get_db)):
+    """Treenin jälkeinen valmennus per liike: vertailu edelliseen, korotus kun
+    tavoitetoistot täyttyivät, ja painon lasku jos sarjat romahtivat."""
+    session = db.get(models.WorkoutSession, workout_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Treeniä ei löytynyt.")
+    # Ohjelman tavoitetoistot per liike (jos treeni ohjelmasta)
+    targets: dict[int, int] = {}
+    if session.program_day_id:
+        day = db.get(models.ProgramDay, session.program_day_id)
+        if day:
+            for pe in day.exercises:
+                reps_scheme = engine.parse_scheme(pe.rep_scheme)
+                targets[pe.exercise_id] = int(max(reps_scheme)) if reps_scheme else pe.target_reps
+
+    out = []
+    for we in session.exercises:
+        ex = we.exercise
+        if not ex:
+            continue
+        sets = [{"weight": s.weight, "reps": s.reps, "completed": s.completed} for s in we.sets]
+        inc = engine.progression_increment(ex.name, ex.equipment, ex.category,
+                                            ex.is_main_lift, ex.per_hand)
+        last_top, last_reps = _last_top_before(db, ex.id, session.profile_id, session.session_date)
+        review = engine.set_performance_review(
+            sets, targets.get(ex.id), inc, last_top, last_reps)
+        if not review:
+            continue
+        # Onko liikkeellä ohjelmarivi johon ehdotettu paino voidaan tallentaa?
+        can_apply = bool(session.program_day_id) and review["suggested_weight"] is not None
+        out.append({"workout_exercise_id": we.id, "exercise_id": ex.id,
+                    "exercise_name": ex.name, "increment": inc,
+                    "can_apply": can_apply, **review})
+    # Nosta huomiota vaativat (korota/laske) ensin
+    out.sort(key=lambda r: 0 if (r["ask_increase"] or r["ask_reduce"]) else 1)
+    return {"exercises": out}
+
+
+@router.post("/exercises/{workout_exercise_id}/apply-weight")
+def apply_next_weight(workout_exercise_id: int, weight: float = Query(...),
+                      db: Session = Depends(get_db)):
+    """Aseta ehdotettu paino ohjelman liikkeen tavoitepainoksi seuraavaa kertaa
+    varten (korotus tai lasku). Vaikuttaa ohjelmasta luotavaan treeniin."""
+    we = db.get(models.WorkoutExercise, workout_exercise_id)
+    if not we:
+        raise HTTPException(status_code=404, detail="Liikettä ei löytynyt.")
+    session = db.get(models.WorkoutSession, we.session_id)
+    if not session or not session.program_day_id:
+        raise HTTPException(status_code=400, detail="Liike ei ole ohjelmasta — ei tallennuskohdetta.")
+    day = db.get(models.ProgramDay, session.program_day_id)
+    pe = next((p for p in day.exercises if p.exercise_id == we.exercise_id), None) if day else None
+    if not pe:
+        raise HTTPException(status_code=404, detail="Ohjelman liikettä ei löytynyt.")
+    pe.target_weight = weight
+    db.commit()
+    return {"exercise_id": we.exercise_id, "next_target_weight": weight}

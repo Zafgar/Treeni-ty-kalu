@@ -581,6 +581,47 @@ document.getElementById("new-workout-btn").addEventListener("click", async () =>
   openWorkoutEditor(w.id);
 });
 
+// Treenin jälkeinen valmennus per liike: vertailu, korotus tai painon lasku
+async function renderWorkoutReview(id) {
+  const box = document.getElementById("workout-review");
+  if (!box) return;
+  box.innerHTML = "";
+  let data;
+  try { data = await api.get(`/api/workouts/${id}/review`); } catch { return; }
+  const rows = (data.exercises || []).filter((e) => e.reason || e.compare);
+  if (!rows.length) return;
+  const card = el("div", { class: "card", style: "border-color:var(--accent)" },
+    el("h3", { style: "margin-top:0" }, "🎯 Treenin analyysi & seuraava kerta"));
+  rows.forEach((e) => {
+    const tone = e.ask_reduce ? "var(--danger)" : e.ask_increase ? "var(--accent-2)" : "var(--muted)";
+    const item = el("div", { class: "item", style: `border-left:3px solid ${tone}` },
+      el("div", { class: "row-between" },
+        el("strong", {}, e.exercise_name),
+        el("span", { class: "muted" }, `${e.top_weight} kg · ${e.reps_at_top.join(", ")}`)));
+    if (e.compare) item.append(el("div", { class: "muted", style: "margin-top:3px" }, "↔ " + e.compare));
+    if (e.reason) item.append(el("div", { style: `margin-top:3px;color:${tone}` }, e.reason));
+    // Korotus/lasku: kysy ja tallenna ohjelman painoksi seuraavaa kertaa varten
+    if ((e.ask_increase || e.ask_reduce) && e.suggested_weight != null) {
+      const btnLabel = e.ask_increase ? `Korota → ${e.suggested_weight} kg ensi kerraksi`
+                                       : `Laske → ${e.suggested_weight} kg ensi kerraksi`;
+      const applyBtn = el("button", { class: "small " + (e.ask_increase ? "success" : "primary"),
+        style: "margin-top:6px",
+        onclick: async () => {
+          if (!e.can_apply) { alert("Tämä liike ei ole ohjelmasta — muista uusi paino itse ensi kerralla."); return; }
+          await api.post(`/api/workouts/exercises/${e.workout_exercise_id}/apply-weight?weight=${e.suggested_weight}`);
+          applyBtn.textContent = "✓ Asetettu ensi kerraksi";
+          applyBtn.disabled = true;
+        } }, btnLabel);
+      item.append(applyBtn);
+      if (!e.can_apply)
+        item.append(el("div", { class: "muted", style: "font-size:0.8em;margin-top:3px" },
+          "(vapaa treeni — paino muistetaan silti viime kerrasta)"));
+    }
+    card.append(item);
+  });
+  box.append(card);
+}
+
 async function openWorkoutEditor(id) {
   const w = await api.get(`/api/workouts/${id}`);
   await refreshKcalPerMin();
@@ -636,6 +677,7 @@ async function openWorkoutEditor(id) {
         }
       } }, "Skip"),
       el("button", { class: "small", onclick: () => { editor.classList.add("hidden"); } }, "Sulje"))));
+  editor.append(el("div", { id: "workout-review" }));
   editor.append(el("div", { class: "grid" },
     el("label", {}, "Nimi", nameInput), el("label", {}, "Päivä", dateInput),
     el("label", {}, "Kehon paino", bw), el("label", {}, "Kesto (min)", dur),
@@ -686,6 +728,9 @@ async function openWorkoutEditor(id) {
       });
       openWorkoutEditor(id);
     } }, "+ Lisää liike treeniin")));
+
+  // Jo kuitatun treenin analyysi näkyviin automaattisesti
+  if (w.status === "completed") renderWorkoutReview(id);
 }
 
 function renderWorkoutExercise(workoutId, we) {
