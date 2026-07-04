@@ -4,7 +4,7 @@ Ruoka-aineet (esim. maitorahka, banaani) ovat yhteisessä kirjastossa makroineen
 (per 100 g). Käyttäjä lisää omia helposti. Päiväkohtaiset kirjaukset summataan
 intake-graafiin, jota voi verrata painon ja voimatason kehitykseen.
 """
-from datetime import date
+from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
@@ -228,8 +228,22 @@ def summary(
         {"date": d.isoformat(), **{k: round(v) for k, v in by_date[d].items()}}
         for d in sorted(by_date)
     ]
+
+    # 7 pv liukuva keskiarvo: syönti heiluu paljon päivittäin (paljon maanantaina,
+    # vähän tiistaina), joten VAKAA kuva saadaan usean päivän keskiarvosta. Tämä on
+    # oikea vertailuluku makrotavoitteisiin — yksittäinen päivä ei ratkaise.
+    window_start = target_date - timedelta(days=6)
+    logged = {d: v for d, v in by_date.items() if window_start <= d <= target_date}
+    days_logged = len(logged)
+    avg7 = None
+    if days_logged:
+        avg7 = {k: round(sum(v[k] for v in logged.values()) / days_logged, 1)
+                for k in today_totals}
+        avg7["days_logged"] = days_logged
+        avg7["window_days"] = 7
     return {
         "date": target_date.isoformat(),
         "today": {k: round(v, 1) for k, v in today_totals.items()},
+        "avg7": avg7,
         "timeline": timeline,
     }

@@ -444,3 +444,39 @@ def test_recovery_insights_and_acwr_gating(client):
     assert rd["acwr"] is not None and rd["acwr"]["zone"] == "keräysvaihe"
     assert rd["acwr"]["acwr"] is None
     assert rd["deload_recommended"] is False
+
+
+def test_nutrition_macros_and_7day_avg(client):
+    from datetime import date, timedelta
+    today = date.today()
+    p = client.post("/api/profiles", json={"name": "Ruokailija"}).json()
+    pid = p["id"]
+    # Testikanta ei aja seedejä -> luodaan ruoat itse (samat arvot kuin kirjastossa)
+    ragu = client.post("/api/nutrition/foods", json={
+        "name": "Ragu (jauhelihakastike, kotitekoinen)", "category": "kastikkeet",
+        "kcal": 215, "protein_g": 10.5, "carbs_g": 4, "fat_g": 17}).json()
+    pasta = client.post("/api/nutrition/foods", json={
+        "name": "Rummo spaghetti (kypsä)", "category": "pasta & riisi",
+        "kcal": 158, "protein_g": 5.5, "carbs_g": 31, "fat_g": 0.9}).json()
+    # Makrolaskenta: grammat/100 * per-100g-arvo
+    client.post(f"/api/nutrition/logs?profile_id={pid}&on_date={today.isoformat()}",
+                json={"food_id": ragu["id"], "grams": 300})
+    client.post(f"/api/nutrition/logs?profile_id={pid}&on_date={today.isoformat()}",
+                json={"food_id": pasta["id"], "grams": 250})
+    s = client.get(f"/api/nutrition/summary?profile_id={pid}&on_date={today.isoformat()}").json()
+    exp_kcal = ragu["kcal"] * 3 + pasta["kcal"] * 2.5
+    exp_prot = ragu["protein_g"] * 3 + pasta["protein_g"] * 2.5
+    assert abs(s["today"]["kcal"] - exp_kcal) < 0.5
+    assert abs(s["today"]["protein_g"] - exp_prot) < 0.5
+    # 7 pv keskiarvo vaihtelevista päivistä -> vakaa keskiluku
+    for i, g in enumerate([600, 200], start=1):
+        d = (today - timedelta(days=i)).isoformat()
+        client.post(f"/api/nutrition/logs?profile_id={pid}&on_date={d}",
+                    json={"food_id": ragu["id"], "grams": g})
+    s2 = client.get(f"/api/nutrition/summary?profile_id={pid}&on_date={today.isoformat()}").json()
+    assert s2["avg7"]["days_logged"] == 3
+    # keskiarvo = (tänään + eilen + toissa) / 3
+    day_today = ragu["kcal"] * 3 + pasta["kcal"] * 2.5
+    day_1 = ragu["kcal"] * 6
+    day_2 = ragu["kcal"] * 2
+    assert abs(s2["avg7"]["kcal"] - (day_today + day_1 + day_2) / 3) < 0.5

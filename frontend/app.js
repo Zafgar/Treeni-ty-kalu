@@ -2679,17 +2679,34 @@ async function renderDayLog() {
   const box = el("div", { class: "result-box" },
     el("div", { class: "big" }, `${Math.round(t.kcal)} kcal`),
     el("div", { class: "muted" }, `Proteiini ${Math.round(t.protein_g)} g · hiilarit ${Math.round(t.carbs_g)} g · rasva ${Math.round(t.fat_g)} g`));
+  // 7 pv keskiarvo: vakaa vertailuluku (yksittäinen päivä heiluu paljon)
+  const a = s.avg7;
+  if (a && a.days_logged >= 2) {
+    box.append(el("div", { style: "margin-top:8px;padding-top:8px;border-top:1px solid var(--border-soft)" },
+      el("div", {}, el("strong", {}, `7 pv keskiarvo: ${Math.round(a.kcal)} kcal/pv`),
+        el("span", { class: "muted" }, ` (${a.days_logged} kirjattua pv)`)),
+      el("div", { class: "muted" }, `Proteiini ${Math.round(a.protein_g)} g · hiilarit ${Math.round(a.carbs_g)} g · rasva ${Math.round(a.fat_g)} g — tämä on vakain kuva`)));
+  }
   try {
     const diet = await api.get(pq("/api/diet/status"));
-    if (diet.targets && t.kcal > 0) {
-      const tgt = diet.targets.kcal, diff = Math.round(t.kcal - tgt);
-      let msg;
-      if (diff < -300) msg = `Syöty ${Math.abs(diff)} kcal alle tavoitteen (${tgt}) — syöt liian vähän.`;
-      else if (diff > 300) msg = `Syöty ${diff} kcal yli tavoitteen (${tgt}) — syöt liikaa.`;
-      else msg = `Tavoitteessa (${tgt} kcal ±300).`;
-      box.append(el("div", { class: "muted", style: "margin-top:6px" }, msg));
-      if (t.protein_g < diet.targets.protein_g * 0.8)
-        box.append(el("div", { class: "muted" }, `Proteiinia jää tavoitteesta (${diet.targets.protein_g} g) — lisää proteiinia.`));
+    if (diet.targets) {
+      const tgt = diet.targets.kcal;
+      // Vertaa ENSISIJAISESTI 7 pv keskiarvoon jos dataa on — yksittäinen
+      // päivä ei kerro liikaa/liian vähän, useamman päivän tahti kertoo.
+      const useAvg = a && a.days_logged >= 3;
+      const cmp = useAvg ? a.kcal : t.kcal;
+      const label = useAvg ? "7 pv keskiarvo" : "Tänään";
+      if (cmp > 0) {
+        const diff = Math.round(cmp - tgt);
+        let msg;
+        if (diff < -300) msg = `${label} ${Math.abs(diff)} kcal alle tavoitteen (${tgt}) — syönti jää liian vähäiseksi.`;
+        else if (diff > 300) msg = `${label} ${diff} kcal yli tavoitteen (${tgt}) — syöt tavoitetta enemmän.`;
+        else msg = `${label} tavoitteessa (${tgt} kcal ±300).`;
+        box.append(el("div", { class: "muted", style: "margin-top:6px" }, msg));
+        const cmpP = useAvg ? a.protein_g : t.protein_g;
+        if (cmpP < diet.targets.protein_g * 0.8)
+          box.append(el("div", { class: "muted" }, `Proteiinia jää tavoitteesta (${diet.targets.protein_g} g) — lisää proteiinia.`));
+      }
     }
   } catch (e) {}
   today.append(box);

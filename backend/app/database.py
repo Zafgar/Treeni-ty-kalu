@@ -889,6 +889,86 @@ EXTRA_FOODS += [
     ("Veriletut", "einekset", 170, 7, 22, 5.5, 200),
 ]
 
+# Käyttäjän toivelista: kotitekoinen ragu, brändätyt pastat (kypsä paino),
+# nuudelit, tonnikalaversiot, kastikkeet, peruna- ja ranskisversiot, pähkinät,
+# myslit, jogurtit ja patongit. Grammat = tyypillinen annos -> yksi klikkaus.
+EXTRA_FOODS += [
+    # --- Ragu & pastakastikkeet (kypsä paino / valmis annos) ---
+    # Reseptistä laskettu: 2 kg jauhelihaa, pancetta, runsas öljy+voi, tomaatti,
+    # ~3.9 kg valmista kastiketta -> ~215 kcal/100 g. Annos ~250 g.
+    ("Ragu (jauhelihakastike, kotitekoinen)", "kastikkeet", 215, 10.5, 4, 17, 250),
+    ("Bolognesekastike (valmis, purkki)", "kastikkeet", 110, 6, 8, 5.5, 200),
+    ("Tomaatti-basilikakastike (valmis)", "kastikkeet", 55, 1.6, 8, 1.8, 150),
+    # --- Pastat kypsänä (brändätyt, helppo klikata) ---
+    # Rummo on durumvehnäpasta; kypsä paino imee ~2.2x vettä -> ~158 kcal/100 g.
+    ("Rummo spaghetti (kypsä)", "pasta & riisi", 158, 5.5, 31, 0.9, 250),
+    ("Rummo penne (kypsä)", "pasta & riisi", 158, 5.5, 31, 0.9, 250),
+    ("Rummo fusilli (kypsä)", "pasta & riisi", 158, 5.5, 31, 0.9, 250),
+    ("Rummo tagliatelle (kypsä)", "pasta & riisi", 165, 6, 32, 1.2, 250),
+    ("Rummo pasta (kuiva)", "pasta & riisi", 359, 12.5, 71, 1.5, 90),
+    ("Täysjyväpasta (kypsä)", "pasta & riisi", 145, 6, 27, 1.3, 250),
+    ("Tuorepasta (kypsä)", "pasta & riisi", 175, 7, 30, 2.5, 220),
+    # --- Nuudelit ---
+    ("Mama-nuudelit (1 pss, kuiva)", "pasta & riisi", 475, 10, 62, 20, 55),
+    ("Mama-nuudelit (valmis keitto)", "einekset", 100, 2.2, 13, 4.2, 350),
+    ("Nuudeli (keitetty)", "pasta & riisi", 138, 4.5, 25, 2.1, 200),
+    ("Riisinuudeli (keitetty)", "pasta & riisi", 108, 1.8, 25, 0.2, 200),
+    # --- Tonnikalaversiot ---
+    ("Tonnikala tomaattikastikkeessa", "kala", 115, 16, 6, 3, 100),
+    ("Tonnikala chilikastikkeessa", "kala", 130, 16, 8, 4, 100),
+    ("Tonnikalatahna (levite)", "kala", 180, 14, 4, 12, 40),
+    # --- Kastikkeet ---
+    ("HP-kastike (ruskea kastike)", "kastikkeet", 120, 1, 28, 0.1, 15),
+    ("Ketsuppi (Heinz)", "kastikkeet", 102, 1.2, 24, 0.1, 20),
+    ("Ketsuppi (sokeriton)", "kastikkeet", 25, 1.3, 5, 0.1, 20),
+    ("Sweet chili -kastike (Blue Dragon)", "kastikkeet", 225, 0.6, 54, 0.2, 25),
+    ("Sweet chili -kastike (sokeriton)", "kastikkeet", 45, 0.5, 10, 0.2, 25),
+    ("Teriyakikastike", "kastikkeet", 90, 3, 18, 0.1, 20),
+    ("Soijakastike (kevyt suola)", "kastikkeet", 60, 6, 8, 0.1, 15),
+    ("Sriracha-kastike", "kastikkeet", 100, 2, 19, 1, 15),
+    ("Valkosipulimajoneesi (aioli)", "kastikkeet", 640, 1, 3, 69, 20),
+    ("Bearnaisekastike", "kastikkeet", 380, 2, 3, 40, 40),
+    # --- Peruna- ja ranskisversiot ---
+    ("Ranskalaiset (rasvakeitetyt)", "pasta & riisi", 312, 3.4, 41, 15, 150),
+    ("Ranskalaiset (pakaste, uuni)", "pasta & riisi", 170, 3, 28, 5, 150),
+    ("Bataattiranskalaiset (uuni)", "pasta & riisi", 175, 2.5, 30, 5.5, 150),
+    ("Lohkoperunat (uuni)", "pasta & riisi", 155, 2.8, 24, 5.2, 150),
+    ("Lohkoperunat (pakaste, uuni)", "pasta & riisi", 145, 2.5, 23, 4.8, 150),
+    ("Perunamuusi (voi + maito)", "pasta & riisi", 110, 2, 15, 4.5, 200),
+    ("Perunamuusi (valmis, hiutaleista)", "pasta & riisi", 85, 2, 14, 2.5, 200),
+    ("Uuniperuna", "pasta & riisi", 93, 2.5, 20, 0.1, 200),
+    ("Paistetut perunat (pannulla)", "pasta & riisi", 150, 2.5, 22, 5.5, 150),
+    ("Rösti / perunaröstit", "pasta & riisi", 210, 2.5, 24, 11, 120),
+    # --- Pähkinät (eri lajit) ---
+    ("Saksanpähkinä", "pähkinät & rasvat", 654, 15, 14, 65, 30),
+    ("Hasselpähkinä", "pähkinät & rasvat", 628, 15, 17, 61, 30),
+    ("Pekaanipähkinä", "pähkinät & rasvat", 691, 9, 14, 72, 30),
+    ("Pistaasipähkinä", "pähkinät & rasvat", 560, 20, 28, 45, 30),
+    ("Parapähkinä", "pähkinät & rasvat", 659, 14, 12, 67, 30),
+    ("Macadamiapähkinä", "pähkinät & rasvat", 718, 8, 14, 76, 30),
+    ("Paahdetut suolapähkinät", "pähkinät & rasvat", 600, 20, 18, 50, 30),
+    ("Kookoshiutaleet", "pähkinät & rasvat", 660, 7, 24, 64, 20),
+    # --- Myslit & murot ---
+    ("Mysli (tavallinen)", "leipä & viljat", 360, 9, 60, 8, 60),
+    ("Mysli (paahdettu, crunchy)", "leipä & viljat", 440, 8, 62, 16, 60),
+    ("Hedelmämysli", "leipä & viljat", 350, 8, 63, 7, 60),
+    ("Maissihiutaleet (Corn Flakes)", "leipä & viljat", 378, 7, 84, 0.9, 40),
+    ("Murot (suklaa)", "leipä & viljat", 385, 6, 82, 4, 40),
+    # --- Jogurtit (maustetut) ---
+    ("Mansikkajogurtti", "maitotuotteet", 90, 3, 15, 2, 150),
+    ("Vaniljajogurtti", "maitotuotteet", 92, 3, 15, 2.2, 150),
+    ("Mustikkajogurtti", "maitotuotteet", 88, 3, 14, 2, 150),
+    ("Vaniljakvarki (maustettu rahka)", "maitotuotteet", 90, 11, 8, 1, 150),
+    ("Mansikkarahka", "maitotuotteet", 88, 11, 8, 0.5, 150),
+    ("Juotava jogurtti (marja)", "maitotuotteet", 75, 3, 13, 1.2, 200),
+    # --- Patongit & leivät ---
+    ("Patonki (iso, kaupan)", "leipä & viljat", 270, 9, 52, 2.5, 125),
+    ("Patonki (puolikas)", "leipä & viljat", 270, 9, 52, 2.5, 125),
+    ("Valkosipulipatonki (pakaste)", "leipä & viljat", 330, 7, 45, 13, 80),
+    ("Ciabatta", "leipä & viljat", 271, 9, 52, 3, 90),
+    ("Vaalea sämpylä", "leipä & viljat", 265, 9, 50, 3, 70),
+]
+
 
 def ensure_extra_foods():
     """Lisää puuttuvat ruoat kirjastoon (idempotentti — myös vanhat kannat
