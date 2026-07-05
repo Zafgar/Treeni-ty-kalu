@@ -1926,6 +1926,12 @@ async function loadNetworkInfo() {
     }
     // Tallenna oma osoite laitesynkronointia varten
     window._phoneUrl = info.phone_url;
+    // Versio näkyviin (auttaa varmistamaan että laitteet ovat samassa versiossa)
+    try {
+      const v = await api.get("/api/version");
+      box.append(el("div", { class: "muted", style: "margin-top:8px;font-size:0.8rem" },
+        `Versio ${v.version} (${v.build}) · isännöitynä sovellus päivittyy automaattisesti kun avaat sen uudelleen`));
+    } catch (e) { /* ei kriittinen */ }
   } catch (e) {
     box.textContent = "Osoitteen haku epäonnistui.";
   }

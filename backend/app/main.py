@@ -4,7 +4,10 @@ Tarjoaa REST-API:n (liikkeet, ohjelmat, treenit, laskentamoottori) ja
 serveeraa selainkäyttöliittymän staattisista tiedostoista. Sama palvelin
 toimii PC:llä ja myöhemmin puhelimella (selain / PWA).
 """
+import os
 import socket
+import subprocess
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -87,6 +90,34 @@ app.include_router(coach.router)
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
+
+
+APP_VERSION = "1.0.0"
+
+
+def _build_id() -> str:
+    """Rakennetunniste päivitysten tunnistamiseen: git-lyhytsha jos saatavilla,
+    muuten frontend/app.js:n muokkausaika. Näin näkee ollaanko uusimmassa."""
+    root = Path(__file__).resolve().parents[2]
+    try:
+        sha = subprocess.check_output(["git", "-C", str(root), "rev-parse", "--short", "HEAD"],
+                                      stderr=subprocess.DEVNULL, timeout=2).decode().strip()
+        if sha:
+            return sha
+    except (OSError, subprocess.SubprocessError):
+        pass
+    try:
+        appjs = root / "frontend" / "app.js"
+        return datetime.utcfromtimestamp(appjs.stat().st_mtime).strftime("%Y%m%d-%H%M")
+    except OSError:
+        return "unknown"
+
+
+@app.get("/api/version")
+def version():
+    """Sovelluksen versio ja rakennetunniste (näkyy 'Tietoja'-kohdassa;
+    auttaa varmistamaan että laitteet ovat samassa versiossa)."""
+    return {"version": APP_VERSION, "build": _build_id()}
 
 
 @app.get("/api/network-info")
