@@ -1,0 +1,32 @@
+# Automaattinen julkaisu Fly.io:hin.
+#
+# Kun tämä on käytössä, sovellus päivittyy KAIKILLE automaattisesti aina kun
+# koodia työnnetään main-haaraan (tai kun ajat työn käsin). Näin ylläpito on
+# helppoa: yksi push -> kaikki kaverit saavat uusimman version seuraavalla
+# avauksella.
+#
+# Kertaluontoinen käyttöönotto:
+#   1) Luo Fly-sovellus ja volyymi paikallisesti kerran (katso JAKELU.md).
+#   2) Luo Fly-API-token:   fly tokens create deploy
+#   3) Lisää se GitHubiin: repo -> Settings -> Secrets and variables ->
+#      Actions -> New repository secret -> nimi FLY_API_TOKEN, arvo = token.
+# Sen jälkeen jokainen push main-haaraan julkaisee automaattisesti.
+
+name: Fly Deploy
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch: {}   # sallii käsin käynnistyksen GitHubin Actions-välilehdeltä
+
+jobs:
+  deploy:
+    name: Deploy app
+    runs-on: ubuntu-latest
+    concurrency: deploy-group   # ei päällekkäisiä julkaisuja
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - run: flyctl deploy --remote-only
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}

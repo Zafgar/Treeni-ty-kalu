@@ -36,15 +36,32 @@ natiivilta appilta (oma ikoni, koko ruutu), mutta päivittyy itsestään.
 
 ### 1) Julkaise sovellus (kerran)
 
-**Fly.io (ilmainen taso riittää, data säilyy volyymissä):**
+**Fly.io (edullisin pysyvä ratkaisu, data säilyy volyymissä):**
 ```bash
-fly launch            # lukee fly.toml
-fly volumes create treeni_data --size 1
+fly launch            # lukee fly.toml, kysyy sovelluksen nimen ja alueen
+fly volumes create treeni_data --size 1 --region arn   # sama alue kuin fly.toml
 fly deploy
 ```
 Saat osoitteen kuten `https://treeni-ty-kalu.fly.dev`.
 
+> **Data säilyy** volyymissä (`/data/treeni.db`) julkaisujen ja
+> uudelleenkäynnistysten yli. **Aja vain yksi kone** — SQLite ei jakaudu usealle
+> koneelle, joten älä skaalaa (`min_machines_running` saa olla 0 tai 1).
+> `min_machines_running = 1` pitää palvelimen aina hereillä (ei herätysviivettä,
+> hieman kalliimpi); `0` säästää mutta ensimmäinen avaus herättää koneen ~1–2 s.
+> **Reaaliaikaisuus ei riipu tästä:** kaikki jakavat saman kannan, joten näet
+> aina uusimman datan heti kun avaat sovelluksen, oli kone hereillä tai ei.
+
+**Automaattiset päivitykset (suositus):** repossa on valmis GitHub Actions -työ
+(`.github/workflows/fly-deploy.yml`). Kun lisäät GitHubiin salaisuuden
+`FLY_API_TOKEN` (luo: `fly tokens create deploy`), jokainen push `main`-haaraan
+julkaisee automaattisesti — et tarvitse `fly deploy`:tä käsin, ja kaverit saavat
+uusimman version seuraavalla avauksella.
+
 **Tai Render.com:** yhdistä GitHub-repo → Render lukee `render.yaml` → deploy.
+Renderin **natiivit automaattipäivitykset** ovat vielä helpommat (push → deploy
+ilman erillistä työtä), mutta **pysyvä levy on Renderissä maksullinen** (n. 7 $/kk).
+Fly on halvempi pysyvälle datalle; Render on yksinkertaisin jos maksu ei haittaa.
 
 **Tai oma kone:** aja `run.sh` (Linux/Mac) tai `Kaynnista-Windows.bat` ja jaa
 lähiverkon osoite (näkyy Profiilit-välilehdellä). Toimii vain samassa wifissä.
