@@ -3033,6 +3033,18 @@ async function renderDietStatus() {
       el("div", { class: "result-box" }, el("div", { class: "muted" }, "Ylläpito (TDEE)"),
         el("div", { class: "big" }, `${t.tdee} kcal`),
         el("div", { class: "muted" }, `Vaje/ylijäämä ${t.daily_delta} kcal/pv`)))));
+  // TDEE:n lähde ja luottamus + mitä dataa vielä tarvitaan (ei hätiköintiä)
+  const confTone = { korkea: "var(--accent-2)", kohtalainen: "var(--warn)", matala: "var(--muted)", "ei dataa": "var(--muted)" }[s.tdee_confidence] || "var(--muted)";
+  const tdeeCard = div.lastChild;
+  tdeeCard.append(el("div", { class: "muted", style: "margin-top:8px" },
+    el("span", { class: "tag", style: `color:${confTone};border-color:${confTone}` },
+      `Tarve: ${s.tdee_source} · luottamus ${s.tdee_confidence}`)));
+  if (s.tdee_note) tdeeCard.append(el("div", { class: "muted", style: "margin-top:4px;font-size:0.85em" }, s.tdee_note));
+  if (s.tdee_data_needs && s.tdee_data_needs.length)
+    tdeeCard.append(el("div", { class: "muted", style: "margin-top:4px;color:var(--warn)" },
+      "Tarkempaan arvioon: " + s.tdee_data_needs.join(", ") + "."));
+  if (s.phase_note)
+    tdeeCard.append(el("div", { class: "result-box", style: "margin-top:8px" }, "🎯 " + s.phase_note));
 
   // Per-päivä-tavoitteet (treeni- vs lepopäivä)
   const dt = s.day_targets;

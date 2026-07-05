@@ -674,3 +674,29 @@ def test_set_performance_review():
     sets4 = [{"weight": 50, "reps": r, "completed": True} for r in (10, 10, 9, 9)]
     r4 = engine.set_performance_review(sets4, 12, inc)
     assert r4["verdict"] == "hold"
+
+
+def test_resolve_tdee_stability():
+    from app import engine
+    base = 2600.0
+    # Liian vähän dataa -> perusarvio, ei adaptiivinen (ei hätiköintiä)
+    r = engine.resolve_tdee(base, 3500, 0.0, 21, intake_day_count=2,
+                            weight_point_count=6, weight_span_days=20)
+    assert r["source"] == "perusarvio" and r["tdee"] == round(base)
+    assert any("kirjaa ruokaa" in n for n in r["data_needs"])
+    # Painodataa liian vähän -> perusarvio
+    r2 = engine.resolve_tdee(base, 2500, 0.0, 21, intake_day_count=12,
+                             weight_point_count=1, weight_span_days=5)
+    assert r2["source"] == "perusarvio"
+    # Tarpeeksi dataa -> adaptiivinen, mutta RAJATTU perusarvion ympärille
+    r3 = engine.resolve_tdee(base, 2400, 0.0, 21, intake_day_count=12,
+                             weight_point_count=8, weight_span_days=20)
+    assert r3["source"].startswith("adaptiivinen") and r3["confidence"] == "korkea"
+    # Absurdi syönti ei saa nostaa yli ~perusarvio*1.18 (clamp + blend)
+    r4 = engine.resolve_tdee(base, 6000, 0.0, 21, intake_day_count=15,
+                             weight_point_count=8, weight_span_days=20)
+    assert r4["tdee"] <= round(base * 1.18) + 1
+    # Absurdin matala ei saa laskea alle ~perusarvio*0.82
+    r5 = engine.resolve_tdee(base, 800, 0.0, 21, intake_day_count=15,
+                             weight_point_count=8, weight_span_days=20)
+    assert r5["tdee"] >= round(base * 0.82) - 1

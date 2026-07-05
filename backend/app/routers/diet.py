@@ -109,18 +109,21 @@ def _avg_daily_cardio_kcal(db: Session, profile_id: int, ref_date: date, days: i
 
 def _avg_daily_steps_kcal(db: Session, profile_id: int, ref_date: date, days: int, weight: float) -> float:
     """Keskimääräinen askelista poltettu kcal/pv. ~0.04 kcal/askel 70 kg:lla,
-    skaalattuna painoon. Vain kirjatuista päivistä (ei oleteta nollaa muille)."""
+    skaalattuna painoon. VAKAUS: keskiarvo jaetaan koko ikkunalle (ei vain
+    kirjatuille päiville), jottei yksittäinen ison askelmäärän päivä hyppää
+    tavoitetta satoja kaloreita. Vaatii ~3 kirjattua päivää ja katto."""
     start = ref_date - timedelta(days=days - 1)
     entries = (db.query(models.BodyEntry)
                .filter(models.BodyEntry.profile_id == profile_id,
                        models.BodyEntry.steps.isnot(None),
                        models.BodyEntry.entry_date >= start,
                        models.BodyEntry.entry_date <= ref_date).all())
-    if not entries:
-        return 0.0
+    if len(entries) < 3:
+        return 0.0  # liian vähän dataa luotettavaan arvioon -> ei lisätä mitään
     per_step = 0.04 * ((weight or 70) / 70.0)
-    avg_steps = sum(e.steps for e in entries) / len(entries)
-    return round(avg_steps * per_step)
+    # Jaa koko ikkunalle: sporadinen kirjaus ei saa inflatoitua päiväkeskiarvoa
+    avg_steps = sum(e.steps for e in entries) / days
+    return round(min(avg_steps * per_step, 350))  # katto ~350 kcal/pv
 
 
 def _macro_style(db: Session, profile_id: int, ref_date: date, days: int = 14) -> dict | None:
@@ -334,31 +337,40 @@ def diet_status(profile_id: int = Query(...), db: Session = Depends(get_db)):
     week_avg = engine.weekly_average(points, ref_date, 7) or points[-1][1]
     trend = engine.weight_trend(points, ref_date)
 
-    # Adaptiivinen TDEE 14 pv ikkunasta jos syöntidataa on, muuten arvio painosta
+    # TDEE VAKAASTI ja data edellä. Syönti kerätään 21 pv ikkunasta (enemmän
+    # dataa = vakaampi), painomuutos robustina 7 pv keskiarvoista. Adaptiivinen
+    # arvio otetaan käyttöön vasta kun dataa on tarpeeksi, ja rajataan
+    # perusarvion ympärille — ettei tavoite hyppää päivästä toiseen.
     kcal_by_date = _daily_kcal(db, profile_id)
-    window_days = 14
+    window_days = 21
     start = ref_date - timedelta(days=window_days - 1)
     intake_days = [kcal_by_date[d] for d in kcal_by_date if start <= d <= ref_date]
-    avg_intake = sum(intake_days) / len(intake_days) if intake_days else None
+    # Robusti syönti: mediaani (ei heilahda yksittäisestä ahmintapäivästä)
+    avg_intake = engine._median(intake_days) if intake_days else None
     w_start = engine.weekly_average(points, start + timedelta(days=6), 7)
     w_end = engine.weekly_average(points, ref_date, 7)
     weight_change = (w_end - w_start) if (w_start and w_end) else 0.0
+    # Paljonko painodataa ikkunassa (adaptiivisen luotettavuuteen)
+    w_in_window = [d for d, _ in points if start <= d <= ref_date]
+    w_points = len(w_in_window)
+    w_span = (max(w_in_window) - min(w_in_window)).days if len(w_in_window) >= 2 else 0
 
     # Treenitiheys (vaikuttaa kulutukseen) ja keskim. treenin kcal
     training_days, workout_kcal_avg = _training_profile(db, profile_id, ref_date)
 
-    tdee = engine.adaptive_tdee(avg_intake, weight_change, window_days) if avg_intake else None
-    if not tdee:
-        # Ei syöntidataa vielä -> arvio painosta/pituudesta/iästä JA treenimäärästä
-        age = engine.age_from_birthdate(profile.birthdate, date.today()) if profile else None
-        tdee = engine.baseline_tdee(
-            week_avg, profile.height_cm if profile else None, age,
-            profile.sex if profile else None, training_days)
-        # Lisää keskimääräinen kardiokulutus/pv ja askelkulutus (arkiaktiivisuus).
-        # Adaptiivinen malli huomioi nämä jo automaattisesti painomuutoksen kautta.
-        if tdee:
-            tdee += _avg_daily_cardio_kcal(db, profile_id, ref_date, 14)
-            tdee += _avg_daily_steps_kcal(db, profile_id, ref_date, 14, week_avg)
+    # Vakaa perusarvio (painosta/pituudesta/iästä/treenimäärästä) + maltillinen
+    # arki-/askelkulutus. Tämä on ankkuri jonka ympärille adaptiivinen rajataan.
+    age = engine.age_from_birthdate(profile.birthdate, date.today()) if profile else None
+    baseline = engine.baseline_tdee(
+        week_avg, profile.height_cm if profile else None, age,
+        profile.sex if profile else None, training_days)
+    if baseline:
+        baseline += _avg_daily_cardio_kcal(db, profile_id, ref_date, 14)
+        baseline += _avg_daily_steps_kcal(db, profile_id, ref_date, 14, week_avg)
+
+    tdee_info = engine.resolve_tdee(baseline, avg_intake, weight_change, window_days,
+                                    len(intake_days), w_points, w_span)
+    tdee = tdee_info["tdee"]
 
     low_carb = bool(next((m for m in DIET_MODELS
                           if phase and m["name"] == phase.model and m.get("low_carb")), None))
@@ -401,6 +413,28 @@ def diet_status(profile_id: int = Query(...), db: Session = Depends(get_db)):
     # Monipäiväinen ruoan laadun arvio (pisteet + järkevämpi lähestymistapa +
     # palautumis-/energialippu). Vain kun kirjattuja päiviä on tarpeeksi.
     nutrition_quality = engine.nutrition_quality(style, week_avg, goal)
+
+    # Realistinen vaihekohtainen ohje (tutkimuspohjainen, ei absolutistinen).
+    # Dieetillä tarvitaan jatkuvaa dataa (paino + vyötärö) ja sopiva väsymys on
+    # normaalia; ylläpidossa tarkkuus, jottei tavoite karkaa.
+    lo_pct = round(week_avg * 0.005, 1)  # ~0.5 %/vk
+    hi_pct = round(week_avg * 0.01, 1)   # ~1 %/vk
+    if goal == "cut":
+        phase_note = (f"Dieetillä realistinen pudotus on ~{lo_pct}–{hi_pct} kg/vk (0.5–1 % painosta). "
+                      "Onnistumisen näkee JATKUVASTA datasta: paino laskee viikkokeskiarvona ja vyötärö "
+                      "kaventuu. Voima ei yleensä NOUSE dieetillä — tavoite on säilyttää se, ja lievä "
+                      "väsymys treeneissä on täysin normaalia. Pidä proteiini korkealla. Jos vyötärö ei "
+                      "kavene 2–3 viikossa, kiristä maltilla; jos voima romahtaa tai olo on jatkuvasti "
+                      "loppu, hidasta tahtia.")
+    elif goal == "bulk":
+        phase_note = (f"Massalla maltillinen nousu ~{round(week_avg*0.0025, 1)}–{lo_pct} kg/vk pitää rasvan "
+                      "kurissa. Seuraa että vyötärö kasvaa vain vähän ja voima nousee — silloin lisä on "
+                      "pääosin lihasta. Jos vyötärö kasvaa nopeasti, hidasta.")
+    else:
+        phase_note = ("Ylläpidossa tavoite on pitää paino ja vyötärö vakaana ja keskittyä suorituskykyyn. "
+                      "Tavoitekaloreita säädetään vain jos viikkokeskiarvo liikkuu selvästi — yksittäinen "
+                      "päivä ei muuta mitään. Treenipäivinä voit syödä hieman enemmän, lepopäivinä vähemmän, "
+                      "kunhan VIIKON keskiarvo pysyy tavoitteessa (jos jätät treenin väliin, syö lepopäivän määrä).")
 
     # Vyötärö (viimeisin) bulk-rajaa varten
     waist = (
@@ -446,6 +480,11 @@ def diet_status(profile_id: int = Query(...), db: Session = Depends(get_db)):
         "trend_kg_per_week": trend,
         "intake_avg_kcal": round(avg_intake) if avg_intake else None,
         "intake_estimated": intake_estimated,
+        "tdee_source": tdee_info["source"],
+        "tdee_confidence": tdee_info["confidence"],
+        "tdee_data_needs": tdee_info.get("data_needs", []),
+        "tdee_note": tdee_info.get("note"),
+        "phase_note": phase_note,
         "macro_style": style,
         "food_notes": food_notes,
         "nutrition_quality": nutrition_quality,
@@ -482,20 +521,26 @@ def _current_targets(db: Session, profile_id: int) -> tuple[dict | None, bool]:
     ref_date = max(d for d, _ in points)
     week_avg = engine.weekly_average(points, ref_date, 7) or points[-1][1]
     kcal_by_date = _daily_kcal(db, profile_id)
-    start = ref_date - timedelta(days=13)
+    window_days = 21
+    start = ref_date - timedelta(days=window_days - 1)
     intake_days = [kcal_by_date[d] for d in kcal_by_date if start <= d <= ref_date]
-    avg_intake = sum(intake_days) / len(intake_days) if intake_days else None
+    avg_intake = engine._median(intake_days) if intake_days else None
     w_start = engine.weekly_average(points, start + timedelta(days=6), 7)
     w_end = engine.weekly_average(points, ref_date, 7)
     weight_change = (w_end - w_start) if (w_start and w_end) else 0.0
-    tdee = engine.adaptive_tdee(avg_intake, weight_change, 14) if avg_intake else None
-    if not tdee:
-        profile = db.get(models.Profile, profile_id)
-        age = engine.age_from_birthdate(profile.birthdate, date.today()) if profile else None
-        training_days, _ = _training_profile(db, profile_id, ref_date)
-        tdee = engine.baseline_tdee(
-            week_avg, profile.height_cm if profile else None, age,
-            profile.sex if profile else None, training_days)
+    w_in = [d for d, _ in points if start <= d <= ref_date]
+    w_span = (max(w_in) - min(w_in)).days if len(w_in) >= 2 else 0
+    profile = db.get(models.Profile, profile_id)
+    age = engine.age_from_birthdate(profile.birthdate, date.today()) if profile else None
+    training_days, _ = _training_profile(db, profile_id, ref_date)
+    baseline = engine.baseline_tdee(
+        week_avg, profile.height_cm if profile else None, age,
+        profile.sex if profile else None, training_days)
+    if baseline:
+        baseline += _avg_daily_cardio_kcal(db, profile_id, ref_date, 14)
+        baseline += _avg_daily_steps_kcal(db, profile_id, ref_date, 14, week_avg)
+    tdee = engine.resolve_tdee(baseline, avg_intake, weight_change, window_days,
+                               len(intake_days), len(w_in), w_span)["tdee"]
     model = next((m for m in DIET_MODELS if phase and m["name"] == phase.model), None)
     low_carb = bool(model and model.get("low_carb"))
     fasting = bool(model and model["id"] == "cut_16_8")

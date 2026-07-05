@@ -1182,6 +1182,67 @@ def baseline_tdee(bodyweight: float, height_cm: float | None, age: int | None,
     return round(bodyweight * 24.0 * activity, 0)
 
 
+# Kuinka paljon dataa tarvitaan ennen kuin syönnistä laskettu (adaptiivinen)
+# TDEE otetaan käyttöön. Vähemmällä datalla nojataan vakaaseen perusarvioon,
+# jottei tavoite hyppää päivästä toiseen yksittäisen kirjauksen takia.
+TDEE_MIN_INTAKE_DAYS = 10     # täysi luottamus adaptiiviseen
+TDEE_PARTIAL_INTAKE_DAYS = 5  # osittainen (sekoitus perusarvioon)
+TDEE_MIN_WEIGHT_POINTS = 4
+TDEE_MIN_WEIGHT_SPAN_DAYS = 14
+
+
+def _median(vals: list) -> float:
+    s = sorted(vals)
+    n = len(s)
+    return s[n // 2] if n % 2 else (s[n // 2 - 1] + s[n // 2]) / 2.0
+
+
+def resolve_tdee(baseline: float | None, avg_intake: float | None,
+                 weight_change_kg: float, window_days: int,
+                 intake_day_count: int, weight_point_count: int,
+                 weight_span_days: int) -> dict:
+    """Päätä TDEE VAKAASTI ja data edellä. Adaptiivinen (syönti - painomuutos)
+    otetaan käyttöön vasta kun dataa on tarpeeksi, ja sekin RAJATAAN perusarvion
+    ympärille (±18 %), ettei yksittäinen kirjaus tai painon kohina heilauta
+    tavoitetta satoja kaloreita. Palauttaa arvon, lähteen, luottamuksen ja
+    mitä dataa vielä tarvitaan.
+    """
+    weight_ok = (weight_point_count >= TDEE_MIN_WEIGHT_POINTS
+                 and weight_span_days >= TDEE_MIN_WEIGHT_SPAN_DAYS)
+    adaptive = None
+    if avg_intake and intake_day_count >= TDEE_PARTIAL_INTAKE_DAYS and weight_ok:
+        adaptive = avg_intake - (weight_change_kg * KCAL_PER_KG / max(1, window_days))
+
+    needs = []
+    if intake_day_count < TDEE_MIN_INTAKE_DAYS:
+        needs.append(f"kirjaa ruokaa vielä ~{TDEE_MIN_INTAKE_DAYS - intake_day_count} päivää")
+    if not weight_ok:
+        needs.append("punnitse ~3×/viikko parin viikon ajan")
+
+    if adaptive is None or baseline is None:
+        return {"tdee": round(baseline) if baseline else None, "source": "perusarvio",
+                "confidence": "matala" if baseline else "ei dataa", "data_needs": needs,
+                "note": ("Tarve on arvioitu painosta, pituudesta, iästä ja treenimäärästä. "
+                         "Tarkka oma tarve lasketaan syönnistä ja painon kehityksestä, kun dataa on "
+                         "tarpeeksi — siihen asti tavoite pidetään vakaana eikä sitä säädetä hätäisesti.")
+                if baseline else {}} if baseline else {
+                    "tdee": None, "source": "ei dataa", "confidence": "ei dataa", "data_needs": needs}
+    # Rajaa adaptiivinen perusarvion ympärille (fysiologisesti järkevä haarukka)
+    lo, hi = baseline * 0.82, baseline * 1.18
+    clamped = max(lo, min(hi, adaptive))
+    if intake_day_count >= TDEE_MIN_INTAKE_DAYS:
+        # Täysi luottamus: enimmäkseen adaptiivinen, hieman perusarvioon ankkuroitu
+        tdee = 0.75 * clamped + 0.25 * baseline
+        source, conf = "adaptiivinen (omasta datasta)", "korkea"
+    else:
+        # Osittainen data: puoliksi kumpaakin -> ei ehdi heilua
+        tdee = 0.5 * clamped + 0.5 * baseline
+        source, conf = "osittain adaptiivinen", "kohtalainen"
+    return {"tdee": round(tdee), "source": source, "confidence": conf, "data_needs": needs,
+            "note": ("Tarve lasketaan omasta syönnistäsi ja painon kehityksestäsi (usean päivän "
+                     "keskiarvo). Muutokset tehdään maltilla, ei yksittäisen päivän perusteella.")}
+
+
 def macro_targets(bodyweight: float, goal: str, tdee: float, target_rate: float,
                   low_carb: bool = False) -> dict:
     """Laske kcal- ja makrotavoitteet kehon painosta, tavoitteesta ja tahdista.
