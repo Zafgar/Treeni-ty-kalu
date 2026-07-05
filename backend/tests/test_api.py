@@ -527,3 +527,44 @@ def test_report_problem_swaps_exercise(client):
     # Ohjelma päivittyi tulevia treenejä varten
     prog2 = client.get(f"/api/programs/{prog['id']}").json()
     assert prog2["days"][0]["exercises"][0]["exercise"]["name"] == "Jalkaprässi"
+
+
+def test_total_forecast_anchored_to_now(client):
+    """Comeback: vanha ennätys (vanha pvm) + tuoreet treenit. Total-ennusteen
+    tulee alkaa NYKYHETKESTÄ eteenpäin, ei liikkeen vanhasta päivästä."""
+    from datetime import date, timedelta
+    today = date.today()
+    client.patch("/api/profiles/1", json={"sex": "mies", "height_cm": 180})
+    client.post("/api/body/entries?profile_id=1", json={"bodyweight": 110})
+    lifts = {}
+    for name in ("Takakyykky", "Penkkipunnerrus", "Maastaveto"):
+        e = client.post("/api/exercises", json={"name": name, "is_main_lift": True,
+                                                "sport": "voimanosto"}).json()
+        lifts[name] = e["id"]
+
+    def sess(dstr, items):
+        client.post("/api/workouts", json={"profile_id": 1, "session_date": dstr, "status": "completed",
+            "exercises": [{"exercise_id": eid, "sets": [{"weight": w, "reps": r, "completed": True}]}
+                          for eid, (w, r) in items]})
+    # Vanhat ennätykset ~3 v sitten
+    old = (today - timedelta(days=1000)).isoformat()
+    sess(old, [(lifts["Takakyykky"], (250, 3)), (lifts["Penkkipunnerrus"], (160, 3)),
+               (lifts["Maastaveto"], (300, 3))])
+    # Tuore comeback (nouseva)
+    for wk, vals in [(6, (140, 90, 170)), (4, (150, 95, 180)), (2, (160, 100, 190)), (0, (170, 105, 200))]:
+        ds = (today - timedelta(weeks=wk)).isoformat()
+        sess(ds, [(lifts["Takakyykky"], (vals[0], 3)), (lifts["Penkkipunnerrus"], (vals[1], 3)),
+                  (lifts["Maastaveto"], (vals[2], 3))])
+    t = client.get("/api/stats/total?sport=voimanosto&profile_id=1").json()
+    fc = t["forecast"]
+    assert len(fc) == 52
+    last_hist = date.fromisoformat(t["timeline"][-1]["date"])
+    # Ennuste alkaa vasta viimeisen historiapäivän jälkeen (ei menneisyydestä)
+    assert date.fromisoformat(fc[0]["date"]) > last_hist
+    # Ulottuu ~1 v eteenpäin
+    assert (date.fromisoformat(fc[-1]["date"]) - last_hist).days >= 350
+    # Haarukka näkyy koko matkalta ja levenee ajassa
+    assert all(p["high"] > p["low"] for p in fc)
+    assert (fc[-1]["high"] - fc[-1]["low"]) > (fc[0]["high"] - fc[0]["low"])
+    # Ennuste yhtyy nykytotaliin (ei hyppyä)
+    assert abs(fc[0]["mid"] - t["total_mid"]) < 40

@@ -364,6 +364,11 @@ def total(
             timeline.append({"date": d.isoformat(), "total": round(sum(last_known.values()), 1)})
 
     # Total-uran ennuste: ennusta jokainen pääliike ja summaa viikoittain.
+    # TÄRKEÄÄ: kaikki liikkeet ankkuroidaan YHTEISEEN tulevaisuusakseliin, joka
+    # alkaa viimeisimmästä toteutuneesta totalista (ref_date) eikä kunkin
+    # liikkeen omasta viimeisestä päivästä. Muuten liike, jonka tuorein merkintä
+    # on vanha (esim. kirjattu vanha ennätys), vetäisi koko ennusteen alkamaan
+    # menneisyydestä. Ennuste projisoidaan aina NYKYHETKESTÄ vuosi eteenpäin.
     bw = _latest_bodyweight(db, profile_id)
     bw_trend = _bodyweight_trend(db, profile_id) or 0.0
     profile = db.get(models.Profile, profile_id) if profile_id else None
@@ -372,11 +377,18 @@ def total(
     fc_mid = [0.0] * horizon
     fc_low = [0.0] * horizon
     fc_high = [0.0] * horizon
-    fc_dates = None
     have_fc = False
+    # Yhteinen ankkuripäivä = tuorein toteutunut total (tai tänään jos ei dataa)
+    ref_date = all_dates[-1] if all_dates else date.today()
     for ex in lifts:
         pts = [p for p in lift_timeseries.get(ex.name, []) if p["estimated_1rm"] > 0]
+        cur = last_known.get(ex.name)  # liikkeen nykyarvo ref_date-hetkellä
         if len(pts) < 2:
+            # Ei ennustettavaa dataa -> pidetään nykyarvo tasaisena (jottei
+            # total-ennuste tipahda alle nykytason puuttuvan liikkeen takia).
+            if cur:
+                for i in range(horizon):
+                    fc_mid[i] += cur; fc_low[i] += cur; fc_high[i] += cur
             continue
         lk = engine.classify_lift(ex.name)
         ceiling = engine.natural_ceiling(lk, bw, sex) if (lk and bw) else None
@@ -390,18 +402,22 @@ def total(
                                       confidence=conf, prior_best=prior_best,
                                       rate_calibration=bt["rate_ratio"], error_scale=bt["error_scale"])
         if not fc:
+            if cur:
+                for i in range(horizon):
+                    fc_mid[i] += cur; fc_low[i] += cur; fc_high[i] += cur
             continue
         have_fc = True
-        if fc_dates is None:
-            fc_dates = [m["date"] for m in fc]
+        # Summataan viikkoindeksillä (viikko i liikkeen nykyarvosta eteenpäin);
+        # kalenteripäivä otetaan yhteisestä ref_date-akselista, ei liikkeeltä.
         for i, m in enumerate(fc):
             fc_mid[i] += m["mid"]; fc_low[i] += m["low"]; fc_high[i] += m["high"]
 
     total_forecast = []
-    if have_fc and fc_dates:
-        total_forecast = [{"date": fc_dates[i], "mid": round(fc_mid[i], 1),
+    if have_fc:
+        total_forecast = [{"date": (ref_date + timedelta(weeks=i + 1)).isoformat(),
+                           "mid": round(fc_mid[i], 1),
                            "low": round(fc_low[i], 1), "high": round(fc_high[i], 1)}
-                          for i in range(len(fc_dates))]
+                          for i in range(horizon)]
 
     # Kilpailutaso: yhteistulos vs. painoluokka ja paikallinen→MM
     competition = engine.competition_assessment(sport, total_mid, bw, sex) if bw else None
