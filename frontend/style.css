@@ -492,3 +492,32 @@ input[id$="-search"] { width: 100%; margin-bottom: 8px; }
 .lock-sep { height: 1px; background: var(--border-soft); margin: 14px 0; }
 .lock-admin { width: 100%; }
 .lock-msg { margin-top: 10px; color: var(--danger); min-height: 1em; }
+
+/* --- Treenin selite (legend) --- */
+.legend summary { cursor: pointer; list-style: none; }
+.legend summary::-webkit-details-marker { display: none; }
+.legend ul { margin: 12px 0 2px; padding-left: 18px; }
+.legend li { margin: 7px 0; color: var(--muted); line-height: 1.5; }
+.legend li strong { color: var(--text); }
+
+/* --- Yhteisö --- */
+.pt-message {
+  font-size: 1.05rem; line-height: 1.5; white-space: pre-wrap;
+  padding: 12px 14px; border-radius: var(--radius-sm);
+  background: rgba(79, 140, 255, 0.1); border: 1px solid rgba(79, 140, 255, 0.4);
+  color: var(--text);
+}
+.member-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px;
+}
+.member {
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 12px 14px;
+}
+.member-top { display: flex; align-items: center; gap: 10px; }
+.member-stats { display: flex; flex-direction: column; gap: 2px; margin-top: 10px; font-size: 0.85rem; }
+.member-note {
+  margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border-soft);
+  font-size: 0.88rem; color: var(--text); font-style: italic;
+}
+.hof-hidden { opacity: 0.55; }

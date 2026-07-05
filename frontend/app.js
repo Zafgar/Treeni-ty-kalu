@@ -868,13 +868,9 @@ function renderWorkoutExercise(workoutId, we) {
   // Arvioitu 1RM tästä treenistä (paras suoritettu sarja)
   block.append(el("div", { class: "muted", style: "margin-top:6px" }, `Arvioitu 1RM: ${oneRm}`));
 
-  // Vajaus-pikakenttä: montako toistoa jäi yhteensä vajaaksi (ei tarvitse
-  // kirjata 5,5,4,2 — riittää "4 vajaa"). Vähennetään kehitysvolyymistä.
-  const missed = el("input", { type: "number", value: we.missed_reps || 0, style: "width:70px" });
-  missed.addEventListener("change", async () => {
-    await api.patch(`/api/workouts/exercises/${we.id}`, { exercise_id: we.exercise_id, missed_reps: +missed.value || 0 });
-    loadWorkouts();
-  });
+  // Huom: erillistä "vajaaksi jäi" -kenttää ei ole — jos sarja jäi vajaaksi,
+  // muuta vain sen sarjan toistoluku siihen mitä oikeasti teit. Toistot per
+  // sarja näkyvät yllä, joten kehitysvolyymi lasketaan suoraan niistä.
 
   const suggestBox = el("span", { class: "muted" });
   block.append(el("div", { class: "btn-row", style: "align-items:center;margin-top:8px" },
@@ -885,7 +881,6 @@ function renderWorkoutExercise(workoutId, we) {
       });
       openWorkoutEditor(workoutId);
     } }, "+ Sarja"),
-    el("label", { style: "flex-direction:row;align-items:center;gap:6px" }, "Vajaaksi jäi (toistot)", missed),
     el("button", { class: "small", onclick: async () => {
       const reps = we.sets[0] ? we.sets[0].reps : 5;
       const s = await api.get(pq(`/api/stats/exercises/${we.exercise_id}/suggest?target_reps=${reps}&increase=true`));
@@ -2199,6 +2194,124 @@ async function loadSecurityCard() {
         catch (e) { note.textContent = e.message; }
       } }, "Poista lukko käytöstä")),
     note);
+}
+
+// =================== YHTEISÖ ===================
+async function loadCommunity() {
+  const box = document.getElementById("community-view");
+  if (!box) return;
+  box.innerHTML = "";
+  let data;
+  try { data = await api.get("/api/community/overview"); }
+  catch (e) { box.textContent = "Yhteisön haku epäonnistui."; return; }
+
+  // --- PT-viesti ---
+  const ptCard = el("div", { class: "card" }, el("h3", { style: "margin-top:0" }, "📣 PT-viesti"));
+  if (data.pt_message) {
+    ptCard.append(el("div", { class: "pt-message" }, data.pt_message),
+      data.pt_message_at ? el("div", { class: "muted", style: "font-size:0.78rem;margin-top:6px" },
+        "Päivitetty " + data.pt_message_at.slice(0, 10)) : "");
+  } else if (!data.is_admin) {
+    ptCard.append(el("div", { class: "muted" }, "Ei viestiä juuri nyt."));
+  }
+  if (data.is_admin) {
+    const ta = el("textarea", { rows: 2, style: "width:100%;margin-top:8px",
+      placeholder: "Kirjoita viesti kaikille (esim. tiedote, kannustus, aikataulu)…" }, data.pt_message || "");
+    const st = el("span", { class: "muted", style: "font-size:0.8rem" });
+    ptCard.append(ta, el("div", { class: "btn-row", style: "margin-top:6px" },
+      el("button", { class: "primary small", onclick: async () => {
+        try { await api.post("/api/community/pt-message", { message: ta.value }); st.textContent = "Tallennettu."; loadCommunity(); }
+        catch (e) { st.textContent = e.message; }
+      } }, "Tallenna viesti"),
+      data.pt_message ? el("button", { class: "small", onclick: async () => {
+        try { await api.post("/api/community/pt-message", { message: "" }); loadCommunity(); }
+        catch (e) { st.textContent = e.message; }
+      } }, "Poista") : "", st));
+  }
+  box.append(ptCard);
+
+  // --- Oma jaettava statusrivi ---
+  const me = data.members.find((m) => m.id === currentProfileId);
+  const myCard = el("div", { class: "card" }, el("h3", { style: "margin-top:0" }, "🙋 Oma jaettava rivi"));
+  const noteInp = el("input", { type: "text", maxlength: 200, style: "width:100%",
+    placeholder: "Esim. tavoite, kuulumiset, motto (näkyy muille)", value: me && me.public_note ? me.public_note : "" });
+  const noteSt = el("span", { class: "muted", style: "font-size:0.8rem" });
+  myCard.append(noteInp, el("div", { class: "btn-row", style: "margin-top:6px" },
+    el("button", { class: "small", onclick: async () => {
+      try { await api.post("/api/community/public-note", { profile_id: currentProfileId, note: noteInp.value }); noteSt.textContent = "Tallennettu."; loadCommunity(); }
+      catch (e) { noteSt.textContent = e.message; }
+    } }, "Tallenna"),
+    el("button", { class: "small", onclick: async () => {
+      try { await api.post("/api/community/public-note", { profile_id: currentProfileId, hide_from_community: true }); loadCommunity(); }
+      catch (e) { noteSt.textContent = e.message; }
+    } }, "Piilota minut yhteisöstä"), noteSt));
+  box.append(myCard);
+
+  // --- Jäsenet ---
+  const memCard = el("div", { class: "card" },
+    el("h3", { style: "margin-top:0" }, `👥 Jäsenet (${data.members.length})`));
+  const grid = el("div", { class: "member-grid" });
+  data.members.forEach((m) => {
+    grid.append(el("div", { class: "member" },
+      el("div", { class: "member-top" },
+        el("span", { class: "lock-ava", style: m.color ? `background:${m.color}` : "" }, initials(m.name)),
+        el("div", {}, el("strong", {}, m.name),
+          el("div", { class: "muted", style: "font-size:0.8rem" },
+            [m.age != null ? m.age + " v" : null, m.sex || null].filter(Boolean).join(" · ")))),
+      el("div", { class: "member-stats" },
+        el("span", {}, `🏋️ ${m.workouts} treeniä`),
+        m.last_workout ? el("span", {}, `Viimeksi ${m.last_workout}`) : el("span", { class: "muted" }, "Ei treenejä vielä"),
+        m.joined ? el("span", { class: "muted" }, `Liittyi ${m.joined}`) : ""),
+      m.public_note ? el("div", { class: "member-note" }, m.public_note) : ""));
+  });
+  memCard.append(grid);
+  box.append(memCard);
+
+  // --- Hall of Fame ---
+  const hofCard = el("div", { class: "card" },
+    el("h3", { style: "margin-top:0" }, "🏆 Hall of Fame"));
+  hofCard.append(el("p", { class: "muted", style: "margin-top:0" },
+    "Jaa saavutus kaikkien nähtäville: ennätys, virstanpylväs tai kuulumiset."));
+  const hTitle = el("input", { type: "text", maxlength: 120, placeholder: "Otsikko (esim. Uusi penkki-ennätys 100 kg!)", style: "width:100%" });
+  const hBody = el("textarea", { rows: 2, placeholder: "Vapaa kuvaus (valinnainen)", style: "width:100%;margin-top:6px" });
+  const hSt = el("span", { class: "muted", style: "font-size:0.8rem" });
+  hofCard.append(hTitle, hBody, el("div", { class: "btn-row", style: "margin-top:6px" },
+    el("button", { class: "primary small", onclick: async () => {
+      if (!hTitle.value.trim()) { hSt.textContent = "Otsikko puuttuu."; return; }
+      try { await api.post("/api/community/hall", { profile_id: currentProfileId, title: hTitle.value, body: hBody.value }); loadCommunity(); }
+      catch (e) { hSt.textContent = e.message; }
+    } }, "Jaa saavutus"), hSt));
+
+  const list = el("div", { class: "list", style: "margin-top:10px" });
+  if (!data.hall_of_fame.length) {
+    list.append(el("div", { class: "muted" }, "Ei vielä merkintöjä — ole ensimmäinen!"));
+  }
+  data.hall_of_fame.forEach((e) => {
+    const actions = el("div", { class: "btn-row" });
+    if (data.is_admin) {
+      actions.append(el("button", { class: "small", onclick: async () => {
+        await api.patch(`/api/community/hall/${e.id}`, { pinned: !e.pinned }); loadCommunity();
+      } }, e.pinned ? "Irrota" : "📌 Kiinnitä"),
+      el("button", { class: "small", onclick: async () => {
+        await api.patch(`/api/community/hall/${e.id}`, { hidden: !e.hidden }); loadCommunity();
+      } }, e.hidden ? "Näytä" : "Piilota"));
+    }
+    if (e.can_edit) {
+      actions.append(el("button", { class: "small danger", onclick: async () => {
+        if (confirm("Poistetaanko merkintä?")) { await api.del(`/api/community/hall/${e.id}`); loadCommunity(); }
+      } }, "Poista"));
+    }
+    list.append(el("div", { class: "item" + (e.hidden ? " hof-hidden" : "") },
+      el("div", { class: "row-between" },
+        el("div", {},
+          el("strong", {}, e.pinned ? "📌 " : "", e.title),
+          el("div", { class: "muted", style: "font-size:0.8rem" },
+            `${e.author}${e.created_at ? " · " + e.created_at : ""}${e.hidden ? " · piilotettu" : ""}`)),
+        actions),
+      e.body ? el("div", { style: "margin-top:6px" }, e.body) : ""));
+  });
+  hofCard.append(list);
+  box.append(hofCard);
 }
 
 async function loadProfilesTab() {
@@ -3706,6 +3819,7 @@ TAB_LOADERS.recovery = loadRecovery;
 TAB_LOADERS.body = loadBody;
 TAB_LOADERS.nutrition = loadNutrition;
 TAB_LOADERS.diet = loadDiet;
+TAB_LOADERS.community = loadCommunity;
 TAB_LOADERS.profiles = loadProfilesTab;
 
 // ---------- Käynnistys ----------
@@ -3714,7 +3828,7 @@ const TAB_ICONS = {
   overview: "layout-dashboard", progress: "trending-up", recovery: "heart-pulse",
   body: "person-standing", workouts: "dumbbell", programs: "calendar-days",
   exercises: "clipboard-list", nutrition: "apple", diet: "salad",
-  profiles: "users", calc: "calculator",
+  community: "trophy", profiles: "users", calc: "calculator",
 };
 
 async function initIcons() {

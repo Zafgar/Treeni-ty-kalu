@@ -37,6 +37,7 @@ from .routers import (
     backup,
     body,
     coach,
+    community,
     diet,
     engine_api,
     exercises,
@@ -185,6 +186,7 @@ def _body_profile_mismatch(body_bytes: bytes, own: int) -> bool:
 
 
 app.include_router(auth.router)
+app.include_router(community.router)
 app.include_router(profiles.router)
 app.include_router(exercises.router)
 app.include_router(programs.router)

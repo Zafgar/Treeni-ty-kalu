@@ -59,6 +59,11 @@ class Profile(Base):
     # Valinnainen profiilin PIN-tiiviste (pbkdf2). Käytössä vain jos profiililukko
     # on päällä (admin-PIN asetettu). Tyhjä = profiililla ei ole omaa PINiä.
     pin_hash: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # Vapaaehtoinen jaettava kuulumis-/statusrivi (näkyy Yhteisö-välilehdellä).
+    public_note: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # Käyttäjä voi piiloutua yhteisönäkymästä (perustiedot eivät näy muille).
+    # server_default varmistaa että raakаsql-insertit (oletusprofiili) toimivat.
+    hide_from_community: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
@@ -72,6 +77,22 @@ class AppSetting(Base):
     key: Mapped[str] = mapped_column(String(60), primary_key=True)
     value: Mapped[str | None] = mapped_column(Text, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class HallOfFameEntry(Base):
+    """Yhteisön "Hall of Fame": kuka tahansa voi jakaa saavutuksen (ennätys,
+    virstanpylväs, kuulumiset) kaikkien nähtäville. Admin (PT) voi piilottaa
+    tai poistaa. Näkyy Yhteisö-välilehdellä."""
+
+    __tablename__ = "hall_of_fame"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    profile_id: Mapped[int] = mapped_column(ForeignKey("profiles.id", ondelete="CASCADE"))
+    title: Mapped[str] = mapped_column(String(120))
+    body: Mapped[str | None] = mapped_column(Text, nullable=True)
+    hidden: Mapped[bool] = mapped_column(Boolean, default=False)
+    pinned: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
 class Exercise(Base):

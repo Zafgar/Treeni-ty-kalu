@@ -704,3 +704,48 @@ def test_profile_lock_flow(client):
     # Admin poistaa lukon -> vapaa käyttö palaa
     assert client.post("/api/auth/disable", headers=ah).json()["enabled"] is False
     assert client.get("/api/profiles").status_code == 200
+
+
+def test_community_overview_and_hall(client):
+    # Toinen jäsen
+    client.post("/api/profiles", json={"name": "Kaveri"})
+    # Yleisnäkymä toimii ilman lukkoa (paikallinen = admin)
+    ov = client.get("/api/community/overview").json()
+    assert ov["is_admin"] is True
+    assert len(ov["members"]) == 2
+    # PT-viesti
+    client.post("/api/community/pt-message", json={"message": "Tervetuloa!"})
+    assert client.get("/api/community/overview").json()["pt_message"] == "Tervetuloa!"
+    # Jaettu saavutus
+    r = client.post("/api/community/hall", json={"profile_id": 1, "title": "Uusi penkki 100kg", "body": "vihdoin"})
+    assert r.status_code == 201
+    hid = r.json()["id"]
+    ov = client.get("/api/community/overview").json()
+    assert ov["hall_of_fame"][0]["title"] == "Uusi penkki 100kg"
+    # Admin piilottaa -> ei näy tavalliselle, näkyy adminille
+    client.patch(f"/api/community/hall/{hid}", json={"hidden": True})
+    assert client.get("/api/community/overview").json()["hall_of_fame"][0]["hidden"] is True
+    # Oma statusrivi + piiloutuminen
+    client.post("/api/community/public-note", json={"profile_id": 2, "note": "Tavoite: 5 treeniä/vko"})
+    client.post("/api/community/public-note", json={"profile_id": 2, "hide_from_community": True})
+    # Admin näkee silti kaikki
+    assert len(client.get("/api/community/overview").json()["members"]) == 2
+
+
+def test_community_hall_scoped_when_locked(client):
+    from backend.app import security
+    client.post("/api/profiles", json={"name": "Kaveri"})  # id 2
+    admin = client.post("/api/auth/setup", json={"admin_pin": "1234"}).json()["token"]
+    ah = {"Authorization": f"Bearer {admin}"}
+    client.post("/api/auth/profile-pin", json={"profile_id": 2, "pin": "9999"}, headers=ah)
+    ptok = client.post("/api/auth/login", json={"mode": "profile", "profile_id": 2, "pin": "9999"}).json()["token"]
+    ph = {"Authorization": f"Bearer {ptok}"}
+    # Käyttäjä näkee yhteisön (jaettu näkymä)
+    ov = client.get("/api/community/overview", headers=ph).json()
+    assert ov["is_admin"] is False and len(ov["members"]) == 2
+    # Ei voi jakaa toisen nimissä
+    assert client.post("/api/community/hall", json={"profile_id": 1, "title": "X"}, headers=ph).status_code == 403
+    # Voi jakaa omalla
+    assert client.post("/api/community/hall", json={"profile_id": 2, "title": "Oma"}, headers=ph).status_code == 201
+    # Ei voi asettaa PT-viestiä
+    assert client.post("/api/community/pt-message", json={"message": "x"}, headers=ph).status_code == 403

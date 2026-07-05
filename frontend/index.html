@@ -45,6 +45,7 @@
       <button data-tab="exercises">Liikkeet</button>
       <button data-tab="nutrition">Ruoka</button>
       <button data-tab="diet">Dieetti</button>
+      <button data-tab="community">Yhteisö</button>
       <button data-tab="profiles">Profiilit</button>
       <button data-tab="calc">Painolaskuri</button>
     </nav>
@@ -329,6 +330,17 @@
     </section>
 
     <!-- PROFIILIT -->
+    <!-- YHTEISÖ -->
+    <section id="tab-community" class="tab">
+      <div class="row-between">
+        <h2>Yhteisö</h2>
+      </div>
+      <p class="muted">Kaikki sovelluksen käyttäjät näkyvät täällä. Yksityinen data
+        (treenit, ruoka, mitat) pysyy oman profiilin takana — täällä näkyy vain se,
+        minkä kukin haluaa jakaa.</p>
+      <div id="community-view"></div>
+    </section>
+
     <section id="tab-profiles" class="tab">
       <div class="row-between">
         <h2>Profiilit</h2>
@@ -573,6 +585,25 @@
         <h2>Treenikerrat</h2>
         <button id="new-workout-btn" class="primary">+ Uusi treeni</button>
       </div>
+      <details class="card legend">
+        <summary><strong>ℹ️ Näin merkkaat treenin</strong> — lue kerran, sitten on selkeää</summary>
+        <ul>
+          <li><strong>Toistot & paino per sarja:</strong> kirjaa jokaiseen sarjaan mitä oikeasti teit.
+            Jos sarja jäi vajaaksi (esim. tavoite 12, teit 8), muuta vain toistoluvuksi <em>8</em> —
+            erillistä "vajaaksi jäi" -kenttää ei tarvita.</li>
+          <li><strong>RIR (varasto):</strong> montako toistoa olisi <em>vielä jäänyt jäljelle</em>.
+            0 = menit täysillä, 2 = kaksi olisi vielä irronnut. Vapaaehtoinen, mutta tarkentaa
+            1RM-arvion ja ennusteen huomattavasti.</li>
+          <li><strong>OK-ruutu:</strong> rastita kun sarja on tehty. Kun kaikki liikkeen sarjat on
+            tehty, paina liikkeen <em>✓ OK</em>.</li>
+          <li><strong>Kuittaa treeni</strong> lopuksi (Merkitse tehdyksi). Vasta silloin päivittyvät
+            ennätykset, volyymi ja lihaskuormitus.</li>
+          <li><strong>Paino-ehdotus:</strong> kun sarjat menivät täyteen, ohjelma ehdottaa korotusta;
+            jos toistot romahtivat, se ehdottaa laskua. Voit myös jättää painon ennalleen.</li>
+          <li><strong>⚠ Ongelma:</strong> jos liike sattuu tai tuntuu vaaralliselta, ilmoita siitä —
+            vaihdamme turvallisempaan liikkeeseen ja PT saa tiedon.</li>
+        </ul>
+      </details>
       <div id="workout-editor" class="hidden card"></div>
       <div id="workout-list" class="list"></div>
     </section>
