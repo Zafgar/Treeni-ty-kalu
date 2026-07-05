@@ -4,3 +4,7 @@ fastapi>=0.115
 uvicorn[standard]>=0.30
 sqlalchemy>=2.0.30
 pydantic>=2.9
+# Vain laitesynkronoinnin automaattinen haku (/api/sync/pull) käyttää tätä.
+# Puhtaasti Python-pohjainen (ei Rustia), joten wheelit löytyvät. Jos paketti
+# puuttuu, sovellus käynnistyy silti ja manuaalinen synkronointi toimii.
+httpx>=0.27

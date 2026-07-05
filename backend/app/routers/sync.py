@@ -10,7 +10,6 @@ Idempotentti: saman datan synkronointi uudelleen ei tuota kaksoiskappaleita.
 """
 import datetime as _dt
 
-import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import text
@@ -190,6 +189,16 @@ class PullIn(BaseModel):
 def sync_pull(payload: PullIn, db: Session = Depends(get_db)):
     """Hae toisen laitteen data ja yhdistä (valinnaisesti myös takaisin, jolloin
     molemmat laitteet päätyvät samaan tilaan). Laitteet samassa lähiverkossa."""
+    # httpx tuodaan vasta tässä, jotta sovellus käynnistyy vaikka pakettia ei
+    # olisi asennettu. Vain automaattinen laitehaku tarvitsee sen — manuaalinen
+    # Vie/Yhdistä-synkronointi (QR) toimii ilmankin.
+    try:
+        import httpx
+    except ImportError:
+        raise HTTPException(
+            status_code=501,
+            detail=("Automaattinen laitehaku vaatii httpx-paketin. Asenna: "
+                    "pip install httpx — tai käytä manuaalista Vie/Yhdistä-synkronointia."))
     base = payload.url.rstrip("/")
     q = f"?profile_id={payload.profile_id}" if payload.profile_id is not None else ""
     try:
