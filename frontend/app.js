@@ -3719,32 +3719,87 @@ document.getElementById("cardio-save").addEventListener("click", async () => {
 });
 
 // Palautumismittarien suunta + oma normaalitaso + hälytysrajat
+// Yleisarvio + hälytykset tiiviinä bannerina paneelien yläpuolelle.
 async function loadRecoveryInsights() {
-  const div = document.getElementById("recovery-insights");
+  const div = document.getElementById("recovery-verdict");
+  const legacy = document.getElementById("recovery-insights");
+  if (legacy) legacy.innerHTML = "";
   if (!div) return;
   div.innerHTML = "";
-  const d = await api.get(pq("/api/recovery/insights"));
-  if (!d.available) { div.append(el("p", { class: "muted" }, d.note)); return; }
+  let d;
+  try { d = await api.get(pq("/api/recovery/insights")); } catch (e) { return; }
+  if (!d.available) return;  // paneelit näyttävät oman "lisää dataa" -viestinsä
   const vTone = { improving: "var(--accent-2)", stable: "var(--muted)", declining: "#f59e0b" }[d.verdict];
-  div.append(el("div", { style: `font-weight:600;color:${vTone};margin:8px 0 6px` },
-    (d.verdict === "improving" ? "📈 " : d.verdict === "declining" ? "📉 " : "➡ ") + d.verdict_label));
-  const tone = { good: "var(--accent-2)", ok: "var(--muted)", alert: "#ef4444", neutral: "var(--muted)" };
-  const icon = { good: "✓", ok: "•", alert: "⚠", neutral: "•" };
-  d.metrics.forEach((m) => {
-    const bits = [];
-    if (m.recent != null) bits.push(`nyt ${m.recent} ${m.unit}`);
-    if (m.baseline != null) bits.push(`oma normaali ~${m.baseline} ${m.unit}`);
-    if (m.change_pct != null) bits.push(`${m.change_pct > 0 ? "+" : ""}${m.change_pct} %`);
-    if (m.general_level) bits.push(m.general_level);
-    div.append(el("div", { style: "margin-bottom:6px" },
-      el("div", {},
-        el("span", { style: `color:${tone[m.status]};font-weight:600` }, `${icon[m.status]} ${m.label}: `),
-        el("span", { class: "muted" }, bits.join(" · "))),
-      m.note ? el("div", { class: "muted", style: "font-size:0.82em" }, m.note) : "",
-      (m.enough_data && m.alert_at != null)
-        ? el("div", { class: "muted", style: "font-size:0.78em" },
-            `Häly jos 7 pv keskiarvo ${m.alert_direction} ${m.alert_at} ${m.unit}`)
-        : ""));
+  const banner = el("div", { class: "recovery-verdict", style: `border-color:${vTone}` },
+    el("div", { style: `font-weight:600;color:${vTone}` },
+      (d.verdict === "improving" ? "📈 " : d.verdict === "declining" ? "📉 " : "➡ ") + d.verdict_label));
+  if (d.alerts && d.alerts.length) {
+    const ul = el("ul", { style: "margin:6px 0 0;padding-left:18px" });
+    d.alerts.forEach((a) => ul.append(el("li", { style: "color:#ef4444;font-size:0.85rem;margin:2px 0" }, a)));
+    banner.append(ul);
+  }
+  div.append(banner);
+}
+
+// Kiinteät värit per mittari (erottuvat, värisokealle turvalliset).
+const RECOVERY_COLORS = {
+  hrv: "#9085e9", resting_hr: "#e66767", sleep_score: "#3987e5", sleep_hours: "#199e70",
+};
+
+// Piirtää kunkin palautumismittarin omaan paneeliinsa: oikeat yksiköt, oma
+// normaalialue (varjostettu vyöhyke), päivämääräakseli ja tilan/hälytyksen.
+async function renderRecoveryPanels() {
+  const wrap = document.getElementById("recovery-panels");
+  if (!wrap) return;
+  wrap.innerHTML = "";
+  let data;
+  try { data = await api.get(pq("/api/recovery/series")); }
+  catch (e) { wrap.textContent = "Datan haku epäonnistui."; return; }
+  if (!data.available) { wrap.append(el("p", { class: "muted" }, data.note)); return; }
+
+  const sColor = { good: "var(--accent-2)", ok: "var(--muted)", alert: "#ef4444", neutral: "var(--muted)" };
+  const sIcon = { good: "✓", ok: "•", alert: "⚠", neutral: "…" };
+
+  data.panels.forEach((p) => {
+    const metricColor = RECOVERY_COLORS[p.key] || CHART_COLORS[0];
+    const lineColor = p.status === "alert" ? "#ef4444" : metricColor;
+    const panel = el("div", { class: "recovery-panel" });
+
+    panel.append(el("div", { class: "row-between", style: "align-items:baseline" },
+      el("strong", {}, p.label),
+      el("span", { class: "tag", style: `color:${sColor[p.status]};border-color:${sColor[p.status]}` },
+        `${sIcon[p.status]} ${p.recent != null ? "nyt " + p.recent + (p.unit ? " " + p.unit : "") : "—"}`)));
+
+    if (p.band) {
+      const zone = p.key === "sleep_hours" ? "Tavoitealue" : "Normaalialue";
+      let line = `${zone} ${p.band.low}–${p.band.high}${p.unit ? " " + p.unit : ""}`;
+      if (p.baseline != null && p.key !== "sleep_hours") line += ` · oma taso ~${p.baseline}`;
+      panel.append(el("div", { class: "muted", style: "font-size:0.8rem" }, line));
+    } else {
+      panel.append(el("div", { class: "muted", style: "font-size:0.8rem" }, `Vyöhyke muodostuu kun mittauksia on ${p.min_n} (nyt ${p.n}).`));
+    }
+
+    const canvas = el("canvas", { width: 820, height: 150 });
+    panel.append(canvas);
+
+    if (p.note) panel.append(el("div", { style: `font-size:0.85rem;margin-top:4px;color:${sColor[p.status]}` }, p.note));
+    if (p.period_from) panel.append(el("div", { class: "muted", style: "font-size:0.72rem;margin-top:2px" },
+      `Jakso ${p.period_from} – ${p.period_to}`));
+
+    wrap.append(panel);
+
+    // Piirto: erillinen tyhjä "band-sarja" pitää vyöhykkeen aina rauhallisen
+    // värisenä vaikka viiva olisi punainen (hälytys).
+    const pts = p.points.map((d) => ({ x: new Date(d.date).getTime(), y: d.value }));
+    const series = [];
+    if (p.band && pts.length) {
+      const xs = pts.map((q) => q.x);
+      series.push({ points: [], color: metricColor,
+        band: [{ x: Math.min(...xs), low: p.band.low, high: p.band.high },
+               { x: Math.max(...xs), low: p.band.low, high: p.band.high }] });
+    }
+    series.push({ name: p.label, points: pts, color: lineColor });
+    drawLineChart(canvas, series, { unit: p.unit });
   });
 }
 
@@ -3752,29 +3807,8 @@ async function loadRecovery() {
   document.getElementById("cardio-date").value = new Date().toISOString().slice(0, 10);
   await loadReadiness();
   await loadCardio();
-  const entries = await api.get(pq("/api/body/entries"));
-  const fields = [
-    ["sleep_score", "Unipisteet"], ["sleep_hours", "Uni (h)"],
-    ["hrv", "HRV"], ["resting_hr", "Leposyke"],
-  ];
-  const series = [];
-  const legend = document.getElementById("recovery-legend");
-  legend.innerHTML = "";
-  let idx = 0;
-  for (const [key, label] of fields) {
-    const pts = entries.filter((e) => e[key] != null)
-      .map((e) => ({ x: new Date(e.entry_date).getTime(), y: e[key] }));
-    if (pts.length < 2) continue;
-    const color = CHART_COLORS[idx % CHART_COLORS.length];
-    series.push({ name: label, points: normalize01to100(pts), color });
-    const latest = pts.sort((a, b) => a.x - b.x)[pts.length - 1].y;
-    legend.append(el("span", { class: "tag", style: `color:${color};border-color:${color}` }, `${label} (nyt ${latest})`));
-    idx++;
-  }
-  if (!series.length) legend.append(el("span", { class: "muted" }, "Lisää uni-/HRV-/syke-dataa Keho-välilehdellä."));
-  else legend.append(el("span", { class: "muted" }, " · arvot normalisoitu 0–100 vertailtavuuden vuoksi"));
-  drawLineChart(document.getElementById("recovery-chart"), series, {});
   await loadRecoveryInsights();
+  await renderRecoveryPanels();
 
   // Korrelaatiotyökalu
   const metrics = await api.get("/api/stats/correlation/metrics");

@@ -402,3 +402,135 @@ def recovery_insights(profile_id: int = Query(...), db: Session = Depends(get_db
         verdict, verdict_label = "stable", "Vakaa"
     return {"available": True, "metrics": metrics, "alerts": alerts,
             "verdict": verdict, "verdict_label": verdict_label}
+
+
+# Kuinka monta mittausta tarvitaan ennen kuin oma normaalialue (vyöhyke)
+# lasketaan. Käyttäjän toive: "usean ainakin 10–20 mittauksen jaksolta".
+BAND_MIN_N = 10
+BAND_WINDOW_N = 30   # normaalialue lasketaan viimeisistä n mittauksesta
+SERIES_DISPLAY_DAYS = 120  # kuinka pitkältä ajalta pisteet piirretään
+
+
+def _mad_spread(vals: list[float], baseline: float) -> float:
+    """Robusti hajonta (MAD ~ keskihajonta). Pieni lattia, ettei vyöhyke ole
+    epärealistisen ohut kun mittaustarkkuus on karkea."""
+    if len(vals) < 2:
+        return abs(baseline) * 0.05 or 1.0
+    devs = sorted(abs(v - baseline) for v in vals)
+    mad = devs[len(devs) // 2] if len(devs) % 2 else (devs[len(devs) // 2 - 1] + devs[len(devs) // 2]) / 2
+    spread = 1.4826 * mad
+    floor = abs(baseline) * 0.03
+    return max(spread, floor, 0.5)
+
+
+@router.get("/series")
+def recovery_series(profile_id: int = Query(...), db: Session = Depends(get_db)):
+    """Palautumisen aikasarjat paneeleittain: jokaiselle arvolle omat pisteet
+    (oikeissa yksiköissä, ei normalisoituna) ja oma normaalialue (vyöhyke).
+
+    Vyöhyke = viimeisten n. 10–30 mittauksen mediaani ± robusti hajonta. Kun
+    tuore arvo karkaa vyöhykkeen väärälle puolelle, paneeli hälyttää ja ehdottaa
+    mahdollista syytä (stressi, sairastuminen, huono yö, hermostollinen kuorma).
+    Unimäärän vyöhyke on absoluuttinen suositus 7–9 h (ei henkilökohtainen)."""
+    today = date.today()
+    entries = (db.query(models.BodyEntry)
+               .filter(models.BodyEntry.profile_id == profile_id)
+               .order_by(models.BodyEntry.entry_date).all())
+
+    def recent_avg(key, days=7):
+        vals = [getattr(e, key) for e in entries if getattr(e, key) is not None
+                and 0 <= (today - e.entry_date).days < days]
+        return round(sum(vals) / len(vals), 1) if vals else None
+
+    # (kenttä, nimi, yksikkö, isompi_parempi, absoluuttinen_tavoite tai None)
+    specs = [
+        ("hrv", "HRV (sykevälivaihtelu)", "ms", True, None),
+        ("resting_hr", "Leposyke", "bpm", False, None),
+        ("sleep_score", "Unipisteet", "", True, None),
+        ("sleep_hours", "Unen määrä", "h", True, (7.0, 9.0)),
+    ]
+
+    panels = []
+    for key, label, unit, higher_better, abs_target in specs:
+        pts_all = [(e.entry_date, getattr(e, key)) for e in entries if getattr(e, key) is not None]
+        if not pts_all:
+            continue
+        # Näytettävät pisteet: viimeiset SERIES_DISPLAY_DAYS päivää (tai kaikki jos vähän)
+        shown = [(d, v) for d, v in pts_all if (today - d).days <= SERIES_DISPLAY_DAYS]
+        if len(shown) < 2:
+            shown = pts_all[-14:]
+        points = [{"date": d.isoformat(), "value": round(v, 1)} for d, v in shown]
+
+        vals_all = [v for _, v in pts_all]
+        window = vals_all[-BAND_WINDOW_N:]
+        enough = len(window) >= BAND_MIN_N
+        rec = recent_avg(key)
+
+        band = None
+        baseline = None
+        status, note = "neutral", None
+
+        if abs_target is not None:
+            # Unimäärä: absoluuttinen suosituskaista 7–9 h.
+            band = {"low": abs_target[0], "high": abs_target[1]}
+            baseline = round(_median(window), 1) if window else None
+            if rec is not None:
+                if rec < 6.5:
+                    status = "alert"
+                    note = (f"Uni jäänyt lyhyeksi (~{rec} h/yö). Unipisteet seuraavat helposti "
+                            "lyhyitä öitä — tavoittele 7–9 h ja anna muutaman yön pidempi lepo.")
+                elif rec < 7:
+                    status, note = "ok", f"Hieman alle suosituksen (~{rec} h). Suositus 7–9 h/yö."
+                else:
+                    status, note = "good", f"Unimäärä hyvällä tasolla (~{rec} h, suositus 7–9 h)."
+        elif enough:
+            baseline = round(_median(window), 1)
+            spread = _mad_spread(window, baseline)
+            low = round(baseline - spread, 1)
+            high = round(baseline + spread, 1)
+            if key == "resting_hr":
+                low = max(30.0, low)
+            elif key == "hrv":
+                low = max(0.0, low)
+            band = {"low": low, "high": high}
+            if rec is not None:
+                if higher_better:
+                    if rec < low:
+                        status = "alert"
+                        if key == "hrv":
+                            note = ("HRV on pudonnut oman normaalialueen alle — usein merkki "
+                                    "alkavasta sairastumisesta tai hermostollisesta ylikuormasta. "
+                                    "Keventäisitkö ja panostaisit uneen? Oliko stressiä tai huono yö?")
+                        else:
+                            note = ("Unipisteet oman normaalialueen alle — oliko stressiä, myöhäinen "
+                                    "ateria/alkoholi tai lyhyt yö? Muutama rauhallinen yö palauttaa.")
+                    elif rec > high:
+                        status, note = "good", "Oman normaalialueen yläpuolella — palautuminen kunnossa."
+                    else:
+                        status, note = "ok", "Omalla normaalialueella."
+                else:  # leposyke: pienempi parempi
+                    if rec > high:
+                        status = "alert"
+                        note = ("Leposyke on noussut oman normaalialueen yli — keho ei ole "
+                                "palautunut. Alkava flunssa, stressi, alkoholi tai liian kova kuorma? "
+                                "Kevennä ja tarkkaile.")
+                    elif rec < low:
+                        status, note = "good", "Leposyke normaalialueen alle — hyvä palautumismerkki."
+                    else:
+                        status, note = "ok", "Omalla normaalialueella."
+        else:
+            note = (f"Tarvitaan lisää mittauksia oman normaalialueen laskemiseen "
+                    f"({len(window)}/{BAND_MIN_N}). Kirjaa säännöllisesti, niin vyöhyke ilmestyy.")
+
+        panels.append({
+            "key": key, "label": label, "unit": unit, "higher_better": higher_better,
+            "points": points, "band": band, "baseline": baseline,
+            "recent": rec, "status": status, "note": note,
+            "enough_data": enough, "n": len(window), "min_n": BAND_MIN_N,
+            "period_from": points[0]["date"] if points else None,
+            "period_to": points[-1]["date"] if points else None,
+        })
+
+    return {"available": bool(panels), "panels": panels,
+            "note": None if panels else
+            "Kirjaa unta, HRV:tä, leposykettä tai unipisteitä Keho-välilehdellä, niin näet paneelit."}

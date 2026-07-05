@@ -521,3 +521,18 @@ input[id$="-search"] { width: 100%; margin-bottom: 8px; }
   font-size: 0.88rem; color: var(--text); font-style: italic;
 }
 .hof-hidden { opacity: 0.55; }
+
+/* --- Palautuminen: paneelit ja normaalialue-vyöhykkeet --- */
+.recovery-verdict {
+  padding: 10px 14px; margin: 6px 0 12px;
+  border: 1px solid var(--muted); border-left-width: 4px; border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+.recovery-panels {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: 14px; margin: 4px 0 10px;
+}
+.recovery-panel {
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 12px 14px;
+}
+.recovery-panel canvas { width: 100%; height: auto; margin-top: 8px; display: block; }

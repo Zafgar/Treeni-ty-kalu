@@ -749,3 +749,45 @@ def test_community_hall_scoped_when_locked(client):
     assert client.post("/api/community/hall", json={"profile_id": 2, "title": "Oma"}, headers=ph).status_code == 201
     # Ei voi asettaa PT-viestiä
     assert client.post("/api/community/pt-message", json={"message": "x"}, headers=ph).status_code == 403
+
+
+def test_recovery_series_bands_and_alerts(client):
+    import datetime
+    today = datetime.date.today()
+    # 24 päivää: perustaso HRV 65 / RHR 52, viimeiset 4 pv HRV 54 / RHR 60 -> hälytys
+    for i in range(24, -1, -1):
+        d = today - datetime.timedelta(days=i)
+        recent = i < 4
+        client.post("/api/body/entries?profile_id=1", json={
+            "entry_date": d.isoformat(),
+            "hrv": 54 if recent else 65,
+            "resting_hr": 60 if recent else 52,
+            "sleep_score": 70 if recent else 82,
+            "sleep_hours": 6.2 if recent else 7.6,
+        })
+    s = client.get("/api/recovery/series?profile_id=1").json()
+    assert s["available"] is True
+    panels = {p["key"]: p for p in s["panels"]}
+    # Kaikilla neljällä mittarilla oma paneeli
+    assert set(panels) == {"hrv", "resting_hr", "sleep_score", "sleep_hours"}
+    # Vyöhyke muodostui (tarpeeksi dataa) ja HRV/leposyke hälyttävät oikein
+    assert panels["hrv"]["band"] is not None and panels["hrv"]["enough_data"]
+    assert panels["hrv"]["status"] == "alert"          # HRV pudonnut alle vyöhykkeen
+    assert panels["resting_hr"]["status"] == "alert"    # leposyke noussut yli
+    # Unimäärän vyöhyke on absoluuttinen 7–9 h
+    assert panels["sleep_hours"]["band"] == {"low": 7.0, "high": 9.0}
+    # Pisteitä ja jakso mukana
+    assert len(panels["hrv"]["points"]) >= 20
+    assert panels["hrv"]["period_from"] and panels["hrv"]["period_to"]
+
+
+def test_recovery_series_needs_more_data(client):
+    import datetime
+    today = datetime.date.today()
+    for i in range(3):
+        client.post("/api/body/entries?profile_id=1", json={
+            "entry_date": (today - datetime.timedelta(days=i)).isoformat(), "hrv": 60})
+    s = client.get("/api/recovery/series?profile_id=1").json()
+    hrv = next(p for p in s["panels"] if p["key"] == "hrv")
+    assert hrv["band"] is None and hrv["enough_data"] is False
+    assert "mittauksia" in (hrv["note"] or "")

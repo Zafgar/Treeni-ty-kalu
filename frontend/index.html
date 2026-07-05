@@ -155,12 +155,13 @@
       </div>
 
       <div class="card">
-        <h3>Uni & palautumisdata</h3>
-        <p class="muted">Vapaaehtoista lisädataa jolla havaitaan treenikehityksen muutoksia.
-          Kun dataa kertyy, näet oman normaalitasosi, suunnan ja hälytysrajat
-          (HRV laskee liikaa / leposyke nousee omasta tasosta).</p>
-        <canvas id="recovery-chart" width="840" height="280"></canvas>
-        <div id="recovery-legend" class="btn-row"></div>
+        <h3>Uni & palautuminen</h3>
+        <p class="muted">Jokaisella arvolla on oma paneeli ja oma normaalialue
+          (varjostettu vyöhyke), joka muodostuu kun mittauksia on tarpeeksi
+          (n. 10–20). Kun arvo pysyy vyöhykkeellä, kaikki on tasapainossa; jos se
+          karkaa väärään suuntaan, järjestelmä huomauttaa ja kysyy mahdollista syytä.</p>
+        <div id="recovery-verdict"></div>
+        <div id="recovery-panels" class="recovery-panels"></div>
         <div id="recovery-insights"></div>
       </div>
       <div class="card">
