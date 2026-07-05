@@ -77,6 +77,8 @@ def ensure_columns():
         ("foods", "sugar_g", "FLOAT DEFAULT 0"),
         ("foods", "sodium_mg", "FLOAT DEFAULT 0"),
         ("foods", "alcohol_g", "FLOAT DEFAULT 0"),
+        ("workout_exercises", "swap_reason", "VARCHAR(20)"),
+        ("workout_exercises", "swapped_from", "VARCHAR(120)"),
         ("profiles", "experience", "VARCHAR(20)"),
         ("profiles", "training_years", "FLOAT"),
         ("profiles", "goal", "VARCHAR(20)"),

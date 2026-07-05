@@ -495,6 +495,50 @@ function askWorkoutFeeling(workoutId, w) {
   document.body.append(overlay);
 }
 
+// Liikkeen ongelman ilmoitus: kipu/vaikea/muu -> turvallinen automaattivaihto
+function reportExerciseProblem(workoutId, we) {
+  const overlay = el("div", { class: "pr-celebrate" });
+  const noteInput = el("input", { placeholder: "Tarkennus (vapaaehtoinen), esim. polvi kipeä", style: "width:100%;margin:8px 0" });
+  const send = async (reason) => {
+    const q = `reason=${reason}` + (noteInput.value.trim() ? `&note=${encodeURIComponent(noteInput.value.trim())}` : "");
+    let res;
+    try { res = await api.post(`/api/workouts/exercises/${we.id}/report-problem?${q}`); }
+    catch (e) { alert("Virhe: " + e.message); return; }
+    overlay.innerHTML = "";
+    const card = el("div", { class: "pr-card", style: "max-width:460px;text-align:left" });
+    if (res.swapped && res.alternative) {
+      const a = res.alternative;
+      card.append(
+        el("h3", { style: "margin:4px 0 8px" }, "Liike vaihdettu turvallisempaan"),
+        el("div", { class: "result-box", style: "border-color:var(--accent-2)" },
+          el("strong", {}, `${res.original} → ${a.exercise_name}`),
+          el("div", { class: "muted", style: "margin-top:4px" },
+            `Ehdotus: ${a.sets} × ${a.reps}` + (a.start_weight ? ` · aloita ~${a.start_weight} kg` : " · aloita kevyellä")),
+          el("div", { class: "muted", style: "margin-top:4px" }, a.start_note)));
+    } else {
+      card.append(el("h3", { style: "margin:4px 0 8px" }, "Ongelma merkitty"));
+    }
+    card.append(el("div", { style: "margin-top:8px;color:var(--warn)" }, "⚠ " + res.safety));
+    card.append(el("div", { class: "result-box", style: "margin-top:8px;border-color:var(--accent)" },
+      "🩺 " + res.pt_note));
+    card.append(el("button", { class: "primary", style: "margin-top:12px",
+      onclick: () => { overlay.remove(); openWorkoutEditor(workoutId); } }, "Selvä"));
+    overlay.append(card);
+  };
+  overlay.append(el("div", { class: "pr-card", style: "max-width:440px;text-align:left" },
+    el("h3", { style: "margin:4px 0 6px" }, `Ongelma liikkeessä: ${we.exercise.name}`),
+    el("div", { class: "muted", style: "margin-bottom:6px" },
+      "Kerro mikä on vialla, niin vaihdamme turvallisempaan tai helpompaan liikkeeseen ja ehdotamme sopivat sarjat. " +
+      "Muista: tämä ei korvaa personal trainerin tai fysioterapeutin arviota."),
+    noteInput,
+    el("div", { class: "btn-row", style: "flex-wrap:wrap" },
+      el("button", { class: "small danger", onclick: () => send("kipu") }, "🤕 Kipua"),
+      el("button", { class: "small", onclick: () => send("vaikea") }, "😖 Tuntuu vaikealta"),
+      el("button", { class: "small", onclick: () => send("muu") }, "Muu syy"),
+      el("button", { class: "small", onclick: () => overlay.remove() }, "Peruuta"))));
+  document.body.append(overlay);
+}
+
 // Ennätysjuhla: banneri + kevyt konfetti kun treeni rikkoo aiemman parhaan
 function celebratePR(lines) {
   const overlay = el("div", { class: "pr-celebrate" },
@@ -604,15 +648,20 @@ async function renderWorkoutReview(id) {
     if ((e.ask_increase || e.ask_reduce) && e.suggested_weight != null) {
       const btnLabel = e.ask_increase ? `Korota → ${e.suggested_weight} kg ensi kerraksi`
                                        : `Laske → ${e.suggested_weight} kg ensi kerraksi`;
+      const row = el("div", { class: "btn-row", style: "margin-top:6px" });
       const applyBtn = el("button", { class: "small " + (e.ask_increase ? "success" : "primary"),
-        style: "margin-top:6px",
         onclick: async () => {
           if (!e.can_apply) { alert("Tämä liike ei ole ohjelmasta — muista uusi paino itse ensi kerralla."); return; }
           await api.post(`/api/workouts/exercises/${e.workout_exercise_id}/apply-weight?weight=${e.suggested_weight}`);
           applyBtn.textContent = "✓ Asetettu ensi kerraksi";
-          applyBtn.disabled = true;
+          applyBtn.disabled = true; keepBtn.disabled = true;
         } }, btnLabel);
-      item.append(applyBtn);
+      // "Älä muuta": pidä nykyinen paino ennallaan (ei pakoteta muutosta)
+      const keepBtn = el("button", { class: "small",
+        onclick: () => { keepBtn.textContent = `✓ Pidetään ${e.top_weight} kg`; keepBtn.disabled = true; applyBtn.disabled = true; } },
+        `Älä muuta (pidä ${e.top_weight} kg)`);
+      row.append(applyBtn, keepBtn);
+      item.append(row);
       if (!e.can_apply)
         item.append(el("div", { class: "muted", style: "font-size:0.8em;margin-top:3px" },
           "(vapaa treeni — paino muistetaan silti viime kerrasta)"));
@@ -752,8 +801,13 @@ function renderWorkoutExercise(workoutId, we) {
   block.append(el("div", { class: "row-between" },
     el("div", { class: "btn-row", style: "align-items:center" },
       el("strong", {}, we.exercise.name),
-      we.done ? el("span", { class: "tag status-done" }, "OK") : ""),
+      we.done ? el("span", { class: "tag status-done" }, "OK") : "",
+      we.swap_reason ? el("span", { class: "tag", style: "color:var(--warn);border-color:var(--warn)",
+        title: `Vaihdettu ongelman takia (${we.swap_reason}). Alkuperäinen: ${we.swapped_from || "?"}` },
+        `⚠ vaihdettu (${we.swap_reason})`) : ""),
     el("div", { class: "btn-row" },
+      el("button", { class: "small", title: "Ilmoita ongelma (kipu/vaikea) — vaihdetaan turvallisempaan liikkeeseen",
+        onclick: () => reportExerciseProblem(workoutId, we) }, "⚠ Ongelma"),
       el("button", { class: "small success", onclick: async () => {
         const markDone = !we.done;
         await api.patch(`/api/workouts/exercises/${we.id}`, { exercise_id: we.exercise_id, done: markDone });
@@ -1519,7 +1573,8 @@ async function loadLoadTimeline() {
       const last = prog.cycles[prog.cycles.length - 1];
       sum.append(el("div", { class: "muted" },
         `${prog.program_name}${prog.is_active ? " (aktiivinen)" : ""}: ${prog.cycles.length} kierrosta · ` +
-        `viimeisin kierto ${Math.round(last.total_kg).toLocaleString("fi-FI")} kg (${last.workouts} treeniä)` +
+        `viimeisin kierto ${Math.round(last.total_kg).toLocaleString("fi-FI")} kg (${last.workouts} treeniä` +
+        (last.skipped ? `, ${last.skipped} skipattu → total pienempi` : "") + ")" +
         (prog.open_partial ? ` · kesken oleva kierto ${prog.open_partial.workouts} treeniä tehty` : "")));
     });
     if (!series.length) {

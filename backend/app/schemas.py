@@ -160,6 +160,8 @@ class WorkoutExerciseOut(WorkoutExerciseBase):
     model_config = ConfigDict(from_attributes=True)
     id: int
     exercise: ExerciseOut
+    swap_reason: str | None = None
+    swapped_from: str | None = None
     sets: list[SetLogOut] = Field(default_factory=list)
 
 

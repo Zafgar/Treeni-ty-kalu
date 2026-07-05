@@ -480,3 +480,50 @@ def test_nutrition_macros_and_7day_avg(client):
     day_1 = ragu["kcal"] * 6
     day_2 = ragu["kcal"] * 2
     assert abs(s2["avg7"]["kcal"] - (day_today + day_1 + day_2) / 3) < 0.5
+
+
+def test_program_load_counts_skips(client):
+    from datetime import date, timedelta
+    today = date.today()
+    a = client.post("/api/exercises", json={"name": "Kyykky sk"}).json()
+    b = client.post("/api/exercises", json={"name": "Penkki sk"}).json()
+    prog = client.post("/api/programs", json={"profile_id": 1, "name": "P", "is_active": True,
+        "days": [{"day_type": "train", "label": "A", "exercises": [{"exercise_id": a["id"], "target_sets": 1, "target_reps": 5}]},
+                 {"day_type": "train", "label": "B", "exercises": [{"exercise_id": b["id"], "target_sets": 1, "target_reps": 5}]}]}).json()
+    dA, dB = prog["days"][0]["id"], prog["days"][1]["id"]
+    # Kierto 1: A tehty (100kg x5 = 500), B SKIPATTU -> kierto sulkeutuu, total = 500
+    s1 = client.post("/api/workouts", json={"profile_id": 1, "program_day_id": dA,
+        "session_date": (today - timedelta(days=3)).isoformat(),
+        "exercises": [{"exercise_id": a["id"], "sets": [{"weight": 100, "reps": 5, "completed": True}]}]}).json()
+    client.post(f"/api/workouts/{s1['id']}/complete")
+    s2 = client.post("/api/workouts", json={"profile_id": 1, "program_day_id": dB,
+        "session_date": (today - timedelta(days=2)).isoformat(), "exercises": []}).json()
+    client.post(f"/api/workouts/{s2['id']}/skip")
+    pl = client.get("/api/stats/program-load?profile_id=1").json()
+    cyc = pl["programs"][0]["cycles"]
+    assert len(cyc) == 1
+    assert cyc[0]["total_kg"] == 500 and cyc[0]["skipped"] == 1 and cyc[0]["workouts"] == 2
+
+
+def test_report_problem_swaps_exercise(client):
+    # Seedaa tarvittavat liikkeet (testikanta ei aja seedejä)
+    squat = client.post("/api/exercises", json={"name": "Takakyykky", "category": "jalat"}).json()
+    client.post("/api/exercises", json={"name": "Jalkaprässi", "category": "jalat",
+                                        "default_sets": 4, "default_reps": 12})
+    prog = client.post("/api/programs", json={"profile_id": 1, "name": "Alk", "is_active": True,
+        "days": [{"day_type": "train", "label": "A",
+                  "exercises": [{"exercise_id": squat["id"], "target_sets": 3, "target_reps": 10}]}]}).json()
+    did = prog["days"][0]["id"]
+    w = client.post(f"/api/workouts/from-program-day/{did}").json()
+    we_id = w["exercises"][0]["id"]
+    r = client.post(f"/api/workouts/exercises/{we_id}/report-problem?reason=kipu").json()
+    assert r["swapped"] is True and r["alternative"]["exercise_name"] == "Jalkaprässi"
+    assert "PT" in r["pt_note"] or "trainer" in r["pt_note"].lower()
+    # Treenin liike vaihtui + merkintä
+    w2 = client.get(f"/api/workouts/{w['id']}").json()
+    assert w2["exercises"][0]["exercise"]["name"] == "Jalkaprässi"
+    assert w2["exercises"][0]["swap_reason"] == "kipu"
+    assert w2["exercises"][0]["swapped_from"] == "Takakyykky"
+    # Ohjelma päivittyi tulevia treenejä varten
+    prog2 = client.get(f"/api/programs/{prog['id']}").json()
+    assert prog2["days"][0]["exercises"][0]["exercise"]["name"] == "Jalkaprässi"

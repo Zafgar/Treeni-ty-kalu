@@ -210,6 +210,10 @@ class WorkoutExercise(Base):
     # volyymistä, jotta samalla painolla tehty sarjojen suoritus näkyy graafilla.
     missed_reps: Mapped[int] = mapped_column(Integer, default=0)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Jos liike on vaihdettu ongelman takia: syy ("kipu"/"vaikea"/"muu") ja
+    # alkuperäinen liike, jotta muutos näkyy ja on jäljitettävissä.
+    swap_reason: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    swapped_from: Mapped[str | None] = mapped_column(String(120), nullable=True)
 
     session: Mapped["WorkoutSession"] = relationship(back_populates="exercises")
     exercise: Mapped["Exercise"] = relationship()

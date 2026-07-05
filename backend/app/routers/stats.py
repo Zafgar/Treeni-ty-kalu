@@ -937,24 +937,34 @@ def program_load(profile_id: int | None = Query(None), db: Session = Depends(get
         if not train_day_ids:
             continue
         need = set(train_day_ids)
+        # Skipatut treenit lasketaan mukaan kierron täyttäjinä (0 kg): näin kierto
+        # sulkeutuu vaikka jokin päivä jäisi väliin, ja total on silloin vain
+        # pienempi — juuri niin kuin kuuluukin näyttää.
         sessions = (db.query(models.WorkoutSession)
                     .filter(models.WorkoutSession.program_day_id.in_(train_day_ids),
-                            models.WorkoutSession.status == "completed")
+                            models.WorkoutSession.status.in_(["completed", "skipped"]))
                     .order_by(models.WorkoutSession.session_date, models.WorkoutSession.id).all())
         cycles = []
-        seen, load, last_date, cnt = set(), 0.0, None, 0
+        seen, load, last_date, cnt, skipped = set(), 0.0, None, 0, 0
         for s in sessions:
-            load += _session_tonnage(s)
+            if s.program_day_id in seen:
+                continue  # sama päivä jo tässä kierrossa -> odota seuraavaa kiertoa
+            if s.status == "completed":
+                load += _session_tonnage(s)
+            else:
+                skipped += 1
             cnt += 1
             seen.add(s.program_day_id)
             last_date = s.session_date
             if need.issubset(seen):
-                cycles.append({"date": last_date.isoformat(), "total_kg": round(load, 1), "workouts": cnt})
-                seen, load, cnt = set(), 0.0, 0
+                cycles.append({"date": last_date.isoformat(), "total_kg": round(load, 1),
+                               "workouts": cnt, "skipped": skipped})
+                seen, load, cnt, skipped = set(), 0.0, 0, 0
         if cycles:
             result.append({"program_id": prog.id, "program_name": prog.name,
                            "is_active": prog.is_active, "cycles": cycles,
-                           "open_partial": {"workouts": cnt, "total_kg": round(load, 1)} if cnt else None})
+                           "open_partial": {"workouts": cnt, "total_kg": round(load, 1),
+                                            "skipped": skipped} if cnt else None})
     # Aktiivinen ensin
     result.sort(key=lambda r: (0 if r["is_active"] else 1))
     return {"programs": result}

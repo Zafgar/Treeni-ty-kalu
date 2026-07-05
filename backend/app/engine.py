@@ -2089,3 +2089,99 @@ def set_performance_review(sets: list, target_reps: int | None, inc: float,
         "ask_increase": ask_increase, "ask_reduce": ask_reduce,
         "suggested_weight": suggested, "reason": reason, "compare": compare,
     }
+
+
+# ---------- Liikkeen ongelma: turvallinen vaihto + yleinen ohjeistus ----------
+# Uudelle nostajalle jokin liike voi tuntua vaikealta tai sattua. Tällöin
+# vaihdetaan turvallisempaan/helpompaan variaatioon (kone/tuettu/kevyempi/
+# kehonpaino) ja KEHOTETAAN AINA ottamaan yhteyttä PT:hen. Nämä ovat yleisiä,
+# turvallisia oletuksia — eivät korvaa ammattilaisen arviota.
+# Avainsanat käydään järjestyksessä; ensimmäinen osuma voittaa.
+_SWAP_RULES = [
+    # (liikkeen avainsanat, {reason: [vaihtoehtojen avainsanat paremmuusjärj.]})
+    (("takakyykky", "etukyykky", "kyykky"), {
+        "kipu": ["jalkaprässi", "reisiojennus", "pakaralaite"],
+        "vaikea": ["jalkaprässi", "goblet", "käsipainokyykky", "askelkyykky"]}),
+    (("maastaveto",), {
+        "kipu": ["selän ojennus", "pakaralaite", "jalkaprässi", "takareisikoukistus"],
+        "vaikea": ["romanialainen", "pakaralaite", "selän ojennus"]}),
+    (("penkkipunnerrus", "penkki"), {
+        "kipu": ["rintaprässi", "punnerrus", "taljaristikko"],
+        "vaikea": ["rintaprässi", "penkkipunnerrus käsipain", "punnerrus"]}),
+    (("pystypunnerrus", "olkapääprässi"), {
+        "kipu": ["olkapääprässi", "sivunosto"],
+        "vaikea": ["olkapääprässi", "sivunosto", "pystypunnerrus käsipain"]}),
+    (("leuanveto",), {
+        "kipu": ["ylätalja", "alatalja"],
+        "vaikea": ["ylätalja", "alatalja soutu"]}),
+    (("dippi",), {
+        "kipu": ["rintaprässi", "ojentajapunnerrus talja", "taljapunnerrus"],
+        "vaikea": ["rintaprässi", "taljapunnerrus"]}),
+    (("askelkyykky", "bulgarian"), {
+        "kipu": ["jalkaprässi", "reisiojennus"],
+        "vaikea": ["jalkaprässi", "goblet", "käsipainokyykky"]}),
+    (("hauiskääntö tanko", "drag curl"), {
+        "kipu": ["taljahauis", "hauiskääntö käsipaino", "vasarakääntö"],
+        "vaikea": ["taljahauis", "hauiskääntö käsipaino"]}),
+    (("ranskalainen", "skull"), {
+        "kipu": ["taljapunnerrus", "ojentajapunnerrus talja", "kickback"],
+        "vaikea": ["taljapunnerrus", "ojentajapotku"]}),
+    (("t-tanko", "tankosoutu", "soutu"), {
+        "kipu": ["soutu (kone", "alatalja", "käsipainosoutu"],
+        "vaikea": ["soutu (kone", "alatalja soutu"]}),
+]
+
+# Kategoriapohjainen varavaihtoehto jos nimestä ei löydy sääntöä.
+_SWAP_FALLBACK = {
+    "jalat": {"kipu": ["jalkaprässi", "reisiojennus", "pakaralaite"],
+              "vaikea": ["jalkaprässi", "goblet", "reisiojennus"]},
+    "rinta": {"kipu": ["rintaprässi", "punnerrus"], "vaikea": ["rintaprässi", "punnerrus"]},
+    "selkä": {"kipu": ["ylätalja", "soutu (kone", "alatalja"], "vaikea": ["ylätalja", "alatalja soutu"]},
+    "olkapää": {"kipu": ["olkapääprässi", "sivunosto"], "vaikea": ["olkapääprässi", "sivunosto"]},
+    "olkapäät": {"kipu": ["olkapääprässi", "sivunosto"], "vaikea": ["olkapääprässi", "sivunosto"]},
+    "kädet": {"kipu": ["taljahauis", "taljapunnerrus"], "vaikea": ["taljahauis", "taljapunnerrus"]},
+}
+
+REASON_LABELS = {"kipu": "kipua", "vaikea": "tuntuu vaikealta", "muu": "muu syy"}
+
+
+def exercise_alternatives(name: str | None, category: str | None,
+                          muscle_group: str | None, reason: str) -> list:
+    """Palauta turvallisempien/helpompien vaihtoehtojen avainsanat paremmuus-
+    järjestyksessä. reason: 'kipu' | 'vaikea' | 'muu' (muu käsitellään kuin vaikea)."""
+    r = "kipu" if reason == "kipu" else "vaikea"
+    n = (name or "").lower()
+    for keys, mapping in _SWAP_RULES:
+        if any(k in n for k in keys):
+            return mapping.get(r, [])
+    cat = (category or "").lower()
+    if cat in _SWAP_FALLBACK:
+        return _SWAP_FALLBACK[cat].get(r, [])
+    mg = (muscle_group or "").lower()
+    for key, mapping in _SWAP_FALLBACK.items():
+        if key in mg:
+            return mapping.get(r, [])
+    return []
+
+
+def problem_guidance(reason: str, swapped: bool, alt_name: str | None,
+                     orig_name: str) -> dict:
+    """Yleinen turvaohjeistus ongelman mukaan. Kipu -> varovaisuus + AINA PT/
+    lääkäri. Aina kehotus ammattilaiseen — tämä ei korvaa arviota."""
+    pt = ("Ota yhteyttä personal traineriin tai fysioterapeuttiin — hän voi tarkistaa "
+          "tekniikan ja räätälöidä liikkeet turvallisesti. Tämä on yleinen automaattinen "
+          "ehdotus, ei ammattilaisen arvio.")
+    if reason == "kipu":
+        safety = ("Kipu on aina merkki pysähtyä: ÄLÄ jatka kivuliasta liikettä. Vaihdoimme "
+                  "turvallisempaan, tuettuun variaatioon kevyellä kuormalla. Jos kipu on terävää, "
+                  "säteilevää tai jatkuu levossa, keskeytä ja hakeudu lääkäriin/fysioterapeuttiin. "
+                  "Aloita erittäin kevyellä ja tekniikka edellä.")
+    elif reason == "vaikea":
+        safety = ("Vaihdoimme helpompaan, ohjatumpaan variaatioon jossa tekniikka on helpompi oppia. "
+                  "Aloita kevyellä painolla ja lisää vasta kun liike tuntuu hallitulta koko liikeradalla.")
+    else:
+        safety = ("Vaihdoimme vaihtoehtoiseen liikkeeseen. Aloita maltilla ja seuraa tuntumaa.")
+    if not swapped:
+        safety = ("Emme löytäneet automaattista turvallista vaihtoehtoa kirjastosta. Jätä liike "
+                  "väliin tai korvaa se kevyellä, tutulla liikkeellä. " + safety)
+    return {"safety": safety, "pt_note": pt}

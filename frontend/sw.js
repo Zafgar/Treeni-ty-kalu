@@ -7,7 +7,7 @@
 // päivitysten jälkeen.)
 //
 // Versionumeroa nostamalla vanha välimuisti tyhjenee aktivoinnissa.
-const CACHE = "treeni-v19";
+const CACHE = "treeni-v20";
 const ASSETS = ["/", "/static/style.css", "/static/app.js", "/static/vendor/three.min.js",
   "/static/vendor/icons.svg", "/static/vendor/outfit-latin-wght-normal.woff2",
   "/static/vendor/inter-latin-wght-normal.woff2", "/icon.svg", "/manifest.json"];

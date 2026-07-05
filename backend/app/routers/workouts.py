@@ -443,3 +443,84 @@ def apply_next_weight(workout_exercise_id: int, weight: float = Query(...),
     pe.target_weight = weight
     db.commit()
     return {"exercise_id": we.exercise_id, "next_target_weight": weight}
+
+
+def _find_exercise_by_keyword(db, keyword: str, exclude_id: int | None = None):
+    kw = keyword.lower()
+    matches = [e for e in db.query(models.Exercise).order_by(models.Exercise.name).all()
+               if kw in e.name.lower() and e.id != exclude_id]
+    return matches[0] if matches else None
+
+
+@router.post("/exercises/{workout_exercise_id}/report-problem")
+def report_problem(workout_exercise_id: int, reason: str = Query(...),
+                   note: str | None = Query(None), db: Session = Depends(get_db)):
+    """Ilmoita liikkeen ongelma (kipu / vaikea / muu). Vaihtaa automaattisesti
+    turvallisempaan variaatioon, ehdottaa sarjat ja painot, jättää merkinnän
+    ohjelmaan ja kehottaa AINA ottamaan yhteyttä PT:hen."""
+    if reason not in ("kipu", "vaikea", "muu"):
+        raise HTTPException(status_code=400, detail="Tuntematon syy.")
+    we = db.get(models.WorkoutExercise, workout_exercise_id)
+    if not we or not we.exercise:
+        raise HTTPException(status_code=404, detail="Liikettä ei löytynyt.")
+    session = db.get(models.WorkoutSession, we.session_id)
+    orig = we.exercise
+    orig_name = orig.name
+
+    # Etsi ensimmäinen kirjastosta löytyvä turvallinen vaihtoehto
+    alt = None
+    for kw in engine.exercise_alternatives(orig.name, orig.category, orig.muscle_group, reason):
+        alt = _find_exercise_by_keyword(db, kw, exclude_id=orig.id)
+        if alt:
+            break
+
+    suggested = None
+    if alt:
+        we.swapped_from = orig_name
+        we.swap_reason = reason
+        we.exercise_id = alt.id
+        # Ehdota maltilliset sarjat: koneet/tuetut, kevyt aloitus (uusi nostaja)
+        n_sets = alt.default_sets or 3
+        reps = alt.default_reps or (12 if reason != "kipu" else 15)
+        prof_id = session.profile_id if session else None
+        recalled = last_working_weight(db, alt.id, prof_id)
+        # Kivun jälkeen aloita erittäin kevyesti (tekniikka edellä)
+        start_w = None
+        if recalled:
+            start_w = round(recalled * (0.6 if reason == "kipu" else 0.8), 1)
+        # Korvaa sarjat ehdotetuilla
+        we.sets.clear()
+        for i in range(n_sets):
+            we.sets.append(models.SetLog(set_index=i, reps=reps, weight=start_w or 0.0, completed=False))
+        suggested = {"exercise_id": alt.id, "exercise_name": alt.name,
+                     "sets": n_sets, "reps": reps,
+                     "start_weight": start_w,
+                     "start_note": ("Aloita erittäin kevyellä tai pelkällä koneella — tekniikka edellä."
+                                    if reason == "kipu" else
+                                    "Aloita kevyellä painolla ja nosta vasta kun liike on hallussa.")}
+        we.notes = (f"Vaihdettu ({engine.REASON_LABELS.get(reason, reason)}): {orig_name} → {alt.name}."
+                    + (f" Huom: {note}" if note else ""))
+
+        # Merkitse muutos treeniin ja OHJELMAAN (jos treeni ohjelmasta)
+        mark = f"[Muokattu: {orig_name} → {alt.name} ({engine.REASON_LABELS.get(reason, reason)})]"
+        if session:
+            session.notes = ((session.notes + " ") if session.notes else "") + mark
+            if session.program_day_id:
+                day = db.get(models.ProgramDay, session.program_day_id)
+                pe = next((p for p in day.exercises if p.exercise_id == orig.id), None) if day else None
+                if pe:
+                    pe.exercise_id = alt.id
+                    pe.target_weight = start_w
+                    pe.notes = ((pe.notes + " ") if pe.notes else "") + \
+                        f"Vaihdettu {orig_name} → {alt.name} ({engine.REASON_LABELS.get(reason, reason)})."
+    else:
+        # Ei vaihtoa: merkitse silti ongelma
+        we.swap_reason = reason
+        we.notes = (f"Ongelma ({engine.REASON_LABELS.get(reason, reason)}), ei automaattista vaihtoa."
+                    + (f" {note}" if note else ""))
+
+    db.commit()
+    db.refresh(we)
+    guidance = engine.problem_guidance(reason, bool(alt), alt.name if alt else None, orig_name)
+    return {"swapped": bool(alt), "reason": reason, "original": orig_name,
+            "alternative": suggested, **guidance}
