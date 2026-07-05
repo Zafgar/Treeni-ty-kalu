@@ -56,7 +56,22 @@ class Profile(Base):
     goal: Mapped[str | None] = mapped_column(String(20), nullable=True)
     days_per_week: Mapped[int | None] = mapped_column(Integer, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Valinnainen profiilin PIN-tiiviste (pbkdf2). Käytössä vain jos profiililukko
+    # on päällä (admin-PIN asetettu). Tyhjä = profiililla ei ole omaa PINiä.
+    pin_hash: Mapped[str | None] = mapped_column(String(200), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class AppSetting(Base):
+    """Yleiset sovellusasetukset avain–arvo-parina (esim. profiililukon
+    admin-PIN-tiiviste ja token-allekirjoitusavain). Pidetään erillään
+    profiileista, koska nämä koskevat koko instanssia."""
+
+    __tablename__ = "app_settings"
+
+    key: Mapped[str] = mapped_column(String(60), primary_key=True)
+    value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
 class Exercise(Base):

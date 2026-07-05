@@ -637,3 +637,70 @@ def test_sync_merge_two_devices():
     # Set-logit siirtyivät (paino 102.5 löytyy PC:ltä)
     weights = {round(sl.weight, 1) for sl in A.query(models.SetLog).all()}
     assert 102.5 in weights and 100 in weights
+
+
+def test_profile_lock_flow(client):
+    from backend.app import security
+    # Toinen profiili adminin lisäksi
+    client.post("/api/profiles", json={"name": "Kaveri"})
+
+    # Aluksi lukko pois; status kertoo profiilit
+    st = client.get("/api/auth/status").json()
+    assert st["enabled"] is False
+    assert len(st["profiles"]) == 2
+
+    # Ilman lukkoa data-API toimii vapaasti
+    assert client.get("/api/profiles").status_code == 200
+
+    # Aseta admin-PIN -> lukko päälle, saadaan admin-token
+    setup = client.post("/api/auth/setup", json={"admin_pin": "1234"})
+    assert setup.status_code == 200
+    admin_token = setup.json()["token"]
+    assert security.read_token  # sanity
+    assert client.get("/api/auth/status").json()["enabled"] is True
+
+    # Ilman tokenia suojattu API estyy
+    assert client.get("/api/profiles").status_code == 401
+
+    # Admin näkee kaikki profiilit
+    ah = {"Authorization": f"Bearer {admin_token}"}
+    plist = client.get("/api/profiles", headers=ah).json()
+    assert len(plist) == 2
+
+    # Admin asettaa kaverille (id=2) PINin
+    r = client.post("/api/auth/profile-pin", json={"profile_id": 2, "pin": "9999"}, headers=ah)
+    assert r.status_code == 200 and r.json()["has_pin"] is True
+
+    # Väärä profiili-PIN estyy
+    assert client.post("/api/auth/login",
+                       json={"mode": "profile", "profile_id": 2, "pin": "0000"}).status_code == 401
+
+    # Oikea PIN -> profiilitoken
+    login = client.post("/api/auth/login",
+                        json={"mode": "profile", "profile_id": 2, "pin": "9999"})
+    assert login.status_code == 200
+    ptoken = login.json()["token"]
+    ph = {"Authorization": f"Bearer {ptoken}"}
+
+    # Käyttäjä näkee vain oman profiilinsa
+    own = client.get("/api/profiles", headers=ph).json()
+    assert len(own) == 1 and own[0]["id"] == 2
+
+    # Käyttäjä ei pääse toisen profiilin dataan (query-param)
+    assert client.get("/api/body/entries?profile_id=1", headers=ph).status_code == 403
+    # Oma profiili sallittu
+    assert client.get("/api/body/entries?profile_id=2", headers=ph).status_code == 200
+    # Ei pääse toisen profiilipolkuun
+    assert client.get("/api/profiles/1", headers=ph).status_code == 403
+    # Ei voi kirjata toisen profiilin nimiin (runko-profile_id)
+    bad = client.post("/api/body/entries?profile_id=2",
+                      json={"profile_id": 1, "entry_date": "2026-07-05", "bodyweight": 80}, headers=ph)
+    assert bad.status_code == 403
+
+    # Ei-admin ei voi hallita PINejä
+    assert client.post("/api/auth/profile-pin",
+                       json={"profile_id": 1, "pin": "1111"}, headers=ph).status_code == 403
+
+    # Admin poistaa lukon -> vapaa käyttö palaa
+    assert client.post("/api/auth/disable", headers=ah).json()["enabled"] is False
+    assert client.get("/api/profiles").status_code == 200

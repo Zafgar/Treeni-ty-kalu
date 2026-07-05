@@ -456,3 +456,39 @@ input[id$="-search"] { width: 100%; margin-bottom: 8px; }
   .tab.active, .level-fill { animation: none; }
   .card:hover { transform: none; }
 }
+
+/* --- Profiililukko: lukitusnäyttö --- */
+.lock-overlay {
+  position: fixed; inset: 0; z-index: 1000;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(6, 9, 15, 0.92); backdrop-filter: blur(6px);
+  padding: 20px;
+}
+.lock-card {
+  width: 100%; max-width: 380px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: var(--shadow-2);
+  padding: 24px;
+}
+.lock-card h2 { margin: 0 0 4px; font-family: var(--font-display); }
+.lock-profile {
+  display: flex; align-items: center; gap: 12px; width: 100%;
+  margin: 8px 0; padding: 12px 14px; text-align: left;
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); font-size: 1rem;
+}
+.lock-profile:hover { border-color: var(--accent); background: var(--surface-3); }
+.lock-ava {
+  width: 34px; height: 34px; flex: 0 0 34px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, var(--accent), #3568c9);
+  color: #fff; font-weight: 700; font-size: 0.85rem;
+}
+.lock-lock { margin-left: auto; opacity: 0.7; }
+.lock-input {
+  width: 100%; font-size: 1.4rem; letter-spacing: 0.3em; text-align: center;
+  padding: 12px; margin-top: 4px;
+}
+.lock-sep { height: 1px; background: var(--border-soft); margin: 14px 0; }
+.lock-admin { width: 100%; }
+.lock-msg { margin-top: 10px; color: var(--danger); min-height: 1em; }

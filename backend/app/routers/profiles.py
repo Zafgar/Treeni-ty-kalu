@@ -1,11 +1,12 @@
 """Profiilien hallinta: vaihda ketä seuraat (oma, valmennettavat, läheiset)."""
 from datetime import date
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from .. import engine, models, schemas
 from ..database import get_db
+from . import auth
 
 router = APIRouter(prefix="/api/profiles", tags=["profiles"])
 
@@ -34,8 +35,15 @@ def _profile_summary(db: Session, p: models.Profile) -> dict:
 
 
 @router.get("")
-def list_profiles(db: Session = Depends(get_db)):
+def list_profiles(request: Request, db: Session = Depends(get_db)):
     profiles = db.query(models.Profile).order_by(models.Profile.name).all()
+    # Jos profiililukko on päällä ja kirjautunut on tavallinen käyttäjä,
+    # näytetään vain hänen oma profiilinsa (ei muiden dataa/valintaa).
+    if auth.lock_enabled(db):
+        payload = auth.current_payload(db, request)
+        if payload and payload.get("role") == "profile":
+            own = payload.get("pid")
+            profiles = [p for p in profiles if p.id == own]
     return [_profile_summary(db, p) for p in profiles]
 
 

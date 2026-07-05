@@ -83,6 +83,7 @@ def ensure_columns():
         ("profiles", "training_years", "FLOAT"),
         ("profiles", "goal", "VARCHAR(20)"),
         ("profiles", "days_per_week", "INTEGER"),
+        ("profiles", "pin_hash", "VARCHAR(200)"),
     ]
     inspector = inspect(engine)
     existing_tables = set(inspector.get_table_names())

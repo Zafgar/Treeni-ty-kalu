@@ -80,6 +80,26 @@ täysin offline-datan matkalla, katso vaihtoehto B + laitesynkronointi.
 
 ---
 
+### Profiililukko (kun jaat saman instanssin kavereille)
+
+Jos kaikki kaverit käyttävät **samaa isännöityä instanssia** (kaikki puhuvat
+keskenään samaan kantaan), ota käyttöön **profiililukko**, ettei kukaan
+vahingossa kirjaa väärälle profiilille:
+
+- Avaa **Profiilit → 🔒 Profiililukko** ja aseta **admin-PIN**. Sinusta (PT)
+  tulee admin, joka näkee ja hallinnoi kaikkia profiileja.
+- Aseta kullekin kaverille **oma PIN**. Tämän jälkeen kaveri näkee ja voi kirjata
+  vain omaan profiiliinsa; muiden dataa hän ei näe.
+- Profiili ilman PINiä on avoin — aseta PIN jokaiselle jonka haluat suojata.
+- Lukko on **valinnainen**: ennen admin-PINin asetusta mikään ei muutu
+  (paikallinen yksinkäyttö toimii kuten ennen). Lukon saa pois päältä admin-PINillä.
+
+Tämä on **järkevä suoja kaveriporukalle**, ei pankkitason turva — pääasiallinen
+tarkoitus on estää vahingossa väärälle profiilille kirjaaminen ja pitää muiden
+data piilossa. Palvelin (pilvi) on aina päällä, joten **sinun PC:si ei tarvitse
+olla auki** jotta muiden kirjaukset tallentuvat — ne menevät suoraan yhteiseen
+kantaan, ja sinä näet ne adminina milloin vain avaat sovelluksen.
+
 ## Vaihtoehto B: Oma tiedostopaketti (täysin offline, kaverin oma data)
 
 Idea: kaveri saa **koko sovelluksen tiedostoina** ja ajaa sen omalla

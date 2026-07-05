@@ -1,10 +1,25 @@
 // Treeni-ty-kalu — selainkäyttöliittymä (vanilla JS, ei build-vaihetta).
 
+// Profiililukon token (jos lukko käytössä). Tallennetaan localStorageen, jotta
+// kirjautuminen säilyy sovelluksen avausten välillä.
+function authToken() { return localStorage.getItem("authToken") || null; }
+function setAuthToken(t) {
+  if (t) localStorage.setItem("authToken", t); else localStorage.removeItem("authToken");
+}
+
 const api = {
   async req(method, path, body) {
     const opts = { method, headers: { "Content-Type": "application/json" } };
+    const tok = authToken();
+    if (tok) opts.headers["Authorization"] = "Bearer " + tok;
     if (body !== undefined) opts.body = JSON.stringify(body);
     const res = await fetch(path, opts);
+    if (res.status === 401 && !path.startsWith("/api/auth/")) {
+      // Token puuttuu tai vanhentui -> takaisin lukitusnäyttöön.
+      setAuthToken(null);
+      if (typeof showLockScreen === "function") showLockScreen();
+      throw new Error("Kirjautuminen vaaditaan.");
+    }
     if (!res.ok) {
       let detail = res.statusText;
       try { detail = (await res.json()).detail || detail; } catch (e) {}
@@ -1863,6 +1878,9 @@ function renderProfileSwitch() {
     sel.append(o);
   });
   sel.value = currentProfileId;
+  // Profiililukossa tavallinen käyttäjä näkee vain oman profiilinsa -> ei
+  // vaihtomahdollisuutta (estää vahingossa väärälle profiilille kirjaamisen).
+  sel.disabled = authRole() === "profile";
   const cur = profilesCache.find((p) => p.id === currentProfileId);
   const av = document.getElementById("profile-avatar");
   av.textContent = cur ? initials(cur.name) : "";
@@ -1874,6 +1892,134 @@ document.getElementById("profile-select").addEventListener("change", async (e) =
   renderProfileSwitch();
   await refreshActiveTab();
 });
+
+// --- Profiililukko (valinnainen pääsynhallinta) ----------------------------
+
+// Lukee tokenin payloadin (allekirjoitettu mutta ei salattu) roolin ja
+// profiilin selvittämiseksi ilman palvelinkyselyä.
+function tokenPayload() {
+  const t = authToken();
+  if (!t || !t.includes(".")) return null;
+  try {
+    let b = t.split(".")[0].replace(/-/g, "+").replace(/_/g, "/");
+    b += "=".repeat((4 - (b.length % 4)) % 4);
+    return JSON.parse(atob(b));
+  } catch (e) { return null; }
+}
+function authRole() { const p = tokenPayload(); return p ? p.role : null; }
+
+function hideLockScreen() {
+  const o = document.getElementById("lock-overlay");
+  if (o) o.remove();
+}
+
+// Näyttää lukitusnäytön: käyttäjä valitsee profiilinsa ja syöttää PINin, tai
+// kirjautuu PT:nä (admin) joka näkee kaikki profiilit.
+async function showLockScreen() {
+  hideLockScreen();
+  let status;
+  try { status = await api.get("/api/auth/status"); }
+  catch (e) { return; }
+  if (!status.enabled) { hideLockScreen(); return; }
+
+  const overlay = el("div", { id: "lock-overlay", class: "lock-overlay" });
+  const card = el("div", { class: "lock-card" });
+  const msg = el("div", { class: "lock-msg muted" });
+
+  async function doLogin(payload) {
+    msg.textContent = "";
+    try {
+      const r = await api.post("/api/auth/login", payload);
+      setAuthToken(r.token);
+      hideLockScreen();
+      currentProfileId = r.profile_id || null;
+      await bootAfterLogin();
+    } catch (e) { msg.textContent = e.message || "Kirjautuminen epäonnistui."; }
+  }
+
+  function renderPicker() {
+    card.innerHTML = "";
+    card.append(
+      el("h2", {}, "Kuka kirjaa?"),
+      el("div", { class: "muted", style: "margin-bottom:12px" },
+        "Valitse oma profiilisi. Näin kirjaukset menevät oikealle henkilölle."),
+    );
+    status.profiles.forEach((p) => {
+      card.append(el("button", { class: "lock-profile", onclick: () => {
+        if (p.has_pin) renderPin(p); else doLogin({ mode: "profile", profile_id: p.id });
+      } }, el("span", { class: "lock-ava" }, initials(p.name)),
+         el("span", {}, p.name),
+         p.has_pin ? el("span", { class: "lock-lock" }, "🔒") : ""));
+    });
+    card.append(
+      el("div", { class: "lock-sep" }),
+      el("button", { class: "lock-admin", onclick: renderAdmin }, "Olen valmentaja (PT)"),
+      msg);
+  }
+
+  function renderPin(p) {
+    card.innerHTML = "";
+    const inp = el("input", { type: "password", inputmode: "numeric",
+      placeholder: "PIN", class: "lock-input" });
+    const submit = () => doLogin({ mode: "profile", profile_id: p.id, pin: inp.value });
+    inp.addEventListener("keydown", (e) => { if (e.key === "Enter") submit(); });
+    card.append(
+      el("h2", {}, p.name),
+      el("div", { class: "muted", style: "margin-bottom:10px" }, "Syötä profiilisi PIN."),
+      inp,
+      el("div", { class: "btn-row", style: "margin-top:12px" },
+        el("button", { class: "primary", onclick: submit }, "Kirjaudu"),
+        el("button", { onclick: renderPicker }, "Takaisin")),
+      msg);
+    setTimeout(() => inp.focus(), 50);
+  }
+
+  function renderAdmin() {
+    card.innerHTML = "";
+    const inp = el("input", { type: "password", inputmode: "numeric",
+      placeholder: "Admin-PIN", class: "lock-input" });
+    const submit = () => doLogin({ mode: "admin", pin: inp.value });
+    inp.addEventListener("keydown", (e) => { if (e.key === "Enter") submit(); });
+    card.append(
+      el("h2", {}, "Valmentaja (PT)"),
+      el("div", { class: "muted", style: "margin-bottom:10px" },
+        "Admin-PINillä näet ja hallinnoit kaikkia profiileja."),
+      inp,
+      el("div", { class: "btn-row", style: "margin-top:12px" },
+        el("button", { class: "primary", onclick: submit }, "Kirjaudu"),
+        el("button", { onclick: renderPicker }, "Takaisin")),
+      msg);
+    setTimeout(() => inp.focus(), 50);
+  }
+
+  renderPicker();
+  overlay.append(card);
+  document.body.append(overlay);
+}
+
+// Kirjautumisen jälkeen: lataa profiilit uudelleen (oikeilla oikeuksilla) ja
+// piilota profiilinvaihto tavallisilta käyttäjiltä.
+async function bootAfterLogin() {
+  await loadProfiles();
+  await loadExercises();
+  await refreshActiveTab();
+}
+
+// Portti sovelluksen alussa: jos lukko on päällä eikä voimassa olevaa tokenia
+// ole, näytä lukitusnäyttö. Palauttaa true jos voi jatkaa normaalisti.
+async function authGate() {
+  let status;
+  try { status = await api.get("/api/auth/status"); }
+  catch (e) { return true; }
+  if (!status.enabled) { setAuthToken(null); return true; }
+  // Onko token voimassa? Testataan kevyellä kutsulla.
+  if (authToken()) {
+    try { await api.get("/api/profiles"); return true; }
+    catch (e) { setAuthToken(null); }
+  }
+  await showLockScreen();
+  return false;
+}
 
 async function refreshActiveTab() {
   // Lataa nykyiset perusnäkymät + aktiivisen välilehden data.
@@ -1954,9 +2100,111 @@ function renderCompletenessHint() {
   }
 }
 
+function logout() {
+  setAuthToken(null);
+  currentProfileId = null;
+  showLockScreen();
+}
+
+// Profiililukon hallintakortti Profiilit-välilehdellä.
+async function loadSecurityCard() {
+  const box = document.getElementById("security-info");
+  if (!box) return;
+  box.innerHTML = "";
+  let status;
+  try { status = await api.get("/api/auth/status"); }
+  catch (e) { box.textContent = "Tilan haku epäonnistui."; return; }
+
+  const note = el("div", { class: "muted", style: "margin-top:8px;font-size:0.85rem" });
+
+  // 1) Lukko pois päältä: kuka tahansa voi ottaa sen käyttöön asettamalla admin-PINin.
+  if (!status.enabled) {
+    const pinInp = el("input", { type: "password", inputmode: "numeric",
+      placeholder: "Admin-PIN (väh. 4)", style: "max-width:180px" });
+    box.append(
+      el("p", { class: "muted", style: "margin-top:0" },
+        "Lukko on pois päältä — kaikki tällä instanssilla näkevät ja voivat kirjata mille " +
+        "tahansa profiilille. Jos jaat sovelluksen kavereille, ota lukko käyttöön: " +
+        "sinä (PT) näet kaikki, muut vain oman profiilinsa."),
+      el("div", { class: "btn-row" },
+        pinInp,
+        el("button", { class: "primary", onclick: async () => {
+          try {
+            const r = await api.post("/api/auth/setup", { admin_pin: pinInp.value });
+            setAuthToken(r.token);
+            note.textContent = "Lukko käyttöön. Aseta seuraavaksi profiileille omat PINit.";
+            note.style.color = "var(--accent)";
+            await loadProfilesTab();
+          } catch (e) { note.textContent = e.message; note.style.color = "#ef4444"; }
+        } }, "Ota lukko käyttöön")),
+      note);
+    return;
+  }
+
+  // 2) Lukko päällä, tavallinen käyttäjä: vain uloskirjautuminen.
+  if (authRole() !== "admin") {
+    box.append(
+      el("p", { class: "muted", style: "margin-top:0" },
+        "Lukko on päällä. Näet vain oman profiilisi. Vain valmentaja (PT) hallinnoi lukkoa."),
+      el("button", { onclick: logout }, "Kirjaudu ulos"));
+    return;
+  }
+
+  // 3) Lukko päällä, admin: hallinnoi profiilien PINejä, admin-PIN, poisto.
+  box.append(el("p", { class: "muted", style: "margin-top:0" },
+    "Lukko on päällä. Sinä (PT) näet kaikki profiilit; muut pääsevät vain omaansa. " +
+    "Aseta kullekin profiilille oma PIN — profiili ilman PINiä on avoin kenelle vain."));
+
+  status.profiles.forEach((p) => {
+    const pinInp = el("input", { type: "password", inputmode: "numeric",
+      placeholder: p.has_pin ? "uusi PIN" : "aseta PIN", style: "max-width:120px" });
+    const st = el("span", { class: "muted", style: "font-size:0.8rem" },
+      p.has_pin ? "🔒 PIN asetettu" : "avoin");
+    const row = el("div", { class: "row-between", style: "gap:8px;margin:6px 0;flex-wrap:wrap" },
+      el("div", {}, el("strong", {}, p.name), " ", st),
+      el("div", { class: "btn-row" },
+        pinInp,
+        el("button", { class: "small", onclick: async () => {
+          try {
+            const r = await api.post("/api/auth/profile-pin", { profile_id: p.id, pin: pinInp.value });
+            st.textContent = r.has_pin ? "🔒 PIN asetettu" : "avoin";
+            pinInp.value = "";
+          } catch (e) { st.textContent = e.message; }
+        } }, "Tallenna"),
+        p.has_pin ? el("button", { class: "small", onclick: async () => {
+          try {
+            await api.post("/api/auth/profile-pin", { profile_id: p.id, pin: "" });
+            st.textContent = "avoin";
+          } catch (e) { st.textContent = e.message; }
+        } }, "Poista PIN") : ""));
+    box.append(row);
+  });
+
+  const admInp = el("input", { type: "password", inputmode: "numeric",
+    placeholder: "uusi admin-PIN", style: "max-width:160px" });
+  box.append(
+    el("div", { class: "lock-sep", style: "margin:12px 0" }),
+    el("div", { class: "btn-row" },
+      admInp,
+      el("button", { class: "small", onclick: async () => {
+        try { await api.post("/api/auth/change-admin-pin", { admin_pin: admInp.value });
+          note.textContent = "Admin-PIN vaihdettu."; note.style.color = "var(--accent)"; admInp.value = "";
+        } catch (e) { note.textContent = e.message; note.style.color = "#ef4444"; }
+      } }, "Vaihda admin-PIN")),
+    el("div", { class: "btn-row", style: "margin-top:10px" },
+      el("button", { onclick: logout }, "Kirjaudu ulos"),
+      el("button", { style: "color:#ef4444", onclick: async () => {
+        if (!confirm("Poistetaanko lukko? Kaikki PINit nollataan ja instanssi palaa avoimeksi.")) return;
+        try { await api.post("/api/auth/disable"); setAuthToken(null); await loadProfilesTab(); }
+        catch (e) { note.textContent = e.message; }
+      } }, "Poista lukko käytöstä")),
+    note);
+}
+
 async function loadProfilesTab() {
   await loadProfiles();
   loadNetworkInfo();
+  loadSecurityCard();
   const list = document.getElementById("profile-list");
   list.innerHTML = "";
   renderCompletenessHint();
@@ -3492,6 +3740,10 @@ async function initIcons() {
 
 (async function init() {
   initIcons();
+  // Profiililukon portti: jos lukko on päällä eikä ole kirjautunut, näytä
+  // lukitusnäyttö äläkä lataa dataa ennen kirjautumista.
+  const ok = await authGate();
+  if (!ok) return;
   await loadProfiles();
   await loadExercises();
   await loadPrograms();
