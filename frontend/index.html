@@ -346,6 +346,29 @@
         <div id="network-info" class="muted">Haetaan osoitetta…</div>
       </div>
 
+      <div class="card" id="sync-card">
+        <h3 style="margin-top:0">🔄 Laitesynkronointi (puhelin ⇄ PC)</h3>
+        <p class="muted">Kun molemmat laitteet ovat samassa wifissä, synkronoi ne
+          keskenään: jäljessä oleva laite saa puuttuvat treenit, merkinnät ja ohjelmat —
+          mitään ei pyyhitä. Kirjaa vaikka puhelimella matkalla, ja synkronoi kotona PC:lle.</p>
+        <div class="btn-row">
+          <input id="sync-url" type="text" placeholder="Toisen laitteen osoite, esim. http://192.168.1.20:8000"
+            style="flex:1;min-width:220px" />
+          <button id="sync-scan-btn" class="small" title="Näytä tämän laitteen QR toiselle laitteelle">Näytä QR</button>
+        </div>
+        <div class="btn-row" style="margin-top:8px">
+          <button id="sync-now-btn" class="primary">Synkronoi nyt (molempiin suuntiin)</button>
+          <label style="flex-direction:row;align-items:center;gap:6px;font-size:0.82rem">
+            <input id="sync-thisprofile" type="checkbox" /> vain tämä profiili
+          </label>
+        </div>
+        <div id="sync-qr" style="margin-top:10px"></div>
+        <div id="sync-status" class="muted" style="margin-top:8px"></div>
+        <p class="muted" style="font-size:0.82rem;margin-top:8px">Valmennus: asiakas voi lähettää
+          oman profiilinsa (Lataa varmuuskopio alla → lähetä tiedosto) tai synkronoida
+          suoraan samassa wifissä.</p>
+      </div>
+
       <div class="card">
         <h3>💾 Varmuuskopio</h3>
         <p class="muted">Lataa koko datasi (kaikki profiilit, treenit, ohjelmat, keho, ruoka,
@@ -598,6 +621,7 @@
   </main>
 
   <script src="/static/vendor/three.min.js"></script>
+  <script src="/static/vendor/qrcode.min.js"></script>
   <script src="/static/app.js"></script>
   <script>
     // Rekisteröi service worker -> sovelluksen voi asentaa puhelimen kotinäytölle.

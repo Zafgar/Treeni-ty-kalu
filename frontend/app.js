@@ -1884,6 +1884,20 @@ async function refreshActiveTab() {
   if (loader) await loader(); else await loadOverview();
 }
 
+// QR-koodi paikallisesti (vendoroitu kirjasto, toimii offline).
+function makeQR(textData, sizePx) {
+  try {
+    const qr = qrcode(0, "M");
+    qr.addData(textData);
+    qr.make();
+    const wrap = el("div", { style: `width:${sizePx}px;height:${sizePx}px;background:#fff;border-radius:8px;padding:6px;box-sizing:border-box` });
+    wrap.innerHTML = qr.createSvgTag({ cellSize: 4, margin: 2, scalable: true });
+    const svg = wrap.querySelector("svg");
+    if (svg) { svg.setAttribute("width", "100%"); svg.setAttribute("height", "100%"); }
+    return wrap;
+  } catch (e) { return null; }
+}
+
 async function loadNetworkInfo() {
   const box = document.getElementById("network-info");
   if (!box) return;
@@ -1907,15 +1921,11 @@ async function loadNetworkInfo() {
             "Kirjoita osoite puhelimen selaimeen tai skannaa QR alta."),
     );
     if (!isLocal) {
-      const qr = el("img", {
-        alt: "QR-koodi osoitteeseen " + info.phone_url,
-        style: "margin-top:10px;width:160px;height:160px;background:#fff;border-radius:8px;padding:6px",
-        src: "https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=" +
-          encodeURIComponent(info.phone_url),
-      });
-      qr.onerror = () => qr.remove(); // jos ei nettiä, jätä pois
-      box.append(qr);
+      const qrEl = makeQR(info.phone_url, 160);
+      if (qrEl) { qrEl.style.marginTop = "10px"; box.append(qrEl); }
     }
+    // Tallenna oma osoite laitesynkronointia varten
+    window._phoneUrl = info.phone_url;
   } catch (e) {
     box.textContent = "Osoitteen haku epäonnistui.";
   }
@@ -2046,6 +2056,38 @@ function openProfileForm(existing) {
 document.getElementById("new-profile-btn").addEventListener("click", () => openProfileForm(null));
 
 // ---- Varmuuskopio: lataus ja palautus ----
+// ---- Laitesynkronointi ----
+document.getElementById("sync-scan-btn").addEventListener("click", () => {
+  const box = document.getElementById("sync-qr");
+  box.innerHTML = "";
+  const url = window._phoneUrl;
+  if (!url) { box.append(el("div", { class: "muted" }, "Osoitetta ei vielä haettu.")); return; }
+  const qr = makeQR(url, 180);
+  box.append(el("div", { class: "muted", style: "margin-bottom:6px" },
+    "Tämän laitteen osoite: " + url + ". Kirjoita se toisen laitteen kenttään, tai skannaa:"),
+    qr || el("div", { class: "muted" }, "QR:ää ei voitu luoda."));
+});
+
+document.getElementById("sync-now-btn").addEventListener("click", async () => {
+  const status = document.getElementById("sync-status");
+  const url = (document.getElementById("sync-url").value || "").trim();
+  if (!url) { status.textContent = "Anna toisen laitteen osoite (tai skannaa sen QR)."; return; }
+  const onlyThis = document.getElementById("sync-thisprofile").checked;
+  status.textContent = "Synkronoidaan…";
+  try {
+    const body = { url, push_back: true };
+    if (onlyThis && currentProfileId != null) body.profile_id = currentProfileId;
+    const r = await api.post("/api/sync/pull", body);
+    const got = r.pulled ? r.pulled.added_total : 0;
+    const sent = r.pushed ? r.pushed.added_total : 0;
+    status.textContent = `✓ ${r.message} Tälle laitteelle tuli ${got} uutta riviä, toiselle lähti ${sent}.`;
+    await loadProfiles(); await refreshActiveTab();
+  } catch (e) {
+    status.textContent = "Synkronointi epäonnistui: " + e.message +
+      " — varmista että molemmat laitteet ovat samassa wifissä ja osoite on oikein.";
+  }
+});
+
 document.getElementById("backup-download").addEventListener("click", async () => {
   const status = document.getElementById("backup-status");
   status.textContent = "Kootaan varmuuskopiota…";

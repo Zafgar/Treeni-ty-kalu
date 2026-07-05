@@ -588,3 +588,52 @@ def test_new_emphasis_programs(client):
     prog = client.get(f"/api/programs/{r['program_id']}").json()
     names = [e["exercise"]["name"].lower() for d in prog["days"] for e in d["exercises"]]
     assert any("lantionnosto" in n for n in names)
+
+
+def test_sync_merge_two_devices():
+    """Kaksi erillistä kantaa yhdistyvät additiivisesti: jäljessä oleva täydentyy,
+    ei duplikaatteja, idempotentti."""
+    import tempfile, os
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from app.database import Base
+    from app import models
+    from app.routers.sync import export_bundle, merge_bundle
+    from datetime import date, timedelta
+    d = tempfile.mkdtemp()
+    today = date.today()
+
+    def mkdb(n):
+        e = create_engine(f"sqlite:///{os.path.join(d, n)}")
+        Base.metadata.create_all(e)
+        return sessionmaker(bind=e)()
+
+    def seed(s, wname, wdate, weight):
+        p = models.Profile(name="Matti", sex="mies", height_cm=180); s.add(p); s.flush()
+        ex = models.Exercise(name="Penkkipunnerrus"); s.add(ex); s.flush()
+        ws = models.WorkoutSession(profile_id=p.id, session_date=wdate, name=wname, status="completed")
+        s.add(ws); s.flush()
+        we = models.WorkoutExercise(session_id=ws.id, exercise_id=ex.id); s.add(we); s.flush()
+        s.add(models.SetLog(workout_exercise_id=we.id, set_index=0, reps=5, weight=weight, completed=True))
+        s.add(models.BodyEntry(profile_id=p.id, entry_date=wdate, bodyweight=90))
+        s.commit()
+
+    A = mkdb("pc.db"); B = mkdb("phone.db")
+    seed(A, "PC-treeni", today - timedelta(days=3), 100)
+    seed(B, "Puhelin-treeni", today - timedelta(days=1), 102.5)
+
+    r1 = merge_bundle(B, export_bundle(A))   # puhelin saa PC:n treenin
+    r2 = merge_bundle(A, export_bundle(B))   # PC saa puhelimen treenin
+    assert r1["added_total"] >= 3 and r2["added_total"] >= 3
+    # Ei duplikaattiprofiilia (nimen mukaan mäpätty)
+    assert A.query(models.Profile).count() == 1
+    assert B.query(models.Profile).count() == 1
+    # Molemmilla nyt samat kaksi treeniä
+    tA = sorted(w.name for w in A.query(models.WorkoutSession).all())
+    tB = sorted(w.name for w in B.query(models.WorkoutSession).all())
+    assert tA == tB == ["PC-treeni", "Puhelin-treeni"]
+    # Idempotenssi: sama merge uudelleen ei lisää mitään
+    assert merge_bundle(A, export_bundle(B))["added_total"] == 0
+    # Set-logit siirtyivät (paino 102.5 löytyy PC:ltä)
+    weights = {round(sl.weight, 1) for sl in A.query(models.SetLog).all()}
+    assert 102.5 in weights and 100 in weights

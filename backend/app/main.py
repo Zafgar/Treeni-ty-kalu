@@ -37,6 +37,7 @@ from .routers import (
     programs,
     recovery,
     stats,
+    sync,
     templates,
     workouts,
 )
@@ -75,6 +76,7 @@ app.include_router(stats.router)
 app.include_router(templates.router)
 app.include_router(body.router)
 app.include_router(nutrition.router)
+app.include_router(sync.router)
 app.include_router(diet.router)
 app.include_router(recovery.router)
 app.include_router(backup.router)
