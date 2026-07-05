@@ -402,6 +402,11 @@ def workout_review(workout_id: int, db: Session = Depends(get_db)):
                 reps_scheme = engine.parse_scheme(pe.rep_scheme)
                 targets[pe.exercise_id] = int(max(reps_scheme)) if reps_scheme else pe.target_reps
 
+    # Onko dieettivaihe (cut) päällä -> lievä lasku samalla painolla on normaalia
+    on_cut = db.query(models.DietPhase).filter(
+        models.DietPhase.profile_id == session.profile_id,
+        models.DietPhase.is_active.is_(True), models.DietPhase.goal == "cut").first() is not None
+
     out = []
     for we in session.exercises:
         ex = we.exercise
@@ -412,7 +417,7 @@ def workout_review(workout_id: int, db: Session = Depends(get_db)):
                                             ex.is_main_lift, ex.per_hand)
         last_top, last_reps = _last_top_before(db, ex.id, session.profile_id, session.session_date)
         review = engine.set_performance_review(
-            sets, targets.get(ex.id), inc, last_top, last_reps)
+            sets, targets.get(ex.id), inc, last_top, last_reps, on_cut=on_cut)
         if not review:
             continue
         # Onko liikkeellä ohjelmarivi johon ehdotettu paino voidaan tallentaa?

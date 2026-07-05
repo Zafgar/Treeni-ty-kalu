@@ -2074,14 +2074,26 @@ def alcohol_assessment(events: list, nights: dict, sex: str | None,
 # ---------- Treenin jälkeinen sarja-analyysi ja painosuositus ----------
 def set_performance_review(sets: list, target_reps: int | None, inc: float,
                            last_top: dict | None = None,
-                           last_reps_at_weight: int | None = None) -> dict | None:
-    """Analysoi yhden liikkeen suoritus: vertaa edelliseen, tunnista tavoite-
-    toistojen täyttyminen (korota) tai sarjojen romahdus (paino liikaa, laske).
+                           last_reps_at_weight: int | None = None,
+                           on_cut: bool = False) -> dict | None:
+    """Analysoi yhden liikkeen suoritus ja anna ohje seuraavaan kertaan.
 
-    sets: [{"weight","reps","completed"}]. target_reps: ohjelman tavoitetoistot
-    (maksimitavoite). inc: realistinen korotusaskel. last_top: edellisen kerran
-    raskain sarja {"weight","reps"}. last_reps_at_weight: edellisen kerran
-    toistot samalla työpainolla (vertailuun).
+    LOGIIKKA (käyttäjän toive):
+    - Jos paino juuri korotettiin edellisestä, laskevat sarjat ovat NORMAALIA:
+      tavoitellaan täysiä sarjoja uudella painolla — EI ehdoteta laskua ellei
+      sarjat romahda täysin. Kun kaikki tavoitetoistot täyttyvät -> korota taas.
+    - Laskua ehdotetaan vain kun paino on selvästi liikaa tavoitteeseen nähden:
+      joko täysromahdus (esim. tavoite 8, tehtiin 4,4,3,2) tai kun paino on
+      pysynyt samana ja sarjat silti romahtavat.
+    - Kohtuullinen lasku loppusarjoissa (esim. 12,10,9) EI vaadi laskua — myös
+      sarjojen laajuus kertoo kehityksestä.
+    - Takapakki samalla painolla ei yleensä johdu liian isosta painosta vaan
+      levosta/ravinnosta/dieetistä; silloin ohjataan katsomaan niitä, ei laskua.
+
+    sets: [{"weight","reps","completed"}]. target_reps: ohjelman tavoitetoistot.
+    last_top: edellisen kerran raskain sarja {"weight","reps"}.
+    last_reps_at_weight: edellisen kerran toistot samalla työpainolla.
+    on_cut: onko dieettivaihe päällä (selittää lievän laskun).
     """
     done = [s for s in sets if s.get("completed") and s.get("reps", 0) > 0 and s.get("weight", 0) > 0]
     if not done:
@@ -2094,6 +2106,20 @@ def set_performance_review(sets: list, target_reps: int | None, inc: float,
     avg_reps = sum(at_top) / len(at_top)
     total_reps_top = sum(at_top)
     n_working = len(at_top)
+    min_reps = min(at_top)
+    tgt = target_reps if target_reps else first_reps
+
+    # Onko painoa juuri korotettu edellisestä kerrasta?
+    last_w = last_top.get("weight") if last_top else None
+    recently_increased = bool(last_w) and top_w > last_w + 0.01
+    same_weight = bool(last_w) and abs(top_w - last_w) < 0.01
+    regressed = bool(same_weight and last_reps_at_weight and total_reps_top < last_reps_at_weight)
+
+    # TÄYSROMAHDUS: paino selvästi liikaa tavoitteeseen nähden (myös heti korotuksen
+    # jälkeen tai tuoreelta pohjalta). Esim. tavoite 8 -> 4,4,3,2.
+    severe = (avg_reps <= tgt * 0.6) or (first_reps < tgt * 0.75) or (min_reps <= max(2, tgt * 0.4))
+    # KOHTALAINEN romahdus vakaalla painolla (ei juuri korotettu).
+    moderate = (n_working >= 3 and avg_reps < tgt * 0.72 and (first_reps - last_reps) >= 3)
 
     verdict = "hold"
     suggested = None
@@ -2101,47 +2127,72 @@ def set_performance_review(sets: list, target_reps: int | None, inc: float,
     ask_increase = False
     ask_reduce = False
 
-    # Tavoitteen määritys: ohjelman target_reps tai (ilman sitä) 1. sarjan toistot
-    tgt = target_reps if target_reps else first_reps
-
-    # 1) Sarjojen ROMAHDUS -> paino todennäköisesti liian suuri
-    #    (esim. tavoite 12, mutta 12,9,6,4,3). Kriteeri: useampi työsarja,
-    #    keskiarvo selvästi alle tavoitteen JA selvä lasku ekasta vikaan.
-    if n_working >= 3 and avg_reps < tgt * 0.72 and (first_reps - last_reps) >= 3:
+    def _reduce(strength_note):
+        nonlocal suggested, verdict, ask_reduce, reason
         shortfall = tgt - avg_reps
-        reduction = max(0.05, min(0.20, shortfall * 0.03))  # ~3 %/puuttuva toisto, 5–20 %
-        suggested = round_to_increment(top_w * (1 - reduction), inc)
-        if suggested >= top_w:
-            suggested = round_to_increment(top_w - inc, inc)
+        reduction = max(0.05, min(0.20, shortfall * 0.03))
+        s = round_to_increment(top_w * (1 - reduction), inc)
+        if s >= top_w:
+            s = round_to_increment(top_w - inc, inc)
+        suggested = s
         verdict, ask_reduce = "reduce", True
-        reason = (f"Sarjat romahtivat ({','.join(str(r) for r in at_top)} tavoitteen {tgt} sijaan) — "
-                  f"paino on todennäköisesti liian suuri. Ehdotus ensi kerraksi ~{suggested} kg "
-                  f"(−{round(reduction*100)} %), jolla saat kaikki sarjat lähemmäs tavoitetta.")
-    # 2) Tavoitetoistot TÄYTTYIVÄT kaikissa työsarjoissa -> korota
-    elif target_reps and min(at_top) >= target_reps:
+        reason = (f"Sarjat ({','.join(str(r) for r in at_top)}) jäivät selvästi tavoitteesta {tgt} — "
+                  f"{strength_note} Ehdotus ensi kerraksi ~{s} kg (−{round(reduction*100)} %), "
+                  "jolla saat kaikki sarjat lähemmäs tavoitetta.")
+
+    # 1) Kaikki tavoitetoistot täyttyivät -> korota
+    if target_reps and min_reps >= target_reps + 3:
+        suggested = round_to_increment(top_w + inc * 2, inc)
+        verdict, ask_increase = "increase", True
+        reason = (f"Ylitit tavoitetoistot selvästi ({','.join(str(r) for r in at_top)} vs. {target_reps}) — "
+                  f"paino on jo kevyt. Ehdotus +{inc*2:g} kg → {suggested} kg.")
+    elif target_reps and min_reps >= target_reps:
         suggested = round_to_increment(top_w + inc, inc)
         verdict, ask_increase = "increase", True
         reason = (f"Teit tavoitetoistot ({target_reps}) kaikissa työsarjoissa {top_w} kg:lla — "
                   f"valmis korotukseen. Ehdotus ensi kerraksi +{inc} kg → {suggested} kg.")
-    # 3) Yläraja ylittyi selvästi (esim. tavoite 8, teit 12+) -> korota reilummin
-    elif target_reps and min(at_top) >= target_reps + 3:
-        suggested = round_to_increment(top_w + inc * 2, inc)
-        verdict, ask_increase = "increase", True
-        reason = (f"Ylitit tavoitetoistot selvästi — paino on jo kevyt. Ehdotus +{inc*2:g} kg → {suggested} kg.")
+    # 2) Juuri korotettu paino: laskevat sarjat ovat NORMAALIA -> tavoittele
+    #    täysiä sarjoja, älä laske. Poikkeus: täysromahdus (liian iso hyppy).
+    elif recently_increased and not severe:
+        verdict = "hold"
+        reason = (f"Korotit painon {last_w:g} → {top_w:g} kg — laskevat sarjat "
+                  f"({','.join(str(r) for r in at_top)}) ovat tässä vaiheessa täysin normaalia. "
+                  f"Pidä {top_w:g} kg ja tavoittele täydet {tgt} toistoa joka sarjaan; kun ne "
+                  "täyttyvät, korota taas. Älä laske painoa.")
+    # 3) Juuri korotettu MUTTA täysromahti -> hyppy oli liian iso, laske hieman
+    elif recently_increased and severe:
+        _reduce(f"korotus {last_w:g} → {top_w:g} kg oli liian iso kerralla.")
+        reason += (f" (Voit myös palata {last_w:g} kg:aan ja tavoitella siellä täydet sarjat ennen "
+                   "pienempää korotusta.)")
+    # 4) Vakaa paino, mutta sarjat romahtavat KESKEN setin (esim. 12,8,5) ->
+    #    paino liian iso tälle toistotavoitteelle. Tämä tunnistetaan myös silloin
+    #    kun tulos on huonompi kuin viimeksi (romahtava muoto ratkaisee, ei total).
+    elif severe or moderate:
+        _reduce("paino on todennäköisesti liian suuri tälle toistotavoitteelle.")
+    # 5) Lievä takapakki samalla painolla (ei romahdus) -> ei laskua, katso lepo
+    elif regressed:
+        verdict = "hold"
+        if on_cut:
+            reason = (f"Hieman vähemmän toistoja kuin viimeksi samalla painolla — dieetillä tämä on "
+                      "täysin normaalia (tavoite on säilyttää voima, ei nostaa). Pidä paino, älä laske.")
+        else:
+            reason = ("Hieman vähemmän toistoja kuin viimeksi samalla painolla. Yleensä syy on lepo, "
+                      "ravinto tai kertynyt väsymys — ei liian iso paino. Pidä sama paino, katso uni ja "
+                      "syöminen, niin suoritus yleensä palaa. Älä laske painoa yhden kerran takia.")
 
     # Vertailu edelliseen kertaan (kannustava palaute)
     compare = None
     if last_top:
-        lw, lr = last_top.get("weight"), last_top.get("reps")
-        if lw and abs(top_w - lw) < 0.001 and last_reps_at_weight:
+        lw = last_top.get("weight")
+        if lw and abs(top_w - lw) < 0.01 and last_reps_at_weight:
             diff = total_reps_top - last_reps_at_weight
             if diff > 0:
-                compare = f"Teit {diff} toistoa enemmän samalla painolla ({top_w} kg) kuin viimeksi — hyvä eteneminen!"
+                compare = f"Teit {diff} toistoa enemmän samalla painolla ({top_w:g} kg) kuin viimeksi — hyvä eteneminen!"
             elif diff == 0:
-                compare = f"Sama suoritus kuin viimeksi ({top_w} kg × {total_reps_top} toistoa yhteensä)."
+                compare = f"Sama suoritus kuin viimeksi ({top_w:g} kg × {total_reps_top} toistoa yhteensä)."
             else:
-                compare = f"Hieman vähemmän toistoja kuin viimeksi ({diff}) — palautuminen tai kuormitus voi vaikuttaa."
-        elif lw and top_w > lw + 0.001:
+                compare = f"Hieman vähemmän toistoja kuin viimeksi ({diff})."
+        elif lw and top_w > lw + 0.01:
             compare = f"Nostit työpainoa edellisestä ({lw:g} → {top_w:g} kg) — kehitystä!"
 
     return {
@@ -2149,6 +2200,7 @@ def set_performance_review(sets: list, target_reps: int | None, inc: float,
         "target_reps": target_reps, "verdict": verdict,
         "ask_increase": ask_increase, "ask_reduce": ask_reduce,
         "suggested_weight": suggested, "reason": reason, "compare": compare,
+        "recently_increased": recently_increased,
     }
 
 

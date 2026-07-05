@@ -700,3 +700,35 @@ def test_resolve_tdee_stability():
     r5 = engine.resolve_tdee(base, 800, 0.0, 21, intake_day_count=15,
                              weight_point_count=8, weight_span_days=20)
     assert r5["tdee"] >= round(base * 0.82) - 1
+
+
+def test_set_review_increase_then_decline_is_normal():
+    """Käyttäjän ydinongelma: korotuksen jälkeen laskevat sarjat EIVÄT saa
+    aiheuttaa laskuehdotusta — tavoitellaan täysiä sarjoja uudella painolla."""
+    from app import engine as E
+    inc = 2.5
+    S = lambda w, reps: [{"weight": w, "reps": x, "completed": True} for x in reps]
+    # 1) Juuri korotettu 100->102.5, sarjat 8,7,7,6 (tavoite 8) -> HOLD, ei laskua
+    r = E.set_performance_review(S(102.5, [8, 7, 7, 6]), 8, inc,
+                                 {"weight": 100, "reps": 8}, 32)
+    assert r["verdict"] == "hold" and not r["ask_reduce"] and r["recently_increased"]
+    assert "korota taas" in r["reason"].lower() or "tavoittele" in r["reason"].lower()
+    # 2) Tuore aloitus 4,4,3,2 (tavoite 8) -> selvästi liikaa -> REDUCE
+    r2 = E.set_performance_review(S(60, [4, 4, 3, 2]), 8, inc)
+    assert r2["verdict"] == "reduce" and r2["suggested_weight"] < 60
+    # 3) Eristävä 12,10,9 (tavoite 12) -> OK, ei laskua
+    r3 = E.set_performance_review(S(12, [12, 10, 9]), 12, inc, {"weight": 12, "reps": 36}, 33)
+    assert r3["verdict"] == "hold" and not r3["ask_reduce"]
+    # 4) Eristävä 12,8,5 (tavoite 12) -> selvä romahdus -> REDUCE
+    r4 = E.set_performance_review(S(12, [12, 8, 5]), 12, inc, {"weight": 12, "reps": 33}, 33)
+    assert r4["verdict"] == "reduce"
+    # 5) Lievä takapakki samalla painolla (8,7,6,6 vs 32) -> HOLD, katso lepo (ei laskua)
+    r5 = E.set_performance_review(S(100, [8, 7, 6, 6]), 8, inc, {"weight": 100, "reps": 8}, 32)
+    assert r5["verdict"] == "hold" and not r5["ask_reduce"]
+    assert "lepo" in r5["reason"].lower() or "uni" in r5["reason"].lower()
+    # 6) Sama takapakki dieetillä -> normaalia dieetillä
+    r6 = E.set_performance_review(S(100, [8, 7, 6, 6]), 8, inc, {"weight": 100, "reps": 8}, 32, on_cut=True)
+    assert r6["verdict"] == "hold" and "dieet" in r6["reason"].lower()
+    # 7) Liian iso korotus joka romahti (5,4,3,3, tavoite 8) -> REDUCE + palaa-vinkki
+    r7 = E.set_performance_review(S(105, [5, 4, 3, 3]), 8, inc, {"weight": 100, "reps": 8}, 32)
+    assert r7["verdict"] == "reduce"
