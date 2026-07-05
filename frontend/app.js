@@ -1772,9 +1772,8 @@ document.getElementById("generate-btn").addEventListener("click", async () => {
   if (panel.classList.contains("hidden")) return;
   panel.innerHTML = "";
   const plans = await api.get("/api/templates/plans");
-  const planNames = { aloittelija: "Aloittelija (ensikertalainen)", bodaus: "Lihasmassa (bodaus)", voimanosto: "Voimanosto", olympia: "Olympianosto" };
   const planSel = el("select", {});
-  plans.forEach((p) => planSel.append(el("option", { value: p.id }, planNames[p.id] || p.id)));
+  plans.forEach((p) => planSel.append(el("option", { value: p.id }, p.name || p.id)));
   const daysSel = el("select", {});
   const info = el("div", { class: "muted", style: "margin:8px 0" });
   function refreshDays() {
@@ -1782,7 +1781,9 @@ document.getElementById("generate-btn").addEventListener("click", async () => {
     daysSel.innerHTML = "";
     p.days_options.forEach((d) => daysSel.append(el("option", { value: d }, `${d}× viikossa`)));
     info.innerHTML = "";
-    info.append(el("div", {}, p.guidance));
+    if (p.emphasis) info.append(el("div", {}, el("strong", {}, "Painotus: "), el("span", {}, p.emphasis)));
+    if (p.suits) info.append(el("div", { style: "margin-top:4px" }, el("strong", {}, "Kenelle: "), el("span", {}, p.suits)));
+    info.append(el("div", { style: "margin-top:6px" }, p.guidance));
     if (p.next_phase) info.append(el("div", { style: "margin-top:6px;color:var(--accent-2)" }, "➜ " + p.next_phase));
   }
   planSel.addEventListener("change", refreshDays);

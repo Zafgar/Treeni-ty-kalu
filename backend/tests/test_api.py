@@ -568,3 +568,23 @@ def test_total_forecast_anchored_to_now(client):
     assert (fc[-1]["high"] - fc[-1]["low"]) > (fc[0]["high"] - fc[0]["low"])
     # Ennuste yhtyy nykytotaliin (ei hyppyä)
     assert abs(fc[0]["mid"] - t["total_mid"]) < 40
+
+
+def test_new_emphasis_programs(client):
+    plans = {p["id"]: p for p in client.get("/api/templates/plans").json()}
+    for pid in ("pakarat", "ylakroppa", "vapaat_painot", "laitteet", "tehokas_kokokeho"):
+        assert pid in plans, pid
+        assert plans[pid]["emphasis"] and plans[pid]["suits"] and plans[pid]["name"]
+        assert plans[pid]["days_options"][0] >= 2
+    # Seedaa pakaraohjelman liikkeet ja varmista että 3 pv -ohjelma rakentuu
+    for name in ("Lantionnosto", "Bulgarian askelkyykky", "Romanialainen maastaveto",
+                 "Loitonnus (kone, pakara/lonkka)", "Pohjenousu", "Takakyykky", "Jalkaprässi",
+                 "Jalkojen koukistus", "Penkkipunnerrus", "Ylätalja eteen", "Pystypunnerrus",
+                 "Hauiskääntö tanko", "Taljapunnerrus", "Askelkyykky", "Tankosoutu"):
+        client.post("/api/exercises", json={"name": name})
+    r = client.post("/api/templates/generate",
+                    json={"plan": "pakarat", "days_per_week": 3, "profile_id": 1}).json()
+    assert r["days"] == 3
+    prog = client.get(f"/api/programs/{r['program_id']}").json()
+    names = [e["exercise"]["name"].lower() for d in prog["days"] for e in d["exercises"]]
+    assert any("lantionnosto" in n for n in names)

@@ -230,6 +230,67 @@ _BEG_LOWER = {"label": "Alakroppa", "items": [
     _A("takakyykky", 3, 8), _A("romanialainen maastaveto", 3, 10), _A("jalkaprässi", 3, 12),
     _A("jalkojen koukistus", 3, 12), _A("pohjenousu", 3, 15), _A("vatsarutistus", 3, 15)]}
 
+# ---- Pakara- ja alavartalopainotus (pyöreämmät pakarat, vahvat jalat) ----
+_GL_LOWER_A = {"label": "Pakarat & takaketju", "items": [
+    _A("lantionnosto", 4, 10), _A("bulgarian askelkyykky", 3, 10),
+    _A("romanialainen maastaveto", 3, 10), _A("loitonnus", 3, 20), _A("pohjenousu", 4, 15)]}
+_GL_LOWER_B = {"label": "Jalat & pakarat", "items": [
+    _A("takakyykky", 4, 8), _A("jalkaprässi", 3, 12), _A("lantionnosto", 3, 12),
+    _A("jalkojen koukistus", 3, 12), _A("loitonnus", 3, 20)]}
+_GL_UPPER = {"label": "Yläkroppa (tasapaino)", "items": [
+    _A("penkkipunnerrus", 3, 10), _A("ylätalja", 3, 12), _A("pystypunnerrus", 3, 12),
+    _A("hauiskääntö", 2, 12), _A("taljapunnerrus", 2, 12)]}
+_GL_FULL = {"label": "Koko keho (pakarapaino)", "items": [
+    _A("lantionnosto", 4, 10), _A("askelkyykky", 3, 10), _A("tankosoutu", 3, 10),
+    _A("penkkipunnerrus", 3, 10), _A("loitonnus", 3, 20)]}
+
+# ---- Yläkroppapainotus (leveä selkä, hartiat, kädet — V-malli) ----
+_UB_PUSH = {"label": "Työntö (rinta/olka/ojentaja)", "items": [
+    _A("pystypunnerrus", 4, 8), _A("penkkipunnerrus", 3, 10), _A("sivunostot", 4, 15),
+    _A("vinopenkki", 3, 10), _A("taljapunnerrus", 3, 12), _A("ranskalainen", 2, 12)]}
+_UB_PULL = {"label": "Veto (selän leveys & hauis)", "items": [
+    _A("leuanveto", 3, 8), _A("ylätalja leveä", 4, 10), _A("tankosoutu", 3, 10),
+    _A("face pull", 3, 15), _A("hauiskääntö tanko", 3, 12), _A("vasarakääntö", 2, 12)]}
+_UB_SHOULDERS = {"label": "Hartiat & kädet", "items": [
+    _A("pystypunnerrus", 4, 10), _A("sivunostot", 4, 15), _A("vipunostot taakse", 3, 15),
+    _A("hauiskääntö", 3, 12), _A("taljapunnerrus", 3, 12), _A("ranskalainen", 2, 12)]}
+_UB_LEGS = {"label": "Jalat (tasapaino)", "items": [
+    _A("takakyykky", 3, 8), _A("romanialainen maastaveto", 3, 10),
+    _A("jalkaprässi", 3, 12), _A("pohjenousu", 3, 15)]}
+
+# ---- Vapaat painot (vain tanko + käsipainot, ei laitteita) ----
+_FW_UPPER = {"label": "Yläkroppa (vapaat painot)", "items": [
+    _A("penkkipunnerrus", 4, 6), _A("tankosoutu", 4, 8), _A("pystypunnerrus", 3, 8),
+    _A("käsipainosoutu", 3, 10), _A("hauiskääntö tanko", 3, 10), _A("ranskalainen", 3, 12)]}
+_FW_LOWER = {"label": "Alakroppa (vapaat painot)", "items": [
+    _A("takakyykky", 4, 6), _A("romanialainen maastaveto", 3, 8),
+    _A("bulgarian askelkyykky", 3, 10), _A("pohjenousu", 4, 15)]}
+_FW_A = {"label": "Koko keho A (tanko)", "items": [
+    _A("takakyykky", 4, 6), _A("penkkipunnerrus", 4, 6), _A("tankosoutu", 4, 8),
+    _A("pystypunnerrus", 3, 8), _A("hauiskääntö tanko", 2, 12)]}
+_FW_B = {"label": "Koko keho B (mave)", "items": [
+    _A("maastaveto", 3, 5), _A("vinopenkki tanko", 3, 8), _A("leuanveto", 3, 8),
+    _A("askelkyykky", 3, 10), _A("ranskalainen", 2, 12)]}
+
+# ---- Kuntosalilaitteet (ohjatut, nivelystävälliset — turvallista tehdä lähelle uupumusta) ----
+_MC_UPPER = {"label": "Yläkroppa (laitteet)", "items": [
+    _A("rintaprässi", 3, 12), _A("ylätalja", 3, 12), _A("olkapääprässi", 3, 12),
+    _A("soutu (kone", 3, 12), _A("taljahauis", 3, 12), _A("taljapunnerrus", 3, 12)]}
+_MC_LOWER = {"label": "Alakroppa (laitteet)", "items": [
+    _A("jalkaprässi", 4, 12), _A("reisiojennus", 3, 15), _A("jalkojen koukistus", 3, 15),
+    _A("pakaralaite", 3, 15), _A("pohjenousu (kone", 4, 15)]}
+_MC_FULL = {"label": "Koko keho (laitteet)", "items": [
+    _A("jalkaprässi", 3, 12), _A("rintaprässi", 3, 12), _A("ylätalja", 3, 12),
+    _A("olkapääprässi", 3, 12), _A("taljahauis", 2, 15), _A("taljapunnerrus", 2, 15)]}
+
+# ---- Tehokas koko keho (kiireiselle — koko keho joka treenillä) ----
+_EFF_A = {"label": "Koko keho A", "items": [
+    _A("takakyykky", 3, 8), _A("penkkipunnerrus", 3, 8), _A("tankosoutu", 3, 10),
+    _A("pystypunnerrus", 2, 12), _A("hauiskääntö", 2, 12), _A("pohjenousu", 2, 15)]}
+_EFF_B = {"label": "Koko keho B", "items": [
+    _A("maastaveto", 3, 5), _A("vinopenkki", 3, 10), _A("ylätalja", 3, 10),
+    _A("jalkaprässi", 3, 12), _A("ranskalainen", 2, 12), _A("vatsarutistus", 3, 15)]}
+
 PLAN_BLUEPRINTS = {
     "aloittelija": {
         "goal": "aloittelija",
@@ -270,6 +331,87 @@ PLAN_BLUEPRINTS = {
                      "Etukyykky ja vedot tukevat nostoja."),
         "days": {3: [_OL_SNATCH, _OL_CJ, _OL_SQUAT], 4: [_OL_SNATCH, _OL_CJ, _OL_SQUAT, _OL_SNATCH]},
     },
+    "pakarat": {
+        "name": "Alavartalo & pakarat",
+        "goal": "hypertrofia",
+        "emphasis": "Pakarat, takareidet ja jalat",
+        "suits": ("Sopii kaikille, jotka haluavat pyöreämmät ja vahvemmat pakarat sekä "
+                  "muotoa jalkoihin. Suosii lantionnostoa, askelkyykkyjä ja lonkan "
+                  "loitonnusta, joita täydentää kevyempi yläkroppa tasapainon vuoksi."),
+        "guidance": ("Alavartalopainotteinen lihasmassaohjelma. Pääpaino pakaroissa "
+                     "(lantionnosto, askelkyykyt, loitonnus) ja takaketjussa. Valitse paino "
+                     "jolla viimeiset toistot ovat haastavia (1–2 varastoa). Pakaraliikkeissä "
+                     "tunne lihas ja tauota huipulla. Yläkroppapäivä pitää kropan tasapainossa."),
+        "days": {2: [_GL_LOWER_A, _GL_UPPER],
+                 3: [_GL_LOWER_A, _GL_UPPER, _GL_LOWER_B],
+                 4: [_GL_LOWER_A, _GL_UPPER, _GL_LOWER_B, _GL_UPPER],
+                 5: [_GL_LOWER_A, _GL_UPPER, _GL_LOWER_B, _GL_LOWER_A, _GL_UPPER]},
+    },
+    "ylakroppa": {
+        "name": "Yläkroppapainotus (V-malli)",
+        "goal": "hypertrofia",
+        "emphasis": "Leveä selkä, hartiat ja kädet",
+        "suits": ("Sopii niille, jotka haluavat leveämmän ja massiivisemman yläkropan — "
+                  "leveät hartiat, V-mallinen selkä ja isommat kädet. Alakroppa pidetään "
+                  "mukana kevyempänä, jottei kokonaisuus jää epätasapainoon."),
+        "guidance": ("Yläkroppapainotteinen lihasmassaohjelma: työntö (rinta/olka/ojentaja) "
+                     "ja veto (selän leveys/hauis) omilla päivillään, hartiat ja kädet saavat "
+                     "lisähuomiota. Sivunostot ja leveä ylätalja rakentavat V-mallia. Pidä 1–2 "
+                     "varastoa ja lisää painoa kun yläpään toistot menevät helposti."),
+        "days": {2: [_UB_PUSH, _UB_PULL],
+                 3: [_UB_PUSH, _UB_PULL, _UB_LEGS],
+                 4: [_UB_PUSH, _UB_PULL, _UB_SHOULDERS, _UB_LEGS],
+                 5: [_UB_PUSH, _UB_PULL, _UB_SHOULDERS, _UB_LEGS, _UB_PULL]},
+    },
+    "vapaat_painot": {
+        "name": "Vapaat painot (tanko & käsipainot)",
+        "goal": "voima",
+        "emphasis": "Toiminnallinen voima vapailla painoilla",
+        "suits": ("Sopii niille, jotka treenaavat tangolla ja käsipainoilla ilman laitteita "
+                  "(myös kotisaliin). Moninivelliikkeet kehittävät voimaa ja lihasta koko "
+                  "keholta ja opettavat kehonhallintaa. Vaatii hieman tekniikkaa."),
+        "guidance": ("Pelkät vapaat painot — ei laitteita. Moninivelliikkeet (kyykky, penkki, "
+                     "mave, soutu, pystypunnerrus) tuottavat eniten voimaa ja lihasta per aika. "
+                     "Aloita hallitulla painolla, tekniikka edellä, ja lisää maltilla. Sopii "
+                     "sekä kotisaliin että kuntosalille."),
+        "days": {2: [_FW_A, _FW_B],
+                 3: [_FW_A, _FW_B, _FW_UPPER],
+                 4: [_FW_UPPER, _FW_LOWER, _FW_UPPER, _FW_LOWER],
+                 5: [_FW_UPPER, _FW_LOWER, _FW_A, _FW_UPPER, _FW_LOWER]},
+    },
+    "laitteet": {
+        "name": "Kuntosalilaitteet (ohjattu)",
+        "goal": "hypertrofia",
+        "emphasis": "Ohjatut laiteliikkeet, nivelystävällinen",
+        "suits": ("Sopii aloittelijalle tai kenelle tahansa, joka haluaa turvallisen, "
+                  "ohjatun ja nivelystävällisen tavan treenata. Laitteet vakauttavat liikkeen, "
+                  "joten voit työntää turvallisesti lähelle uupumusta ilman tarkkaa tekniikkaa."),
+        "guidance": ("Laitepainotteinen lihasmassaohjelma. Koneet ohjaavat liikeradan, joten "
+                     "tekniikkariski on pieni ja voit keskittyä lihastuntumaan ja työntää "
+                     "lähelle uupumusta. Hyvä aloittelijalle, kuntoutujalle tai nivelien "
+                     "säästämiseen. Valitse paino jolla 12–15 toistoa on haastava."),
+        "days": {2: [_MC_FULL, _MC_LOWER],
+                 3: [_MC_UPPER, _MC_LOWER, _MC_FULL],
+                 4: [_MC_UPPER, _MC_LOWER, _MC_UPPER, _MC_LOWER],
+                 5: [_MC_UPPER, _MC_LOWER, _MC_FULL, _MC_UPPER, _MC_LOWER]},
+    },
+    "tehokas_kokokeho": {
+        "name": "Tehokas koko keho (kiireiselle)",
+        "goal": "hypertrofia",
+        "emphasis": "Koko keho joka treenillä, aikatehokas",
+        "suits": ("Sopii kiireiselle, jolla on aikaa vain 2–3 treeniin viikossa. Jokainen "
+                  "treeni kattaa koko kehon, joten yksikin viikko tuottaa tasaisen ärsykkeen. "
+                  "3 päivää ~tunnin treenillä ei ole yhtä kattava kuin useampi päivä, mutta "
+                  "se on paras tuotto rajallisella ajalla ja pitää kehityksen käynnissä."),
+        "guidance": ("Koko keho joka kerta: 1–2 isoa moninivelliikettä + muutama täydentävä. "
+                     "Vaihtele A/B-päiviä. Aikatehokas: kun ehdit vain 2–3× viikossa, tämä "
+                     "kuormittaa kaiken tasaisesti. Lisää painoa kun toistot menevät varastolla. "
+                     "Kun aikaa vapautuu, siirry jaettuun ohjelmaan (yläkroppa/alakroppa)."),
+        "next_phase": "Kun ehdit treenata useammin: jaettu ohjelma (esim. yläkroppa/alakroppa).",
+        "days": {2: [_EFF_A, _EFF_B],
+                 3: [_EFF_A, _EFF_B, _EFF_A],
+                 4: [_EFF_A, _EFF_B, _EFF_A, _EFF_B]},
+    },
 }
 
 
@@ -291,8 +433,12 @@ def _find_exercise(db: Session, keyword: str):
 @router.get("/plans")
 def list_plans():
     """Listaa generoitavat ohjelmatyypit ja niiden tuetut treenikerrat/viikko."""
+    _default_names = {"aloittelija": "Aloittelija (ensikertalainen)", "bodaus": "Lihasmassa (bodaus)",
+                      "voimanosto": "Voimanosto", "olympia": "Olympianosto"}
     return [
-        {"id": pid, "goal": b["goal"], "guidance": b["guidance"],
+        {"id": pid, "name": b.get("name", _default_names.get(pid, pid)),
+         "goal": b["goal"], "guidance": b["guidance"],
+         "emphasis": b.get("emphasis"), "suits": b.get("suits"),
          "next_phase": b.get("next_phase"), "days_options": sorted(b["days"].keys())}
         for pid, b in PLAN_BLUEPRINTS.items()
     ]
@@ -311,8 +457,9 @@ def generate_program(payload: GenerateIn, db: Session = Depends(get_db)):
 
     plan_names = {"aloittelija": "Aloittelija", "bodaus": "Lihasmassa",
                   "voimanosto": "Voimanosto", "olympia": "Olympianosto"}
+    plan_label = bp.get("name", plan_names.get(payload.plan, payload.plan))
     program = models.Program(
-        name=payload.name or f"{plan_names.get(payload.plan, payload.plan)} {days_n}x/vk",
+        name=payload.name or f"{plan_label} {days_n}x/vk",
         profile_id=payload.profile_id, schedule_type="weekly",
         goal=bp["goal"], description=bp["guidance"], is_active=True,
     )
