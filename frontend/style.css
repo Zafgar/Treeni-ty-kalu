@@ -536,3 +536,14 @@ input[id$="-search"] { width: 100%; margin-bottom: 8px; }
   border-radius: var(--radius-sm); padding: 12px 14px;
 }
 .recovery-panel canvas { width: 100%; height: auto; margin-top: 8px; display: block; }
+
+/* --- Treenin jälkianalyysi (painojen vahvistus) --- */
+.review-card .review-item { transition: opacity 0.25s ease; }
+.review-card .review-item.done { opacity: 0.7; padding-top: 8px; padding-bottom: 8px; }
+.review-card .review-item .btn-row { flex-wrap: wrap; gap: 6px; }
+.review-complete {
+  margin-top: 10px; padding: 12px 14px; border-radius: var(--radius-sm);
+  background: rgba(52, 211, 153, 0.12); border: 1px solid var(--accent-2);
+  display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap;
+}
+.review-complete strong { color: var(--accent-2-hi); }

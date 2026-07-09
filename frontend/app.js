@@ -649,41 +649,101 @@ async function renderWorkoutReview(id) {
   try { data = await api.get(`/api/workouts/${id}/review`); } catch { return; }
   const rows = (data.exercises || []).filter((e) => e.reason || e.compare);
   if (!rows.length) return;
-  const card = el("div", { class: "card", style: "border-color:var(--accent)" },
-    el("h3", { style: "margin-top:0" }, "🎯 Treenin analyysi & seuraava kerta"));
+
+  const card = el("div", { class: "card review-card", style: "border-color:var(--accent)" });
+  const progress = el("span", { class: "muted", style: "font-size:0.85rem" });
+  card.append(el("div", { class: "row-between", style: "align-items:baseline" },
+    el("h3", { style: "margin:0" }, "🎯 Seuraava kerta — vahvista painot"),
+    progress));
+  const list = el("div", {});
+  const footer = el("div", {});
+  card.append(list, footer);
+  box.append(card);
+
+  // Vain ne rivit joissa on valinta (korotus/lasku) vaativat päätöksen.
+  let pending = 0, totalActions = 0;
+
+  function updateProgress() {
+    if (!totalActions) { progress.textContent = ""; return; }
+    progress.textContent = `${totalActions - pending}/${totalActions} valittu`;
+    if (pending === 0) finish();
+  }
+
+  function finish() {
+    footer.innerHTML = "";
+    const banner = el("div", { class: "review-complete" },
+      el("strong", {}, "✓ Kaikki painot vahvistettu — treeni valmis!"),
+      el("button", { class: "small", onclick: () => {
+        document.getElementById("workout-editor").classList.add("hidden");
+      } }, "Sulje treeni"));
+    footer.append(banner);
+    // Sulje treeni pehmeästi hetken kuluttua (käyttäjä ehtii nähdä kuittauksen).
+    setTimeout(() => {
+      const ed = document.getElementById("workout-editor");
+      if (ed && document.body.contains(banner)) ed.classList.add("hidden");
+    }, 1800);
+  }
+
   rows.forEach((e) => {
+    const actionable = (e.ask_increase || e.ask_reduce) && e.suggested_weight != null;
     const tone = e.ask_reduce ? "var(--danger)" : e.ask_increase ? "var(--accent-2)" : "var(--muted)";
-    const item = el("div", { class: "item", style: `border-left:3px solid ${tone}` },
-      el("div", { class: "row-between" },
-        el("strong", {}, e.exercise_name),
-        el("span", { class: "muted" }, `${e.top_weight} kg · ${e.reps_at_top.join(", ")}`)));
+    const item = el("div", { class: "item review-item", style: `border-left:3px solid ${tone}` });
+    const head = el("div", { class: "row-between" },
+      el("strong", {}, e.exercise_name),
+      el("span", { class: "muted" }, `${e.top_weight} kg · ${e.reps_at_top.join(", ")}`));
+    item.append(head);
     if (e.compare) item.append(el("div", { class: "muted", style: "margin-top:3px" }, "↔ " + e.compare));
     if (e.reason) item.append(el("div", { style: `margin-top:3px;color:${tone}` }, e.reason));
-    // Korotus/lasku: kysy ja tallenna ohjelman painoksi seuraavaa kertaa varten
-    if ((e.ask_increase || e.ask_reduce) && e.suggested_weight != null) {
-      const btnLabel = e.ask_increase ? `Korota → ${e.suggested_weight} kg ensi kerraksi`
-                                       : `Laske → ${e.suggested_weight} kg ensi kerraksi`;
-      const row = el("div", { class: "btn-row", style: "margin-top:6px" });
-      const applyBtn = el("button", { class: "small " + (e.ask_increase ? "success" : "primary"),
-        onclick: async () => {
-          if (!e.can_apply) { alert("Tämä liike ei ole ohjelmasta — muista uusi paino itse ensi kerralla."); return; }
-          await api.post(`/api/workouts/exercises/${e.workout_exercise_id}/apply-weight?weight=${e.suggested_weight}`);
-          applyBtn.textContent = "✓ Asetettu ensi kerraksi";
-          applyBtn.disabled = true; keepBtn.disabled = true;
-        } }, btnLabel);
-      // "Älä muuta": pidä nykyinen paino ennallaan (ei pakoteta muutosta)
-      const keepBtn = el("button", { class: "small",
-        onclick: () => { keepBtn.textContent = `✓ Pidetään ${e.top_weight} kg`; keepBtn.disabled = true; applyBtn.disabled = true; } },
-        `Älä muuta (pidä ${e.top_weight} kg)`);
-      row.append(applyBtn, keepBtn);
-      item.append(row);
-      if (!e.can_apply)
-        item.append(el("div", { class: "muted", style: "font-size:0.8em;margin-top:3px" },
-          "(vapaa treeni — paino muistetaan silti viime kerrasta)"));
+
+    // Rivi käsitelty -> supistuu yhden rivin kuittaukseksi ("häviää" listasta).
+    function resolve(msg) {
+      item.classList.add("done");
+      item.innerHTML = "";
+      item.append(el("div", { class: "row-between" },
+        el("span", { style: "color:var(--muted)" }, e.exercise_name),
+        el("span", { style: "color:var(--accent-2)" }, "✓ " + msg)));
+      if (actionable) { pending--; updateProgress(); }
     }
-    card.append(item);
+
+    if (actionable) {
+      totalActions++; pending++;
+      const verb = e.ask_increase ? "Korota" : "Laske";
+      const applyBtn = el("button", { class: "small " + (e.ask_increase ? "success" : "primary"),
+        onclick: async () => { await setNext(e.suggested_weight); } },
+        `${verb} → ${e.suggested_weight} kg`);
+      // Oma paino: valitse itse mihin korotat/lasket (esitäyttö = ehdotus)
+      const custom = el("input", { type: "number", step: "0.5", value: e.suggested_weight,
+        style: "width:78px", title: "Valitse oma paino ensi kerraksi" });
+      const customBtn = el("button", { class: "small",
+        onclick: async () => {
+          const w = parseFloat(custom.value);
+          if (!(w > 0)) return;
+          await setNext(w);
+        } }, "Aseta oma");
+      const keepBtn = el("button", { class: "small",
+        onclick: () => resolve(`pidetään ${e.top_weight} kg`) }, "Pidä ennallaan");
+
+      async function setNext(w) {
+        if (e.can_apply) {
+          try { await api.post(`/api/workouts/exercises/${e.workout_exercise_id}/apply-weight?weight=${w}`); }
+          catch (err) { alert(err.message); return; }
+          resolve(`ensi kerraksi ${w} kg`);
+        } else {
+          // Vapaa treeni: ei ohjelmaa johon tallentaa, mutta paino muistetaan
+          // viime kerrasta -> kuitataan visuaalisesti.
+          resolve(`ensi kerraksi ${w} kg (muistetaan viime kerrasta)`);
+        }
+      }
+
+      item.append(el("div", { class: "btn-row", style: "margin-top:6px;align-items:center" },
+        applyBtn,
+        el("span", { class: "muted", style: "font-size:0.8rem" }, "tai"),
+        custom, el("span", { class: "muted", style: "font-size:0.8rem" }, "kg"), customBtn,
+        keepBtn));
+    }
+    list.append(item);
   });
-  box.append(card);
+  updateProgress();
 }
 
 async function openWorkoutEditor(id) {
