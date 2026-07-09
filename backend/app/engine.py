@@ -681,6 +681,60 @@ def _linear_rate(points: list[tuple]) -> float:
     return sum((xs[i] - mx) * (ys[i] - my) for i in range(n)) / denom
 
 
+def _robust_rate(points: list[tuple]) -> float:
+    """Theil–Sen-kulmakerroin: kaikkien pisteparien kulmakertoimien mediaani
+    (y-yksikköä / päivä). Toisin kuin OLS (pienimmän neliösumman) sovitus, tämä
+    on robusti yksittäisille poikkeaville treenipäiville — yksi hyvä tai huono
+    päivä ei kallista koko trendiä. Käyttää kaikkia datapisteitä (jokaista paria),
+    joten se katsoo koko historian eikä vain päätepisteitä."""
+    n = len(points)
+    if n < 2:
+        return 0.0
+    slopes = []
+    for i in range(n):
+        xi, yi = points[i]
+        for j in range(i + 1, n):
+            xj, yj = points[j]
+            dx = xj - xi
+            if dx > 0:
+                slopes.append((yj - yi) / dx)
+    if not slopes:
+        return 0.0
+    return _median(slopes)
+
+
+def _plateau_damp(points: list[tuple], rate_per_day: float) -> float:
+    """Vaimennuskerroin 0–1: kuinka selvä trendi on treenistä-treeniin -kohinaan
+    nähden. Jos mallinnettu kokonaismuutos ikkunan aikana on pieni tyypilliseen
+    session-vaihteluun verrattuna (esim. sama paino usealla kerralla, toistot
+    heiluvat), trendi tulkitaan tasanteeksi ja vaimennetaan kohti nollaa. Näin
+    ei ennusteta systemaattista nousua kun kehitys on tosiasiassa tasaantunut.
+    Aito nouseva kehitys (toistot tai painot kasvavat johdonmukaisesti) tuottaa
+    signaalin selvästi yli kohinan, jolloin vaimennusta ei juuri tule."""
+    n = len(points)
+    if n < 4:
+        return 1.0  # liian vähän dataa kohinan arviointiin -> ei vaimenneta
+    span = points[-1][0] - points[0][0]
+    signal = abs(rate_per_day) * span            # mallinnettu kokonaismuutos ikkunassa
+    if signal <= 0:
+        return 1.0
+    diffs = [abs(points[i + 1][1] - points[i][1]) for i in range(n - 1)]
+    noise = _median(diffs)                        # tyypillinen treenistä-treeniin vaihtelu
+    if noise <= 0:
+        return 1.0
+    return max(0.0, min(1.0, signal / (signal + 1.2 * noise)))
+
+
+def _forecast_rate_per_day(points: list[tuple]) -> float:
+    """Ennusteessa käytetty päivätahti: robusti trendi (Theil–Sen) tasanne-
+    vaimennuksella, ei koskaan negatiivinen (ei ennusteta laskua). Yhteinen
+    sekä varsinaiselle ennusteelle että taustatestin kalibroinnille, jotta ne
+    pysyvät johdonmukaisina."""
+    r = _robust_rate(points)
+    r *= _plateau_damp(points, r)
+    return max(0.0, r)
+
+
 def forecast_confidence(n_points: int, span_days: int) -> float:
     """Ennusteen luottamus 0–1 datan määrästä ja kestosta. Mitä enemmän
     treenikertoja ja pidempi seurantajakso, sitä kapeampi haarukka."""
@@ -723,7 +777,7 @@ def backtest_forecast(history: list[tuple]) -> dict:
         hist = pts[:i]
         last_day, last_v = hist[-1]
         recent = [p for p in hist if p[0] >= last_day - 84] or hist
-        rate = max(0.0, _linear_rate(recent))  # per päivä, siihenastisesta datasta
+        rate = _forecast_rate_per_day(recent)  # per päivä, siihenastisesta datasta
         adx, adv = pts[i]
         dt = adx - last_day
         if dt <= 0:
@@ -768,10 +822,12 @@ def forecast_progress(
     valid.sort(key=lambda p: p[0])
     base_date = valid[0][0]
     pts = [((d - base_date).days, v) for d, v in valid]
-    # Käytä korkeintaan viimeistä ~84 päivää tahdin arviointiin
+    # Käytä korkeintaan viimeistä ~84 päivää tahdin arviointiin. Robusti trendi
+    # + tasannevaimennus: usea kerta samalla painolla ei tuota systemaattista
+    # nousuennustetta, mutta aito toisto-/painokehitys näkyy silti.
     last_day = pts[-1][0]
     recent = [p for p in pts if p[0] >= last_day - 84] or pts
-    rate_per_day = max(0.0, _linear_rate(recent))  # ei ennusteta laskua
+    rate_per_day = _forecast_rate_per_day(recent)  # ei ennusteta laskua
     # Kalibrointi: aiemman osuvuuden mukaan (jos ennusteet ovat aliarvioineet
     # -> nostetaan tahtia, jos yliarvioineet -> lasketaan). Rajattu maltilliseksi.
     rate_per_week = rate_per_day * 7 * max(0.6, min(1.4, rate_calibration))

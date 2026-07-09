@@ -1030,6 +1030,41 @@ EXTRA_FOODS += [
 ]
 
 
+# --- Valmiit proteiinituotteet (merkkituotteet) --------------------------
+# Arvot per 100 g / 100 ml, oletusannos = tyypillinen pakkaus. Merkkien arvot
+# vaihtelevat mauittain hieman; nämä ovat edustavia keskiarvoja.
+EXTRA_FOODS += [
+    # Valio PROfeel
+    ("Valio PROfeel proteiinirahka", "proteiinituotteet", 66, 11, 4.5, 0.2, 200),
+    ("Valio PROfeel proteiinivanukas", "proteiinituotteet", 78, 10, 7, 0.9, 180),
+    ("Valio PROfeel proteiinijuoma (2,5 dl)", "proteiinituotteet", 40, 8, 2.5, 0.2, 250),
+    ("Valio PROfeel proteiinijuoma (4 dl)", "proteiinituotteet", 40, 8, 2.5, 0.2, 400),
+    ("Valio PROfeel proteiinijogurtti", "proteiinituotteet", 61, 8, 5.5, 0.2, 175),
+    ("Valio PROfeel proteiinipatukka", "proteiinituotteet", 340, 32, 34, 9, 60),
+    ("Valio PROfeel proteiinijäätelöpuikko", "proteiinituotteet", 150, 8, 18, 5, 70),
+    ("Valio PROfeel proteiinivälipala (lusikoitava)", "proteiinituotteet", 85, 9, 9, 1.5, 150),
+    # Arla Protein
+    ("Arla Protein rahka", "proteiinituotteet", 66, 11, 4, 0.2, 200),
+    ("Arla Protein vanukas", "proteiinituotteet", 75, 10, 6, 1, 200),
+    ("Arla Protein juoma", "proteiinituotteet", 40, 8, 3, 0.2, 250),
+    ("Arla Protein välipalapatukka", "proteiinituotteet", 350, 30, 36, 9, 55),
+    # Muut suositut valmistuotteet
+    ("PROpud proteiinivanukas", "proteiinituotteet", 90, 10, 4.5, 3.5, 200),
+    ("Barebells proteiinipatukka", "proteiinituotteet", 364, 36, 30, 16, 55),
+    ("Barebells proteiinimilkshake", "proteiinituotteet", 55, 8, 3.5, 1.5, 330),
+    ("Nick's proteiinipatukka", "proteiinituotteet", 350, 30, 40, 12, 50),
+    ("Gainomax proteiinijuoma", "proteiinituotteet", 70, 9, 6, 0.9, 250),
+    ("Gainomax proteiinipatukka", "proteiinituotteet", 400, 25, 42, 14, 60),
+    ("Leader Protein vanukas", "proteiinituotteet", 80, 10, 7, 1.5, 200),
+    ("Leader Protein patukka", "proteiinituotteet", 340, 33, 33, 9, 61),
+    ("FAST proteiinipatukka", "proteiinituotteet", 350, 33, 32, 10, 55),
+    ("FAST Flapjack (kaurapatukka)", "proteiinituotteet", 400, 20, 45, 15, 100),
+    ("Kvarg proteiinirahka (Lidl)", "proteiinituotteet", 60, 10, 4, 0.2, 200),
+    ("NOCCO (BCAA-juoma, 0,33 l)", "proteiinituotteet", 5, 0, 0.4, 0, 330),
+    ("Optimum Nutrition Gold Standard (whey)", "proteiinijauheet", 375, 78, 8, 6, 30),
+]
+
+
 def ensure_extra_foods():
     """Lisää puuttuvat ruoat kirjastoon (idempotentti — myös vanhat kannat
     saavat uudet ruoat ilman uudelleenluontia)."""

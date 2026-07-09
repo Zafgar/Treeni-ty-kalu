@@ -732,3 +732,52 @@ def test_set_review_increase_then_decline_is_normal():
     # 7) Liian iso korotus joka romahti (5,4,3,3, tavoite 8) -> REDUCE + palaa-vinkki
     r7 = E.set_performance_review(S(105, [5, 4, 3, 3]), 8, inc, {"weight": 100, "reps": 8}, 32)
     assert r7["verdict"] == "reduce"
+
+
+def test_forecast_plateau_is_flat_but_credits_real_progress():
+    """Käyttäjän ongelma: usea kerta samalla painolla EI saa tuottaa
+    systemaattista nousuennustetta, mutta aito toisto-/painokehitys pitää nähdä."""
+    from datetime import date, timedelta
+    from app import engine as E
+    base = date(2025, 1, 1)
+
+    def hist(vals):
+        return [(base + timedelta(days=i * 7), v) for i, v in enumerate(vals)]
+
+    def y1(vals):
+        h = hist(vals)
+        conf = E.forecast_confidence(len(h), (h[-1][0] - h[0][0]).days)
+        bt = E.backtest_forecast(h)
+        fc = E.forecast_progress(h, 52, ceiling=None, confidence=conf,
+                                 rate_calibration=bt["rate_ratio"], error_scale=bt["error_scale"])
+        return h[-1][1], fc[-1]["mid"]
+
+    def e(w, reps, rir=1):
+        return round(E.estimate_1rm(w, reps, rir), 1)
+
+    # Tasanne: sama paino, toistot heiluvat 3-5 -> ennuste käytännössä tasainen
+    plateau = [e(100, 4), e(100, 3), e(100, 5), e(100, 4), e(100, 4),
+               e(100, 3), e(100, 5), e(100, 4), e(100, 4), e(100, 5)]
+    cur, fut = y1(plateau)
+    assert abs(fut - cur) <= 2.0, f"tasanne ei saa nousta systemaattisesti: {cur}->{fut}"
+
+    # Yksi hyvä päivä tasanteen lopussa ei saa laukaista vuoden nousua
+    spike = plateau[:-1] + [e(100, 7)]
+    cur, fut = y1(spike)
+    assert abs(fut - cur) <= 2.0, f"yksi piikki ei saa tuottaa nousuennustetta: {cur}->{fut}"
+
+    # Aito toistokehitys (3->7) -> ennusteen pitää nousta selvästi
+    prog = [e(100, 3), e(100, 3), e(100, 4), e(100, 4), e(100, 5),
+            e(100, 5), e(100, 6), e(100, 6), e(100, 7), e(100, 7)]
+    cur, fut = y1(prog)
+    assert fut - cur >= 4.0, f"aito toistokehitys pitää nähdä nousuna: {cur}->{fut}"
+
+
+def test_robust_rate_ignores_single_outlier():
+    from app import engine as E
+    # Tasainen data + yksi iso poikkeama -> robusti tahti pysyy lähellä nollaa
+    flat = [(i * 7, 100.0) for i in range(8)]
+    flat_spike = flat[:-1] + [(49, 130.0)]
+    assert abs(E._robust_rate(flat_spike)) < 0.05
+    # OLS reagoi poikkeamaan selvästi enemmän (osoittaa miksi robusti on parempi)
+    assert E._linear_rate(flat_spike) > E._robust_rate(flat_spike)
