@@ -816,3 +816,43 @@ def test_acwr_consistent_training_not_constant_spike(client):
     # Tasaisella kuormalla suhteen pitää olla lähellä 1.0, ei piikissä
     assert 0.7 <= acwr <= 1.35, f"tasainen treeni antoi ACWR {acwr} (pitäisi olla ~1.0)"
     assert r["deload_recommended"] is False, "tasainen treeni ei saa laukaista kevennystä"
+
+
+def test_measurement_guidance_and_strength_link(client):
+    import datetime
+    today = datetime.date.today()
+    p = client.post("/api/profiles", json={"name": "Mittari", "sex": "mies", "height_cm": 180}).json()
+    pid = p["id"]
+    # Ohje-endpoint
+    guide = client.get("/api/body/measurement-guide").json()
+    assert "general" in guide and "reisi" in guide["sites"] and guide["weight"]
+
+    # Yksittäinen/tiheä mittaus -> ei vielä trendiä (ei säikäytä)
+    client.post(f"/api/body/measurements?profile_id={pid}",
+                json={"entry_date": today.isoformat(), "site": "vyötärö", "value_cm": 90})
+    client.post(f"/api/body/measurements?profile_id={pid}",
+                json={"entry_date": (today - datetime.timedelta(days=2)).isoformat(), "site": "vyötärö", "value_cm": 89.6})
+    s = client.get(f"/api/body/summary?profile_id={pid}").json()
+    assert s["measurement_insights"]["vyötärö"]["reading"]["status"] == "need_more"
+
+    # Reisi kasvaa viikoittain 4 viikkoa + jalkavoima nousee -> lihaskasvu-yhteys
+    leg = client.post("/api/exercises", json={"name": "Jalkaprässi-testi", "category": "jalat"}).json()
+    for wk, (thigh, w) in enumerate([(56, 150), (56.8, 160), (57.5, 170), (58.2, 180)]):
+        d = (today - datetime.timedelta(days=(3 - wk) * 7)).isoformat()
+        client.post(f"/api/body/measurements?profile_id={pid}",
+                    json={"entry_date": d, "site": "reisi", "value_cm": thigh})
+        client.post("/api/workouts", json={"profile_id": pid, "session_date": d, "status": "completed",
+            "exercises": [{"exercise_id": leg["id"], "sets": [
+                {"set_index": i, "reps": 8, "weight": w, "completed": True} for i in range(3)]}]})
+    s = client.get(f"/api/body/summary?profile_id={pid}").json()
+    reisi = s["measurement_insights"]["reisi"]
+    assert reisi["reading"]["status"] == "up"
+    assert reisi["strength_link"] and "lihaskasv" in reisi["strength_link"].lower()
+
+    # Painon opastus: 7 pv keskiarvo + kohinaviesti
+    for i in range(6):
+        client.post(f"/api/body/entries?profile_id={pid}",
+                    json={"entry_date": (today - datetime.timedelta(days=i)).isoformat(), "bodyweight": 85 + (i % 2) * 0.4})
+    s = client.get(f"/api/body/summary?profile_id={pid}").json()
+    assert s["weight_guidance"]["avg7"] is not None
+    assert "keskiarvo" in s["weight_guidance"]["message"]

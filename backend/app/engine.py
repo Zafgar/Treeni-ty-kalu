@@ -1144,6 +1144,139 @@ def measurement_insight(site: str, rate_per_week: float | None, current: float |
     return "; ".join(notes)
 
 
+# ---- Mittausten luonnollinen heilahtelu, ohjeet ja voima-yhteys ----
+
+# Viikon sisäinen luonnollinen heilahtelu (neste, turvotus, ruoka, suolan
+# määrä, mittaustarkkuus). Tämän rajoissa oleva muutos EI ole todellinen
+# muutos vaan normaalia vaihtelua — siitä ei kannata säikähtää.
+MEASUREMENT_NOISE_CM = {
+    "vyötärö": 1.0, "lantio": 1.0, "reisi": 0.7, "rintakehä": 1.0, "hauis": 0.5,
+    "kyynärvarsi": 0.4, "forkku": 0.4, "pohje": 0.5, "hartia": 1.0, "kaula": 0.5,
+    "niska": 0.5,
+}
+WEIGHT_NOISE_KG = 1.3
+DEFAULT_MEAS_NOISE_CM = 0.7
+
+MEASUREMENT_GENERAL_GUIDE = (
+    "Mittaa kerran viikossa, mieluiten aamulla heti heräämisen jälkeen ennen syömistä ja "
+    "juomista (ja paino samalla). Ota nauha rennosti ihoa vasten, älä kiristä. Käytä joka "
+    "kerta samaa kohtaa, samaa asentoa ja samaa viikonpäivää/aikaa — vain silloin luvut ovat "
+    "vertailukelpoisia. Yksittäinen viikko voi heilahtaa; katso aina kokonaissuuntaa."
+)
+MEASUREMENT_SITE_GUIDE = {
+    "vyötärö": "Navan korkeudelta, vatsa rentona (älä vedä sisään äläkä pullista). Mittaa uloshengityksen jälkeen.",
+    "lantio": "Pakaroiden leveimmältä kohdalta, jalat yhdessä.",
+    "reisi": "Reiden paksuimmalta kohdalta ylhäältä, paino tasaisesti molemmilla jaloilla, lihas rentona.",
+    "rintakehä": "Rinnan/nännien korkeudelta, käsivarret rentoina sivuilla, normaali uloshengitys.",
+    "hauis": "Käsivarren paksuimmalta kohdalta — valitse rento TAI jännitetty ja pysy samassa tavassa joka kerta.",
+    "kyynärvarsi": "Kyynärvarren paksuimmalta kohdalta, käsi rentona alhaalla.",
+    "hartia": "Hartioiden ympäri leveimmältä kohdalta, kädet rentoina sivuilla.",
+    "pohje": "Pohkeen paksuimmalta kohdalta seisten, paino tasaisesti.",
+    "forkku": "Kyynärvarren paksuimmalta kohdalta.",
+    "kaula": "Kaulan ympäri kurkunpään alapuolelta, pää suorassa.",
+}
+
+# Mitta -> siihen vaikuttavat treenikategoriat (voiman ja koon yhteyttä varten).
+SITE_TRAINING_LINK = {
+    "reisi": ("jalkaliikkeet", ["jalat", "etureidet", "takareidet", "pakarat"]),
+    "hauis": ("hauis- ja käsivarsiliikkeet", ["hauis", "kädet"]),
+    "kyynärvarsi": ("käsivarsiliikkeet", ["kädet", "hauis"]),
+    "rintakehä": ("rinta- ja selkäliikkeet", ["rinta", "selkä"]),
+    "hartia": ("olkapää- ja selkäliikkeet", ["olkapäät", "selkä"]),
+    "pohje": ("pohjenostot", ["pohkeet", "pohje"]),
+}
+
+
+def measurement_reading(site: str, history: list[tuple]) -> dict | None:
+    """Kohina- ja kadenssitietoinen suunta-arvio yhdelle mitalle.
+
+    EI säikäytä yksittäisistä muutoksista:
+    - Alle ~10 pv jaksolla / alle 2 mittauksesta ei julisteta trendiä.
+    - Viikon sisäisen luonnollisen heilahtelun (neste/turvotus) rajoissa oleva
+      muutos merkitään normaaliksi vaihteluksi, ei todelliseksi muutokseksi.
+    - Suunta perustuu KOKO seurannan tahtiin, ei pelkkään viimeiseen lukemaan.
+    """
+    valid = sorted([(d, v) for d, v in history if v and v > 0], key=lambda p: p[0])
+    n = len(valid)
+    if n == 0:
+        return None
+    s = (site or "").lower()
+    noise = MEASUREMENT_NOISE_CM.get(s, DEFAULT_MEAS_NOISE_CM)
+    current = valid[-1][1]
+    first = valid[0][1]
+    span_days = (valid[-1][0] - valid[0][0]).days
+    prev = valid[-2][1] if n >= 2 else None
+    change_prev = round(current - prev, 1) if prev is not None else None
+    change_first = round(current - first, 1)
+    base = {
+        "n": n, "current": round(current, 1), "change_prev": change_prev,
+        "change_first": change_first, "noise_band": noise,
+        "weeks_tracked": round(span_days / 7.0, 1),
+    }
+
+    if n < 2 or span_days < 10:
+        base.update(status="need_more", within_noise=None, rate_per_week=None,
+                    message=("Kerää mittauksia noin viikon välein. Suunta selviää 2–3 "
+                             "mittauksen jälkeen — yksittäinen luku ei vielä kerro kehitystä."),
+                    reassure=None)
+        return base
+
+    rate = recent_rate_per_week(valid) or 0.0
+    within_noise = change_prev is not None and abs(change_prev) <= noise
+    real_change = abs(change_first) > noise and abs(rate) >= 0.03
+
+    if not real_change:
+        status = "stable"
+        msg = (f"Vakaa (~{round(current,1)} cm). Pientä viikkoheilahtelua (±{noise} cm) "
+               "tulee aina — se on normaalia, ei todellinen muutos.")
+    elif rate > 0:
+        status = "up"
+        msg = (f"Kasvaa noin {round(abs(rate),2)} cm/vk "
+               f"(yhteensä {'+' if change_first >= 0 else ''}{change_first} cm {base['weeks_tracked']} viikossa).")
+    else:
+        status = "down"
+        msg = (f"Pienenee noin {round(abs(rate),2)} cm/vk "
+               f"(yhteensä {change_first} cm {base['weeks_tracked']} viikossa).")
+
+    reassure = None
+    if within_noise and change_prev:
+        reassure = (f"Viimeisin muutos {'+' if change_prev >= 0 else ''}{change_prev} cm on normaalin "
+                    f"viikkoheilahtelun (±{noise} cm) rajoissa — usein nestettä tai turvotusta, ei syytä huoleen. "
+                    "Katso kokonaissuuntaa, ei yksittäistä viikkoa.")
+    base.update(status=status, within_noise=within_noise, rate_per_week=round(rate, 2),
+                message=msg, reassure=reassure)
+    return base
+
+
+def strength_measurement_link(site: str, meas_status: str, strength_pct_per_week: float | None,
+                              friendly: str) -> str | None:
+    """Yhdistä voiman kehitys ja ympärysmitan kehitys tulkinnaksi.
+
+    Esim. jalkavoima nousee JA reisi kasvaa -> todennäköisesti lihaskasvua.
+    Voima nousee mutta koko ei vielä -> hermostollista kehitystä, koko seuraa.
+    """
+    if strength_pct_per_week is None:
+        return None
+    stronger = strength_pct_per_week >= 0.3   # ~+0.3 %/vk = selvä voimakehitys
+    weaker = strength_pct_per_week <= -0.3
+    grew = meas_status == "up"
+    shrank = meas_status == "down"
+    stable = meas_status == "stable"
+    if grew and stronger:
+        return (f"{friendly.capitalize()} vahvistuvat (~+{strength_pct_per_week} %/vk) ja mitta kasvaa "
+                "samaan aikaan — vahva merkki lihaskasvusta juuri tällä alueella.")
+    if stable and stronger:
+        return (f"{friendly.capitalize()} vahvistuvat, mutta mitta ei vielä kasva — usein hermostollista "
+                "kehitystä (voima ennen kokoa). Koko seuraa yleensä perässä, kun jatkat.")
+    if grew and not stronger and not weaker:
+        return (f"Mitta kasvaa mutta {friendly} eivät juuri vahvistu — varmista että kasvu on lihasta "
+                "(riittävä proteiini/progressio); osa voi olla nestettä tai rasvaa.")
+    if shrank and weaker:
+        return (f"Sekä {friendly} että mitta laskevat — jos et ole tarkoituksella dieetillä, lisää "
+                "energiaa ja palautumista.")
+    return None
+
+
 def volume_verdict(sets_week: int, sets_prev: int) -> dict:
     """Arvioi lihasryhmän viikkovolyymi ja anna ehdotus.
 

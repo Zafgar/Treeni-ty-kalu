@@ -3058,20 +3058,64 @@ async function loadBody() {
   if (hasFc) legend.append(el("span", { class: "muted" }, " — katkoviiva = ennuste (oman datan trendistä)"));
   drawLineChart(document.getElementById("measure-chart"), series, { unit: "cm" });
 
-  // Tulkinnat (kasvu rasvaa/lihasta, vakaa dieetillä, lähellä kattoa…)
+  // Painon opastus (7 pv keskiarvo + luonnollinen heilahtelu, ei säikäytä)
+  renderWeightGuidance(s.weight_guidance);
+  // Mittausohjeet (haetaan kerran)
+  loadMeasureGuide();
+
+  // Tulkinnat per mitta: suunta (kohina-/kadenssitietoinen), rauhoitus ja
+  // voima–koko-yhteys (esim. reisi kasvaa + jalkavoima nousee = lihaskasvua).
   const ins = document.getElementById("measure-insights");
   ins.innerHTML = "";
   const insights = s.measurement_insights || {};
-  const rows = Object.entries(insights).filter(([, v]) => v.note || v.ceiling);
-  if (rows.length) {
-    rows.forEach(([site, v]) => {
-      const parts = [];
-      if (v.note) parts.push(v.note);
-      if (v.ceiling) parts.push(`arvioitu luonnollinen katto ~${v.ceiling} cm`);
-      ins.append(el("div", { class: "muted", style: "margin-top:4px" },
-        `${site}: ${parts.join(" · ")}`));
-    });
+  const rows = Object.entries(insights);
+  rows.forEach(([site, v]) => {
+    const r = v.reading;
+    const tone = r && r.status === "up" ? "var(--accent-2)"
+      : r && r.status === "down" ? "#f59e0b" : "var(--muted)";
+    const card = el("div", { class: "item", style: `margin-top:6px;border-left:3px solid ${tone}` },
+      el("div", { class: "row-between" },
+        el("strong", {}, site),
+        el("span", { class: "muted" }, r ? `${r.current} cm` : "")));
+    if (r) card.append(el("div", { style: `margin-top:3px;color:${tone}` }, r.message));
+    if (r && r.reassure) card.append(el("div", { class: "muted", style: "margin-top:3px;font-size:0.85em" }, "🌊 " + r.reassure));
+    if (v.strength_link) card.append(el("div", { style: "margin-top:3px;color:var(--accent);font-size:0.9em" }, "💪 " + v.strength_link));
+    if (v.note) card.append(el("div", { class: "muted", style: "margin-top:3px;font-size:0.85em" }, v.note));
+    if (v.ceiling) card.append(el("div", { class: "muted", style: "margin-top:2px;font-size:0.8em" }, `Arvioitu luonnollinen katto ~${v.ceiling} cm`));
+    ins.append(card);
+  });
+}
+
+function renderWeightGuidance(g) {
+  const div = document.getElementById("weight-guidance");
+  if (!div) return;
+  div.innerHTML = "";
+  if (!g) return;
+  const box = el("div", { class: "result-box", style: "text-align:left" });
+  if (g.avg7 != null) {
+    box.append(el("div", {}, el("strong", {}, `7 pv keskiarvo: ${g.avg7} kg`),
+      g.direction ? el("span", { class: "muted" }, ` · ${g.direction}`) : ""));
   }
+  box.append(el("div", { class: "muted", style: "margin-top:4px;font-size:0.85em" }, g.message));
+  div.append(box);
+}
+
+let _measureGuideLoaded = false;
+async function loadMeasureGuide() {
+  const body = document.getElementById("measure-guide-body");
+  if (!body || _measureGuideLoaded) return;
+  try {
+    const g = await api.get("/api/body/measurement-guide");
+    body.innerHTML = "";
+    body.append(el("p", { class: "muted", style: "margin:8px 0" }, g.general));
+    const ul = el("ul", { style: "margin:6px 0;padding-left:18px" });
+    Object.entries(g.sites).forEach(([site, txt]) =>
+      ul.append(el("li", { style: "margin:4px 0;color:var(--muted)" },
+        el("strong", { style: "color:var(--text)" }, site + ": "), txt)));
+    body.append(ul);
+    body.append(el("p", { class: "muted", style: "margin:6px 0;font-size:0.88em" }, "⚖ " + g.weight));
+    _measureGuideLoaded = true;
+  } catch (e) { /* ohje ei kriittinen */ }
 }
 
 document.getElementById("b-save").addEventListener("click", async () => {

@@ -202,6 +202,7 @@
         <p class="muted" style="margin:6px 0 0">Kalorit = koko päivän <strong>syödyt</strong> kalorit (ei treenin
           poltto — sen voit kirjata treenin tietoihin). Tämä auttaa arvioimaan tarpeesi tarkemmin.</p>
         <button id="b-save" class="success">Tallenna kehodata</button>
+        <div id="weight-guidance" style="margin-top:10px"></div>
       </div>
 
       <div class="card">
@@ -280,6 +281,12 @@
 
       <div class="card">
         <h3>Ympärysmitat (cm)</h3>
+        <details class="legend" id="measure-guide">
+          <summary><strong>📏 Näin mittaat oikein</strong> — milloin, miten ja mistä</summary>
+          <div id="measure-guide-body"></div>
+        </details>
+        <p class="muted" style="margin-top:8px">Mittaa <strong>kerran viikossa</strong>, aamulla.
+          Suunta selviää 2–3 mittauksen jälkeen — yksittäinen viikko voi heilahtaa.</p>
         <div class="grid">
           <label>Päivä<input id="m-date" type="date" /></label>
           <label>Kohta<input id="m-site" list="m-sites" placeholder="esim. hauis" />

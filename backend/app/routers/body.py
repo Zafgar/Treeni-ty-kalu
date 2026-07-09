@@ -12,6 +12,43 @@ from ..database import get_db
 router = APIRouter(prefix="/api/body", tags=["body"])
 
 
+def _area_strength_trend(db: Session, profile_id: int, categories: list[str]) -> float | None:
+    """Alueen voimakehitys prosenttia/viikko: mediaani liikkeiden arvioidun 1RM:n
+    normalisoidusta tahdista annetuissa kategorioissa. Skaalaton (median % ),
+    joten eri painoiset liikkeet (jalkaprässi vs. jalkakoukistus) vertautuvat.
+    Positiivinen = alue vahvistuu."""
+    from .stats import _exercise_session_points
+    exs = (db.query(models.Exercise)
+           .filter(models.Exercise.category.in_(categories)).all())
+    norm_rates = []
+    for ex in exs:
+        pts = _exercise_session_points(db, ex.id, profile_id)
+        hist = [(p["date"], p["estimated_1rm"]) for p in pts if p["estimated_1rm"] > 0]
+        if len(hist) < 2:
+            continue
+        rate = engine.recent_rate_per_week(hist)
+        cur = hist[-1][1]
+        if rate is not None and cur > 0:
+            norm_rates.append(rate / cur)
+    if not norm_rates:
+        return None
+    norm_rates.sort()
+    med = norm_rates[len(norm_rates) // 2]
+    return round(med * 100, 2)
+
+
+@router.get("/measurement-guide")
+def measurement_guide():
+    """Ohjeet mittaamiseen: milloin, miten ja mistä kohtaa mitataan."""
+    return {
+        "general": engine.MEASUREMENT_GENERAL_GUIDE,
+        "sites": engine.MEASUREMENT_SITE_GUIDE,
+        "cadence": "Kerran viikossa riittää — päivittäinen mittaus näyttää vain kohinaa.",
+        "weight": ("Punnitse aamulla vessakäynnin jälkeen, ennen syömistä. Käytä 7 päivän "
+                   "keskiarvoa: yksittäinen aamu voi heilahtaa 1–1,5 kg pelkästä nesteestä ja ruoasta."),
+    }
+
+
 # ---------- Päiväkohtainen kehodata ----------
 @router.get("/entries", response_model=list[schemas.BodyEntryOut])
 def list_entries(profile_id: int = Query(...), db: Session = Depends(get_db)):
@@ -201,11 +238,47 @@ def body_summary(profile_id: int = Query(...), db: Session = Depends(get_db)):
         rate = engine.recent_rate_per_week(hist)
         current = hist[-1][1]
         note = engine.measurement_insight(site, rate, current, ceiling, bw_trend, waist_trend)
-        if note or ceiling:
+        # Kohina-/kadenssitietoinen suunta (ei säikäytä yksittäisistä muutoksista)
+        reading = engine.measurement_reading(site, hist)
+        # Voima–koko-yhteys: vahvistuuko alue samalla kun mitta muuttuu?
+        strength_link = None
+        link = engine.SITE_TRAINING_LINK.get(site)
+        if link and reading and reading["status"] != "need_more":
+            friendly, cats = link
+            st = _area_strength_trend(db, profile_id, cats)
+            strength_link = engine.strength_measurement_link(site, reading["status"], st, friendly)
+        if note or ceiling or reading:
             measurement_insights[site] = {
                 "note": note, "ceiling": ceiling, "current": current,
                 "rate_per_week": round(rate, 2) if rate is not None else None,
+                "reading": reading, "strength_link": strength_link,
             }
+
+    # Painon opastus: 7 pv keskiarvo + luonnollinen heilahtelu (ei säikäytetä
+    # yksittäisestä aamupainosta) + suunta vasta kun dataa on tarpeeksi.
+    weight_guidance = None
+    if weight_hist:
+        wsorted = sorted(weight_hist, key=lambda p: p[0])
+        latest_date = wsorted[-1][0]
+        avg7 = engine.weekly_average(wsorted, latest_date, 7)
+        n_w = len(wsorted)
+        direction = None
+        if bw_trend is not None and n_w >= 4:
+            if abs(bw_trend) < 0.1:
+                direction = "vakaa"
+            elif bw_trend > 0:
+                direction = f"nousee ~{round(bw_trend, 2)} kg/vk"
+            else:
+                direction = f"laskee ~{round(abs(bw_trend), 2)} kg/vk"
+        weight_guidance = {
+            "avg7": avg7, "latest": round(wsorted[-1][1], 1),
+            "trend_kg_per_week": round(bw_trend, 2) if bw_trend is not None else None,
+            "noise_band_kg": engine.WEIGHT_NOISE_KG, "direction": direction,
+            "enough_data": n_w >= 4,
+            "message": ("Seuraa 7 päivän keskiarvoa, ei yksittäistä aamua. Paino voi heilahtaa "
+                        f"±{engine.WEIGHT_NOISE_KG} kg pelkästä nesteestä, suolasta ja ruoasta — se ei ole rasvaa. "
+                        "Punnitse aamulla vessakäynnin jälkeen, ennen syömistä."),
+        }
 
     return {
         "weight_series": weight_series,
@@ -218,6 +291,7 @@ def body_summary(profile_id: int = Query(...), db: Session = Depends(get_db)):
         "measurement_sites": by_site,
         "measurement_forecasts": measurement_forecasts,
         "measurement_insights": measurement_insights,
+        "weight_guidance": weight_guidance,
     }
 
 
