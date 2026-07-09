@@ -1859,10 +1859,22 @@ function initials(name) {
 async function loadProfiles() {
   profilesCache = await api.get("/api/profiles");
   if (!profilesCache.length) return;
+  // Muista viimeksi käytetty profiili: avaa se ensin (jos yhä olemassa eikä
+  // roolilukko ole jo valinnut profiilia).
+  if (currentProfileId == null) {
+    const saved = +localStorage.getItem("lastProfileId");
+    if (saved && profilesCache.some((p) => p.id === saved)) currentProfileId = saved;
+  }
   if (currentProfileId == null || !profilesCache.some((p) => p.id === currentProfileId)) {
     currentProfileId = profilesCache[0].id;
   }
   renderProfileSwitch();
+}
+
+// Aseta aktiivinen profiili ja muista se seuraavaa avausta varten.
+function setActiveProfile(id) {
+  currentProfileId = id;
+  if (id != null) localStorage.setItem("lastProfileId", String(id));
 }
 
 function renderProfileSwitch() {
@@ -1883,7 +1895,7 @@ function renderProfileSwitch() {
 }
 
 document.getElementById("profile-select").addEventListener("change", async (e) => {
-  currentProfileId = +e.target.value;
+  setActiveProfile(+e.target.value);
   renderProfileSwitch();
   await refreshActiveTab();
 });
@@ -2330,7 +2342,7 @@ async function loadProfilesTab() {
           el("strong", {}, p.name + (isCurrent ? " (aktiivinen)" : ""))),
         el("div", { class: "btn-row" },
           isCurrent ? "" : el("button", { class: "small primary", onclick: async () => {
-            currentProfileId = p.id; renderProfileSwitch(); await refreshActiveTab(); loadProfilesTab();
+            setActiveProfile(p.id); renderProfileSwitch(); await refreshActiveTab(); loadProfilesTab();
           } }, "Valitse"),
           el("button", { class: "small", onclick: () => openProfileForm(p) }, "Muokkaa"),
           el("button", { class: "small danger", onclick: async () => {
@@ -2412,7 +2424,7 @@ function openProfileForm(existing) {
           await api.patch(`/api/profiles/${existing.id}`, payload);
         } else {
           const p = await api.post("/api/profiles", payload);
-          currentProfileId = p.id;
+          setActiveProfile(p.id);
         }
         form.classList.add("hidden");
         await loadProfiles(); renderProfileSwitch(); loadProfilesTab(); await refreshActiveTab();
@@ -3197,9 +3209,11 @@ async function renderDayLog() {
         el("span", { class: "muted" }, ` (${a.days_logged} kirjattua pv)`)),
       el("div", { class: "muted" }, `Proteiini ${Math.round(a.protein_g)} g · hiilarit ${Math.round(a.carbs_g)} g · rasva ${Math.round(a.fat_g)} g — tämä on vakain kuva`)));
   }
+  let dietTargets = null;
   try {
     const diet = await api.get(pq("/api/diet/status"));
     if (diet.targets) {
+      dietTargets = diet.targets;
       const tgt = diet.targets.kcal;
       // Vertaa ENSISIJAISESTI 7 pv keskiarvoon jos dataa on — yksittäinen
       // päivä ei kerro liikaa/liian vähän, useamman päivän tahti kertoo.
@@ -3244,21 +3258,59 @@ async function renderDayLog() {
           el("button", { class: "small danger", onclick: async () => { await api.del(`/api/nutrition/logs/${l.id}`); renderDayLog(); } }, "x")))));
   });
 
-  // Makrograafi (kcal + P/C/F ajan yli)
-  const tl = s.timeline;
-  const legend = document.getElementById("macro-legend");
-  legend.innerHTML = "";
-  const macroSeries = [
-    ["kcal", "kcal", CHART_COLORS[0]], ["protein_g", "Proteiini", CHART_COLORS[1]],
-    ["carbs_g", "Hiilarit", CHART_COLORS[2]], ["fat_g", "Rasva", CHART_COLORS[3]],
-  ];
-  const series = macroSeries.map(([key, label, color]) => {
-    legend.append(el("span", { class: "tag", style: `color:${color};border-color:${color}` }, label));
-    return { name: label, color, points: tl.map((p) => ({ x: new Date(p.date).getTime(), y: p[key] })) };
-  });
-  // Normalisoi 0–100 jotta eri mittakaavat näkyvät samassa
-  drawLineChart(document.getElementById("intake-chart"),
-    series.map((s) => ({ ...s, points: normalize01to100(s.points) })), {});
+  // Kalorit & makrot omissa paneeleissaan (oikeat yksiköt, ei normalisointia)
+  renderIntakePanels(s.timeline, dietTargets);
+}
+
+// Kalorit ja makrot erillisiin paneeleihin: kalorit omalla asteikolla (+ tavoite
+// katkoviivana), makrot grammoina samassa paneelissa (sama yksikkö -> vertailtava).
+function renderIntakePanels(timeline, targets) {
+  const wrap = document.getElementById("intake-panels");
+  if (!wrap) return;
+  wrap.innerHTML = "";
+  if (!timeline || timeline.length < 2) {
+    wrap.append(el("p", { class: "muted" }, "Kirjaa ruokaa muutamana päivänä, niin kehitys näkyy tässä."));
+    return;
+  }
+  const xs = timeline.map((p) => new Date(p.date).getTime());
+  const x0 = Math.min(...xs), x1 = Math.max(...xs);
+  const targetLine = (val) => (val ? { name: "tavoite", dashed: true, color: "#9aa3b2",
+    points: [{ x: x0, y: val }, { x: x1, y: val }] } : null);
+
+  // Paneeli 1: kalorit (+ tavoite jos dieetti käytössä)
+  const kcalPanel = el("div", { class: "recovery-panel" });
+  kcalPanel.append(el("div", { class: "row-between", style: "align-items:baseline" },
+    el("strong", {}, "Kalorit"),
+    el("span", { class: "muted", style: "font-size:0.8rem" },
+      targets && targets.kcal ? `tavoite ${Math.round(targets.kcal)} kcal/pv` : "kcal/pv")));
+  const kcalCanvas = el("canvas", { width: 820, height: 150 });
+  kcalPanel.append(kcalCanvas);
+  wrap.append(kcalPanel);
+  const kcalSeries = [{ name: "Kalorit", color: CHART_COLORS[0],
+    points: timeline.map((p) => ({ x: new Date(p.date).getTime(), y: p.kcal })) }];
+  const kt = targetLine(targets && targets.kcal);
+  if (kt) kcalSeries.push(kt);
+  // Ei yksikköä akselille: "2400 kcal" ei mahdu kapeaan marginaaliin ja
+  // otsikko kertoo jo yksikön. Pelkkä luku (2400) pysyy luettavana.
+  drawLineChart(kcalCanvas, kcalSeries, {});
+
+  // Paneeli 2: makrot grammoina (proteiini/hiilarit/rasva, sama yksikkö)
+  const macroPanel = el("div", { class: "recovery-panel" });
+  const legend = el("div", { class: "btn-row" });
+  const macros = [["protein_g", "Proteiini", CHART_COLORS[1]],
+                  ["carbs_g", "Hiilarit", CHART_COLORS[2]], ["fat_g", "Rasva", CHART_COLORS[3]]];
+  macros.forEach(([k, label, color]) =>
+    legend.append(el("span", { class: "tag", style: `color:${color};border-color:${color}` }, label)));
+  macroPanel.append(el("div", { class: "row-between", style: "align-items:baseline;flex-wrap:wrap;gap:6px" },
+    el("strong", {}, "Makrot (g)"), legend));
+  const macroCanvas = el("canvas", { width: 820, height: 150 });
+  macroPanel.append(macroCanvas);
+  wrap.append(macroPanel);
+  const macroSeries = macros.map(([k, label, color]) => ({ name: label, color,
+    points: timeline.map((p) => ({ x: new Date(p.date).getTime(), y: p[k] })) }));
+  const pt = targetLine(targets && targets.protein_g);
+  if (pt) { pt.name = "proteiinitavoite"; macroSeries.push(pt); }
+  drawLineChart(macroCanvas, macroSeries, { unit: "g" });
 }
 
 document.getElementById("n-date").addEventListener("change", renderDayLog);
@@ -3624,6 +3676,11 @@ async function loadReadiness() {
     div.append(el("div", { style: "margin-top:10px;padding:10px;border-radius:10px;background:rgba(239,68,68,0.12);border:1px solid #ef4444" },
       el("strong", { style: "color:#ef4444" }, "🛑 Kevennysviikko suositeltu"),
       el("div", { class: "muted", style: "margin-top:4px" }, r.deload_message)));
+  } else if (r.load_caution) {
+    // Kuorma nousi mutta palautuminen kunnossa -> huomautus, ei pakotettu kevennys
+    div.append(el("div", { style: "margin-top:10px;padding:10px;border-radius:10px;background:rgba(245,158,11,0.12);border:1px solid #f59e0b" },
+      el("strong", { style: "color:#f59e0b" }, "⚠ Kuorma nousi — seuraa tuntumaa"),
+      el("div", { class: "muted", style: "margin-top:4px" }, r.load_caution)));
   }
   // Tekijät
   const tbl = el("table", { style: "margin-top:8px" });

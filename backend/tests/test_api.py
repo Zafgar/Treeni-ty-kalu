@@ -791,3 +791,28 @@ def test_recovery_series_needs_more_data(client):
     hrv = next(p for p in s["panels"] if p["key"] == "hrv")
     assert hrv["band"] is None and hrv["enough_data"] is False
     assert "mittauksia" in (hrv["note"] or "")
+
+
+def test_acwr_consistent_training_not_constant_spike(client):
+    """Korjaus: tasainen treeni EI saa tuottaa jatkuvaa kuormapiikkiä. Aiemmin
+    krooninen jaettiin aina 4:llä vaikka historiaa oli vähemmän -> ACWR liian
+    korkea joka kerta ja jatkuva kevennyssuositus."""
+    import datetime
+    ex = client.post("/api/exercises", json={"name": "Kyykky"}).json()
+    today = datetime.date.today()
+    # ~3 viikkoa tasaista treeniä (juuri se tilanne jossa vanha koodi hajosi:
+    # krooninen ikkuna [7,35) ei ole vielä täysi, mutta se jaettiin silti 4:llä
+    # -> krooninen aliarvioitui -> ACWR ~1.7 -> jatkuva kuormapiikki/kevennys).
+    for d in (0, 2, 4, 7, 9, 11, 14, 16, 18, 21):
+        day = today - datetime.timedelta(days=d)
+        client.post("/api/workouts", json={
+            "profile_id": 1, "session_date": day.isoformat(), "status": "completed",
+            "exercises": [{"exercise_id": ex["id"], "sets": [
+                {"set_index": i, "reps": 5, "weight": 100, "completed": True} for i in range(5)]}],
+        })
+    r = client.get("/api/recovery/readiness?profile_id=1").json()
+    acwr = r["acwr"]["acwr"]
+    assert acwr is not None, "ACWR pitäisi laskea 3 viikon historialla"
+    # Tasaisella kuormalla suhteen pitää olla lähellä 1.0, ei piikissä
+    assert 0.7 <= acwr <= 1.35, f"tasainen treeni antoi ACWR {acwr} (pitäisi olla ~1.0)"
+    assert r["deload_recommended"] is False, "tasainen treeni ei saa laukaista kevennystä"

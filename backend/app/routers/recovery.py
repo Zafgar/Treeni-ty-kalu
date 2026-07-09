@@ -134,13 +134,17 @@ def readiness(profile_id: int = Query(...), db: Session = Depends(get_db)):
         return load
 
     acute = load_in(0, 7)
-    # Krooninen = EDELTÄVIEN 4 viikon keskiarvo (pv 7-35), EI sisällä akuuttia
-    # viikkoa — muuten piikki laimentaisi omaa vertailutasoaan. Lisäksi ACWR
-    # lasketaan vasta kun historiaa on vähintään ~3 viikkoa: muuten uusi
-    # käyttäjä saisi aina "kuormapiikin" koska vertailujakso on tyhjä.
+    # Krooninen = EDELTÄVIEN viikkojen viikkokeskiarvo (pv 7-35), EI sisällä
+    # akuuttia viikkoa — muuten piikki laimentaisi omaa vertailutasoaan.
+    # TÄRKEÄÄ: normalisoidaan sen mukaan kuinka monta viikkoa dataa ikkunassa
+    # OIKEASTI on. Ilman tätä uudehko käyttäjä (esim. 3-4 vk historiaa) sai
+    # jatkuvan "kuormapiikin", koska kokonaiskuorma jaettiin aina neljällä
+    # vaikka dataa oli vain pari viikkoa -> krooninen aliarvioitui -> ACWR liian
+    # korkea joka kerta.
     all_dates = ([s.session_date for s in workouts] + [c.session_date for c in cardio])
     history_days = max(((today - d).days for d in all_dates), default=0)
-    chronic4 = load_in(7, 35) / 4.0
+    chronic_weeks = max(0.0, min(28, history_days - 7)) / 7.0  # katettu osuus ikkunasta [7,35)
+    chronic4 = load_in(7, 35) / chronic_weeks if chronic_weeks >= 1.0 else 0.0
     acwr_info = None
     if history_days >= 21 and chronic4 > 0:
         acwr_info = engine.acwr_status(acute, chronic4)
@@ -185,15 +189,27 @@ def readiness(profile_id: int = Query(...), db: Session = Depends(get_db)):
     result["care_sessions_week"] = care_n
     result["has_data"] = bool(result["factors"])
 
-    # Deload-suositus: matalat valmiuspisteet TAI selvä kuormapiikki
+    # Deload-suositus: matalat valmiuspisteet TAI kuormapiikki JONKA lisäksi
+    # palautuminen ei ole kunnossa. Pelkkä kuorman nousu (kg) EI yksin pakota
+    # kevennykseen jos keho palautuu hyvin — ACWR on vain yksi tekijä, ja
+    # kuormasuhde voi hyppiä luonnostaan (esim. yksi raskas viikko). Näin
+    # järjestelmä ei ehdota kevennystä jatkuvasti pelkän kg-nousun takia.
     spike = acwr is not None and acwr > 1.5
     low = result["has_data"] and result["score"] < 55
-    if spike or low:
-        reason = ("kuormapiikki (ACWR " + str(acwr) + ")") if spike else "matalat palautumismittarit"
+    recovery_ok = result["score"] >= 70   # muut mittarit (uni/HRV/leposyke) hyvät
+    if low or (spike and not recovery_ok):
+        reason = "matalat palautumismittarit" if low else f"kuormapiikki (ACWR {acwr}) ilman palautumisen tukea"
         result["deload_recommended"] = True
         result["deload_message"] = (
             f"Harkitse kevennysviikkoa — {reason}. Pudota kuormaa ~40–50 % tai sarjoja "
             "puoleen 5–7 päiväksi, pidä liikkeet samoina. Keho palautuu ja tulokset usein hyppäävät kevennyksen jälkeen.")
+    elif spike:
+        # Kuorma nousi rajusti mutta palautuminen näyttää hyvältä: ei pakotettua
+        # kevennystä, vaan seurantakehotus.
+        result["deload_recommended"] = False
+        result["load_caution"] = (
+            f"Treenikuorma nousi rajusti edellisviikkoihin nähden (ACWR {acwr}), mutta palautumismittarit "
+            "näyttävät hyviltä. Voit jatkaa — seuraa unta, leposykettä ja tuntumaa, ja pidä nousu maltillisena.")
     else:
         result["deload_recommended"] = False
     return result
