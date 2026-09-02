@@ -751,19 +751,46 @@ def _median(xs: list[float]) -> float:
     return s[n // 2] if n % 2 else (s[n // 2 - 1] + s[n // 2]) / 2
 
 
-def backtest_forecast(history: list[tuple]) -> dict:
-    """Walk-forward-taustatesti: käy data läpi pisteestä pisteeseen, ennusta
-    joka kohdassa SEURAAVA piste vain siihenastisesta datasta ja mittaa osuiko.
+BACKTEST_HORIZON_DAYS = 28
+
+
+def _value_at_day(pts: list[tuple], day: float, start_index: int = 0) -> float | None:
+    """Sarjan arvo päivänä `day` lineaarisesti interpoloituna naapuripisteistä
+    (pts[start_index-1:] käytettävissä). None jos day on datan ulkopuolella."""
+    prev = pts[start_index - 1] if start_index > 0 else None
+    for j in range(start_index, len(pts)):
+        dj, vj = pts[j]
+        if dj == day:
+            return vj
+        if dj > day:
+            if prev is None:
+                return None
+            dp, vp = prev
+            if dj == dp:
+                return vj
+            return vp + (vj - vp) * (day - dp) / (dj - dp)
+        prev = pts[j]
+    return None
+
+
+def backtest_forecast(history: list[tuple], horizon_days: int = BACKTEST_HORIZON_DAYS) -> dict:
+    """Walk-forward-taustatesti: käy data läpi pisteestä pisteeseen ja ennusta
+    joka kohdassa taso ~4 VIIKON päähän vain siihenastisesta datasta; vertaa
+    siihen mitä sarja silloin oikeasti oli (interpoloituna).
+
+    Miksi 4 viikon horisontti eikä "seuraava treeni": treenistä-treeniin
+    arvio heiluu sarjamallin mukaan (5x5 vs 3x3 antaa eri arvion samasta
+    voimasta). Yhden askeleen vertailu mittasi tuota heiluntaa, ei mallin
+    osumista — kalibrointi kääntyi satunnaisesti ääriarvoihin ja haarukka
+    paisui √ajan mukaan absurdiksi. Neljän viikon horisontti on sama jota
+    osuvuusloki seuraa, joten graafi ja laskuri oppivat samasta asiasta.
 
     Kokoaa kahdesta virhejoukosta:
-      - rate_ratio: kuinka lähelle mallin ennustama muutos osui todelliseen
-        (mediaani toteuma/ennuste). >1 = malli aliarvioi (esim. geneettinen
-        vaste), <1 = yliarvioi (plataa/hidas). Näin kaava oppii juuri tämän
-        henkilön kehityksen luonteen.
-      - error_scale: tyypillinen yhden askeleen ennustevirhe (kg per √viikko).
-        Antaa EMPIIRISEN haarukan tulevaan: pienet ja tasaiset virheet -> kapea
-        haarukka, iso hajonta -> leveä. Kapenee kun dataa on enemmän ja se on
-        johdonmukaista.
+      - rate_ratio: toteutunut muutos / ennustettu muutos (mediaani). >1 =
+        malli aliarvioi (vahva vaste), <1 = yliarvioi (tasanne). Vain kohdat
+        joissa ennustettu muutos on kohinaa isompi lasketaan mukaan.
+      - error_scale: tyypillinen 4 viikon ennustevirhe (kg). Antaa EMPIIRISEN
+        haarukan: pienet virheet -> kapea, iso hajonta -> leveä.
 
     Vaatii vähintään ~4 pistettä ollakseen luotettava; muuten palauttaa neutraalin.
     """
@@ -772,38 +799,72 @@ def backtest_forecast(history: list[tuple]) -> dict:
         return {"rate_ratio": 1.0, "error_scale": None, "n": 0}
     base = valid[0][0]
     pts = [((d - base).days, v) for d, v in valid]
-    ratios, norm_errors = [], []
+    ratios, errors = [], []
     for i in range(3, len(pts)):
         hist = pts[:i]
         last_day, last_v = hist[-1]
         recent = [p for p in hist if p[0] >= last_day - 84] or hist
         rate = _forecast_rate_per_day(recent)  # per päivä, siihenastisesta datasta
-        adx, adv = pts[i]
-        dt = adx - last_day
-        if dt <= 0:
+        target_day = last_day + horizon_days
+        actual = _value_at_day(pts, target_day, i)
+        if actual is None:
             continue
-        pred = last_v + rate * dt
-        pg, ag = pred - last_v, adv - last_v
-        if abs(pg) > 0.5:
+        pred = last_v + rate * horizon_days
+        pg, ag = pred - last_v, actual - last_v
+        if abs(pg) >= max(1.0, 0.005 * last_v):
             ratios.append(ag / pg)
-        # Virhe normalisoituna √aikaan (satunnaiskulku): vertailukelpoinen per √vk
-        norm_errors.append((adv - pred) / ((dt / 7.0) ** 0.5))
+        errors.append(actual - pred)
     rate_ratio = 1.0
     if len(ratios) >= 2:
         rate_ratio = max(0.5, min(1.6, round(_median(ratios), 2)))
     error_scale = None
-    if len(norm_errors) >= 3:
-        med = _median(norm_errors)
-        mad = _median([abs(e - med) for e in norm_errors])
-        error_scale = round(1.4826 * mad, 2) or round(_median([abs(e) for e in norm_errors]), 2)
-    return {"rate_ratio": rate_ratio, "error_scale": error_scale, "n": len(norm_errors)}
+    if len(errors) >= 3:
+        med = _median(errors)
+        mad = _median([abs(e - med) for e in errors])
+        error_scale = round(1.4826 * mad, 2) or round(_median([abs(e) for e in errors]), 2)
+    return {"rate_ratio": rate_ratio, "error_scale": error_scale, "n": len(errors)}
+
+
+def rolling_best_series(history: list[tuple], window_days: int = 56) -> list[tuple]:
+    """"Nykytaso"-aikasarja: kullakin päivällä paras arvo edeltävän ikkunan
+    (window_days) sisällä. Sama sääntö kuin ennätystaulukon current_1rm:llä,
+    joten ennuste, total ja tavoitepainot puhuvat samasta luvusta.
+
+    Yksittäinen kevyt/volyymitreeni (esim. 5x5 kevyemmällä) ei pudota tasoa,
+    koska 1RM ei oikeasti katoa yhdessä treenissä — vasta jos parempaa ei
+    tule ikkunan aikana, taso laskee."""
+    valid = sorted([(d, v) for d, v in history if v and v > 0], key=lambda p: p[0])
+    out = []
+    for i, (d, _v) in enumerate(valid):
+        best = max(v for dd, v in valid[: i + 1] if (d - dd).days <= window_days)
+        out.append((d, best))
+    return out
+
+
+def muscle_memory_strength(weeks_since: float | None) -> float:
+    """Lihasmuistin voimakkuus 0–1 vanhan huipun iän mukaan.
+
+    Paluu vanhaan huippuun on nopeampaa kuin sen saavuttaminen ensi kertaa
+    (lihastumat säilyvät, tekniikka on opittu). Tuore huippu (alle ~2 v):
+    täysi etu. Vanhempi huippu antaa pienemmän etulyönnin — keho, ikä ja
+    tekniikka ovat ehtineet muuttua (esim. 5 v vanha ennätys eri kyykky-
+    tyylillä): 1.0 (≤2 v) -> 0.6 (5 v) -> 0.4 (8+ v). Huippu itsessään
+    pysyy realistisena kohteena; vain paluun NOPEUS heikkenee iän myötä."""
+    if weeks_since is None or weeks_since <= 104:
+        return 1.0
+    if weeks_since >= 416:
+        return 0.4
+    if weeks_since <= 260:
+        return 1.0 - 0.4 * (weeks_since - 104) / 156.0
+    return 0.6 - 0.2 * (weeks_since - 260) / 156.0
 
 
 def forecast_progress(
     history: list[tuple], horizon_weeks: int = 26, ceiling: float | None = None,
     bodyweight_trend_per_week: float = 0.0, confidence: float = 1.0,
     rate_calibration: float = 1.0, prior_best: float | None = None,
-    error_scale: float | None = None,
+    error_scale: float | None = None, anchor: float | None = None,
+    prior_best_age_weeks: float | None = None,
 ) -> list[dict]:
     """Ennusta kehitys realistisesti vähenevällä tuotolla (data + malli).
 
@@ -812,9 +873,15 @@ def forecast_progress(
     (MALLI/tutkimus). Painon lasku hidastaa tahtia ja laskee kattoa (max
     potentiaali skaalautuu painon mukaan). Pienempi data -> leveämpi haarukka.
 
+    anchor: taso josta ennuste lähtee (oletus: viimeisin arvo). Käytännössä
+    kannattaa antaa "nykytaso" (paras tuoreen ikkunan sisällä), jotta yksi
+    kevyt treeni ei pudota koko ennustetta alemmas.
+
     prior_best: aiempi henkilökohtainen huippu. Jos nykyinen on sen alle
     (paluu tauolta), paluu vanhaan huippuun on NOPEAA (lihasmuisti) ja vasta
     huipun ylityksen jälkeen haaste kasvaa (vähenevä tuotto kohti kattoa).
+    prior_best_age_weeks: huipun ikä — hyvin vanha huippu vetää vähemmän
+    (ks. prior_best_memory_factor).
     """
     valid = [(d, v) for d, v in history if v and v > 0]
     if len(valid) < 2:
@@ -832,7 +899,14 @@ def forecast_progress(
     # -> nostetaan tahtia, jos yliarvioineet -> lasketaan). Rajattu maltilliseksi.
     rate_per_week = rate_per_day * 7 * max(0.6, min(1.4, rate_calibration))
 
-    current = valid[-1][1]
+    current = anchor if (anchor and anchor > 0) else valid[-1][1]
+    memory = 0.0
+    if prior_best and prior_best > current + 0.5:
+        # Vanha huippu on realistinen kohde; sen ikä määrää kuinka paljon
+        # lihasmuisti nopeuttaa paluuta (tuore: täysi etu, 5 v: ~60 %).
+        memory = muscle_memory_strength(prior_best_age_weeks)
+    else:
+        prior_best = None
 
     # TÄRKEÄÄ: vähällä datalla / lyhyellä jaksolla lyhyt jyrkkä pätkä ei saa
     # ekstrapoloitua järjettömäksi. Kutista tahtia luottamuksen mukaan (enemmän
@@ -844,6 +918,10 @@ def forecast_progress(
 
     if ceiling is None or ceiling <= current:
         ceiling = current * 1.5  # ilman standardia oletetaan 50 % varaa
+    if prior_best and ceiling < prior_best * 1.03:
+        # Keho joka on jo nostanut huipun pystyy siihen uudelleen: katto ei
+        # voi olla alle aiemman huipun.
+        ceiling = prior_best * 1.03
 
     # Painon lasku (dieetti) hidastaa kehitystä ja laskee max potentiaalia
     if bodyweight_trend_per_week < 0:
@@ -856,23 +934,39 @@ def forecast_progress(
 
     from datetime import timedelta
 
+    def ceiling_damp(v: float) -> float:
+        # Vähenevä tuotto kohti fysiologista kattoa. Neliöjuuri on pehmeämpi
+        # kuin lineaarinen (1 - v/katto): 80 %:ssa katosta tahdista jää ~45 %
+        # (lineaarisella vain 20 %), mikä vastaa paremmin kokeneen nostajan
+        # hidasta mutta todellista kehitystä. Lähellä kattoa lähes pysähtyy.
+        return max(0.1, (max(0.0, 1 - v / ceiling)) ** 0.5)
+
     out = []
     value = current
     for w in range(1, horizon_weeks + 1):
         if prior_best and value < prior_best:
-            # Lihasmuisti: paluu vanhaan huippuun on nopeaa (vain lievä vaimennus)
-            step = rate_per_week * max(0.7, 1 - value / (prior_best * 1.15))
+            # Lihasmuisti: paluu vanhaan huippuun on nopeaa (vain lievä
+            # vaimennus) — vanhan huipun iän mukaan sekoitettuna normaaliin
+            # kattovaimennukseen.
+            fast = max(0.7, 1 - value / (prior_best * 1.15))
+            step = rate_per_week * (memory * fast + (1 - memory) * ceiling_damp(value))
             value = min(prior_best, value + step)
         else:
             # Huipun ylityksen jälkeen: vähenevä tuotto kohti fysiologista kattoa
-            damp = max(0.1, 1 - (value / ceiling))
-            value = min(ceiling, value + rate_per_week * damp)
+            value = min(ceiling, value + rate_per_week * ceiling_damp(value))
         gain = value - current
         if error_scale is not None:
-            # EMPIIRINEN haarukka: taustatestin virheistä, kasvaa √ajan mukaan
-            # (satunnaiskulku). Pohja mittauskohinalle. Johdonmukainen data ->
-            # pieni error_scale -> kapea haarukka. Ei riipu heuristiikasta.
-            spread = max(error_scale * (w ** 0.5), 0.02 * current, 0.12 * gain)
+            # EMPIIRINEN haarukka taustatestin 4 viikon virheistä. Kasvaa ajassa
+            # hitaammin kuin lineaarisesti (tahtivirhe kumuloituu, mutta
+            # kehitys ei ole satunnaiskulku — se palaa kohti trendiä):
+            # (w/4)^0.6. Pohja mittauskohinalle; katto estää haarukan
+            # paisumisen fysiologisesti mahdottomaksi (~8 % + puolet noususta).
+            spread = error_scale * ((w / 4.0) ** 0.6)
+            # Pohja kasvaa horisontin mukaan: 4 vk ~2 %, 1 v ~7.5 % nykytasosta
+            # (vuoden päähän ei voi olla ±2 kg varma vaikka data olisi tasaista).
+            floor = current * (0.015 + 0.06 * min(1.0, w / 52.0))
+            spread = max(spread, floor, 0.1 * gain)
+            spread = min(spread, 0.08 * current + 0.5 * abs(gain))
         else:
             # Ilman riittävää taustadataa: heuristiikka + datan niukkuus
             spread = (max(0.5, 0.35 * gain) + 0.015 * current * (w ** 0.5)) * spread_mult

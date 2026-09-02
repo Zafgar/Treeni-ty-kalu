@@ -1424,11 +1424,13 @@ async function loadTargetWeights() {
         el("span", {}, el("span", { class: "muted" }, "3×3: "), el("strong", {}, `${l.schemes["3x3"]} kg`)),
         el("span", {}, el("span", { class: "muted" }, "1RM: "), el("strong", {}, `${l.schemes["1RM"]} kg`))),
       l.forecast_1rm_1y ? el("div", { class: "muted", style: "margin-top:3px" },
-        `Ennuste ~1 v: 1RM ~${l.forecast_1rm_1y} kg (5×5 ~${Math.round(l.forecast_1rm_1y / (1 + 7 / 30) / l.increment) * l.increment} kg)`) : ""));
+        (l.forecast_1rm_4wk ? `Ennuste 4 vk: 1RM ~${l.forecast_1rm_4wk} kg · ` : "") +
+        `~1 v: 1RM ~${l.forecast_1rm_1y} kg (5×5 ~${Math.round(l.forecast_1rm_1y / (1 + 7 / 30) / l.increment) * l.increment} kg) — sama laskuri kuin kehitysgraafissa`) : ""));
   });
 }
 
 async function loadProgress() {
+  await restoreProgressSelection();
   renderProgressChips();
   await loadTargetWeights();
   renderBackfill();
@@ -1673,20 +1675,66 @@ document.querySelectorAll(".load-mode-btn").forEach((b) => b.addEventListener("c
   loadLoadTimeline();
 }));
 
+// Pääliikkeet (kyykky/penkki/mave/pystypunnerrus tai pääliikkeeksi merkitty)
+// ovat kehitysgraafin prioriteetti: ne listataan ensin ja ne saavat ennusteen.
+const MAIN_LIFT_WORDS = ["kyykky", "penkki", "maasta", "mave", "pystypunnerrus"];
+function isMainLiftLike(ex) {
+  const n = (ex.name || "").toLowerCase();
+  return !!ex.is_main_lift || MAIN_LIFT_WORDS.some((w) => n.includes(w));
+}
+// Liikkeet joilla on kirjattua dataa (ennätystaulukosta) -> etusijalle listassa
+let progressDataIds = new Set();
+
+function progressStorageKey() { return `progressSelection:${currentProfileId ?? "none"}`; }
+function saveProgressSelection() {
+  try { localStorage.setItem(progressStorageKey(), JSON.stringify([...selectedProgress])); } catch (e) { /* ei kriittinen */ }
+}
+// Palauta valinta (profiilikohtainen); jos ei tallennettua, valitse oletuksena
+// pääliikkeet joissa on dataa (max 3) -> ennuste näkyy heti.
+async function restoreProgressSelection() {
+  selectedProgress = new Set();
+  const validIds = new Set(exercisesCache.map((e) => e.id));
+  try {
+    const saved = JSON.parse(localStorage.getItem(progressStorageKey()) || "null");
+    if (Array.isArray(saved)) saved.forEach((id) => { if (validIds.has(+id)) selectedProgress.add(+id); });
+  } catch (e) { /* ei kriittinen */ }
+  try {
+    const recs = await api.get(pq("/api/stats/records"));
+    progressDataIds = new Set(recs.map((r) => r.exercise_id));
+    if (!selectedProgress.size) {
+      recs.filter((r) => r.is_main_lift || isMainLiftLike({ name: r.exercise_name }))
+        .filter((r) => r.sessions >= 2)
+        .slice(0, 3)
+        .forEach((r) => selectedProgress.add(r.exercise_id));
+    }
+  } catch (e) { /* ei kriittinen */ }
+}
+
 function renderProgressChips() {
   const search = document.getElementById("progress-search").value.toLowerCase();
   const chips = document.getElementById("progress-chips");
   chips.innerHTML = "";
-  exercisesCache
-    .filter((ex) => ex.name.toLowerCase().includes(search))
-    .slice(0, 30)
-    .forEach((ex) => {
-      const active = selectedProgress.has(ex.id);
-      chips.append(el("button", { class: "small" + (active ? " primary" : ""), onclick: () => {
+  // Järjestys: valitut aina ensin (ja aina näkyvissä, vaikka haku ei osuisi),
+  // sitten pääliikkeet joissa on dataa, muut liikkeet joissa on dataa, loput.
+  const rank = (ex) => (selectedProgress.has(ex.id) ? 0 : 1) * 100
+    + (isMainLiftLike(ex) ? 0 : 10) + (progressDataIds.has(ex.id) ? 0 : 1);
+  const list = exercisesCache
+    .filter((ex) => selectedProgress.has(ex.id) || ex.name.toLowerCase().includes(search))
+    .sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name, "fi"));
+  const shown = list.filter((ex) => selectedProgress.has(ex.id))
+    .concat(list.filter((ex) => !selectedProgress.has(ex.id)).slice(0, 30));
+  shown.forEach((ex) => {
+    const active = selectedProgress.has(ex.id);
+    const main = isMainLiftLike(ex);
+    chips.append(el("button", {
+      class: "small" + (active ? " primary" : ""),
+      title: main ? "Pääliike — saa ennusteen" : "",
+      onclick: () => {
         active ? selectedProgress.delete(ex.id) : selectedProgress.add(ex.id);
+        saveProgressSelection();
         renderProgressChips(); drawProgressChart();
-      } }, ex.name));
-    });
+      } }, (active ? "✓ " : "") + ex.name + (main && !active ? " ★" : "")));
+  });
 }
 
 let progressRangeDays = 0;   // 0 = kaikki
@@ -1699,28 +1747,40 @@ async function drawProgressChart() {
   const single = selectedProgress.size === 1;
   // Historiaraja: näytä vain viimeiset N päivää (ennuste säilyy kokonaan)
   const cutoff = progressRangeDays ? Date.now() - progressRangeDays * 864e5 : null;
+  const notes = [];
+  let anyForecast = false;
   for (const id of selectedProgress) {
     const h = await api.get(pq(`/api/stats/exercises/${id}/history`));
     const color = CHART_COLORS[idx % CHART_COLORS.length];
-    let pts = h.points.map((p) => ({ x: new Date(p.date).getTime(), y: p.estimated_1rm }));
+    // Vain päivät joina liike oikeasti tehtiin (0 = ei suoritettua sarjaa ->
+    // ei piirretä "tiputusta" nollaan).
+    let pts = h.points.filter((p) => p.estimated_1rm > 0)
+      .map((p) => ({ x: new Date(p.date).getTime(), y: p.estimated_1rm }));
     if (cutoff) pts = pts.filter((p) => p.x >= cutoff);
     series.push({ name: h.exercise_name, points: pts, color });
     legend.append(el("span", { class: "tag", style: `color:${color};border-color:${color}` }, h.exercise_name));
-    // Ennuste (katkoviiva + haarukka) vain kun yksi liike valittuna -> selkeä
-    if (single && h.forecast && h.forecast.length && h.points.length) {
-      const lastPt = h.points[h.points.length - 1];
-      const anchor = { x: new Date(lastPt.date).getTime(), y: lastPt.estimated_1rm };
+    // Ennuste (katkoviiva + haarukka) jokaiselle valitulle pääliikkeelle —
+    // säilyy näkyvissä vaikka vertailuun lisätään muita liikkeitä.
+    const meta = h.forecast_meta;
+    if (h.forecast && h.forecast.length && meta) {
+      // Ankkuri = nykytaso (paras tuoreen ikkunan sisällä), ei viimeisin
+      // yksittäinen treeni -> kevyt päivä ei näy ennusteen pudotuksena.
+      const anchor = { x: new Date(meta.anchor_date).getTime(), y: meta.anchor };
       const fc = h.forecast.map((p) => ({ x: new Date(p.date).getTime(), y: p.mid }));
       const band = h.forecast.map((p) => ({ x: new Date(p.date).getTime(), low: p.low, high: p.high }));
-      series.push({ name: h.exercise_name, points: [anchor, ...fc], band, color, dashed: true });
-      legend.append(el("span", { class: "muted" }, " — katkoviiva = ennuste, alue = haarukka"));
-      if (h.forecast_meta) {
-        document.getElementById("progress-legend").append(
-          el("div", { class: "muted", style: "margin-top:6px;width:100%" }, h.forecast_meta.note));
-      }
+      series.push({ name: h.exercise_name + " (ennuste)", points: [anchor, ...fc], band, color, dashed: true });
+      anyForecast = true;
+      const w4 = h.forecast[3] || h.forecast[h.forecast.length - 1];
+      const w52 = h.forecast[h.forecast.length - 1];
+      notes.push(el("div", { class: "muted", style: "margin-top:4px;width:100%" },
+        el("span", { style: `color:${color}` }, `${h.exercise_name}: `),
+        `nykytaso ${meta.anchor} kg → 4 vk ~${w4.mid} kg → 1 v ~${w52.mid} kg (${w52.low}–${w52.high})`
+        + (single ? ". " + meta.note : "")));
     }
     idx++;
   }
+  if (anyForecast) legend.append(el("span", { class: "muted" }, " — katkoviiva = ennuste, alue = haarukka"));
+  notes.forEach((n) => legend.append(n));
   drawLineChart(document.getElementById("progress-chart"), series, { unit: "kg" });
 }
 

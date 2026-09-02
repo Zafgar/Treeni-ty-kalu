@@ -209,7 +209,7 @@ def health():
     return {"status": "ok"}
 
 
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.1.0"
 
 
 def _build_id() -> str:

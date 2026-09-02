@@ -65,7 +65,118 @@ def _exercise_session_points(
         if best and best["estimated_1rm"] > entry["estimated_1rm"]:
             entry["estimated_1rm"] = best["estimated_1rm"]
             entry["best_set"] = {"weight": best["weight"], "reps": best["reps"], "rir": best["rir"]}
-    return [by_date[d] for d in sorted(by_date)]
+    # Päivät joina liikkeestä ei ole yhtään suoritettua sarjaa (esim. tälle
+    # päivälle ohjelmasta luotu, vielä tekemätön "suunniteltu" treeni) eivät
+    # ole kehitystä: ilman tätä ne piirtyivät käyrään nollapisteenä, joka
+    # näytti valtavalta tiputukselta ja josta ennusteen katkoviiva lähti.
+    return [by_date[d] for d in sorted(by_date)
+            if by_date[d]["best_set"] is not None or by_date[d]["volume"] > 0]
+
+
+def _level_series(points: list[dict], window_days: int = DEFAULT_WINDOW_DAYS) -> list[tuple]:
+    """"Nykytaso"-sarja: paras arvioitu 1RM tuoreen ikkunan sisällä per päivä
+    (sama sääntö kuin current_1rm). Tästä sarjasta ennuste lähtee ja tähän
+    sarjaan toteumaa verrataan — ei yksittäisen treenin arvioon."""
+    return engine.rolling_best_series(
+        [(p["date"], p["estimated_1rm"]) for p in points if p["estimated_1rm"] > 0], window_days)
+
+
+# Kun aiempi huippu on eri variaatiosta samaa nostoa (esim. low bar -kyykky
+# vs. nykyinen high bar, sumo vs. konventionaalinen mave), se ei ole suoraan
+# sama luku: käytetään maltillista alennusta.
+CROSS_VARIANT_PRIOR_FACTOR = 0.92
+
+
+def _prior_best_for_lift(db: Session, profile_id: int | None, lift_key: str,
+                         exclude_exercise_id: int) -> tuple[float, date, str] | None:
+    """Paras aiempi tulos SAMAN nostoluokan muista liikkeistä (variaatiot)."""
+    if not lift_key:
+        return None
+    best = None
+    for ex in db.query(models.Exercise).all():
+        if ex.id == exclude_exercise_id or engine.classify_lift(ex.name) != lift_key:
+            continue
+        pts = _exercise_session_points(db, ex.id, profile_id)
+        valid = [p for p in pts if p["estimated_1rm"] > 0]
+        if not valid:
+            continue
+        top = max(valid, key=lambda p: p["estimated_1rm"])
+        if best is None or top["estimated_1rm"] > best[0]:
+            best = (top["estimated_1rm"], top["date"], ex.name)
+    return best
+
+
+def _lift_forecast(db: Session, profile_id: int | None, ex: models.Exercise,
+                   points: list[dict], horizon_weeks: int = 52,
+                   window_days: int = DEFAULT_WINDOW_DAYS) -> dict | None:
+    """YKSI yhteinen ennustelaskuri pääliikkeelle. Käytetään kehitysgraafissa,
+    lajitotalissa ja tavoitepainoissa, jotta kaikki näyttävät saman ennusteen.
+
+    - Lähtötaso (anchor) = current_1rm (paras tuoreen ikkunan sisällä), ei
+      viimeisin yksittäinen treeni.
+    - Tahti robustista trendistä (viim. ~84 pv), taustatestistä opittu
+      kalibrointi + osuvuuslokin kalibrointi + kokemustaso.
+    - Aiempi huippu (myös saman noston toinen variaatio) -> lihasmuisti,
+      vanhan huipun ikä huomioiden.
+    """
+    valid_pts = [p for p in points if p["estimated_1rm"] > 0]
+    lift_key = engine.classify_lift(ex.name)
+    is_main = bool(lift_key) or bool(ex.is_main_lift)
+    if not is_main or len(valid_pts) < 2:
+        return None
+    profile = db.get(models.Profile, profile_id) if profile_id else None
+    sex = profile.sex if profile else None
+    bw = _latest_bodyweight(db, profile_id)
+    ceiling = engine.natural_ceiling(lift_key, bw, sex) if (lift_key and bw) else None
+    span_days = (valid_pts[-1]["date"] - valid_pts[0]["date"]).days
+    conf = engine.forecast_confidence(len(valid_pts), span_days)
+    bw_trend = _bodyweight_trend(db, profile_id) or 0.0
+    history = [(p["date"], p["estimated_1rm"]) for p in valid_pts]
+    level = engine.rolling_best_series(history, window_days)
+    anchor = level[-1][1]
+    anchor_date = level[-1][0]
+
+    # Kalibrointi: osuvuusloki (nykytasoa vasten) * taustatesti * kokemustaso.
+    # Sekä tahti että taustatesti lasketaan NYKYTASOSARJASTA: treenistä-
+    # treeniin heilunta (5x5 vs 3x3 antaa eri arvion samasta voimasta) ei
+    # silloin näy tasanteena eikä kohinana, vaan trendi on aito tason muutos.
+    log_calib = _calibration_for_key(db, profile_id, "lift", ex.id, level)
+    bt = engine.backtest_forecast(level)
+    calib = max(0.6, min(1.4, log_calib * bt["rate_ratio"]))
+    exp_calib = engine.experience_rate_calibration(profile.experience if profile else None, conf)
+    calib = max(0.6, min(1.5, calib * exp_calib))
+
+    # Aiempi huippu: oma historia tai saman noston toinen variaatio
+    best_pt = max(valid_pts, key=lambda p: p["estimated_1rm"])
+    prior_best, prior_date, prior_src = best_pt["estimated_1rm"], best_pt["date"], None
+    cross = _prior_best_for_lift(db, profile_id, lift_key, ex.id) if lift_key else None
+    if cross and cross[0] * CROSS_VARIANT_PRIOR_FACTOR > prior_best:
+        prior_best, prior_date, prior_src = cross[0] * CROSS_VARIANT_PRIOR_FACTOR, cross[1], cross[2]
+    prior_age_weeks = (date.today() - prior_date).days / 7.0
+    prior_info = None
+    if prior_best > anchor + 0.5:
+        prior_info = {"value": round(prior_best, 1), "date": prior_date.isoformat(),
+                      "years_ago": round(prior_age_weeks / 52.0, 1),
+                      "memory_strength": round(engine.muscle_memory_strength(prior_age_weeks), 2),
+                      "source": prior_src}
+        # Keho joka on jo nostanut huipun pystyy siihen uudelleen: naturaali-
+        # katto (kehon painosta) ei voi olla alle todistetun huipun.
+        if ceiling is not None and ceiling < prior_best * 1.03:
+            ceiling = round(prior_best * 1.03, 1)
+    else:
+        prior_best = None
+
+    fc = engine.forecast_progress(
+        level, horizon_weeks, ceiling, bodyweight_trend_per_week=bw_trend,
+        confidence=conf, rate_calibration=calib, prior_best=prior_best,
+        prior_best_age_weeks=prior_age_weeks, error_scale=bt["error_scale"], anchor=anchor)
+    if not fc:
+        return None
+    return {"forecast": fc, "anchor": round(anchor, 1), "anchor_date": anchor_date,
+            "confidence": conf, "calibration": calib, "log_calibration": log_calib,
+            "backtest": bt, "exp_calib": exp_calib,
+            "bodyweight_trend": bw_trend, "sessions": len(valid_pts), "prior": prior_info,
+            "ceiling": ceiling, "level": level, "lift_key": lift_key}
 
 
 def _records_for_exercise(points: list[dict], window_days: int) -> dict | None:
@@ -188,46 +299,19 @@ def exercise_history(
     # tai is_main_lift) — apuliikkeiden ennuste ei ole hyödyllinen.
     forecast_points = []
     forecast_meta = None
-    lift_key = engine.classify_lift(ex.name) if ex else None
-    is_main = bool(lift_key) or (ex.is_main_lift if ex else False)
-    valid_pts = [p for p in points if p["estimated_1rm"] > 0]
-    if forecast and is_main and len(valid_pts) >= 2:
+    lf = _lift_forecast(db, profile_id, ex, points, horizon_weeks, window_days) if (forecast and ex) else None
+    if lf:
+        forecast_points = lf["forecast"]
+        bt, calib, exp_calib, conf, bw_trend = (lf["backtest"], lf["calibration"], lf["exp_calib"],
+                                                lf["confidence"], lf["bodyweight_trend"])
         profile = db.get(models.Profile, profile_id) if profile_id else None
-        # Katto naturaalinostajan realistisesta huipusta (jos paino tunnetaan)
-        ceiling = None
-        bw = _latest_bodyweight(db, profile_id)
-        if lift_key and bw:
-            ceiling = engine.natural_ceiling(lift_key, bw, profile.sex if profile else None)
-        # Luottamus datan määrästä ja painotrendi dieetin vaikutusta varten
-        span_days = (valid_pts[-1]["date"] - valid_pts[0]["date"]).days
-        conf = engine.forecast_confidence(len(valid_pts), span_days)
-        bw_trend = _bodyweight_trend(db, profile_id) or 0.0
-        history = [(p["date"], p["estimated_1rm"]) for p in valid_pts]
-        # Kalibrointi aiemman osuvuuden mukaan
-        calib = _calibration_for_key(db, profile_id, "lift", exercise_id, history)
-        # Walk-forward-taustatesti: opi tahti ja EMPIIRINEN haarukka omasta
-        # datasta (ennusta joka piste aiemmista ja mittaa virhe).
-        bt = engine.backtest_forecast(history)
-        calib = max(0.6, min(1.4, calib * bt["rate_ratio"]))
-        # Kokemustaso (taustakysely) ohjaa tahtia kun omaa dataa on vähän;
-        # vaikutus häipyy kun luottamus nousee ja oma toteuma ottaa vallan.
-        exp_calib = engine.experience_rate_calibration(
-            profile.experience if profile else None, conf)
-        calib = max(0.6, min(1.5, calib * exp_calib))
-        # Lihasmuisti: aiempi huippu -> paluu siihen on nopeaa, ylitys haastavampaa
-        best_ever = max(p["estimated_1rm"] for p in valid_pts)
-        prior_best = best_ever if best_ever > valid_pts[-1]["estimated_1rm"] + 0.5 else None
-        forecast_points = engine.forecast_progress(
-            history, horizon_weeks, ceiling, bodyweight_trend_per_week=bw_trend,
-            confidence=conf, rate_calibration=calib, prior_best=prior_best,
-            error_scale=bt["error_scale"])
-        _snapshot_forecast(db, profile_id, "lift", exercise_id, valid_pts[-1]["estimated_1rm"], forecast_points)
+        _snapshot_forecast(db, profile_id, "lift", exercise_id, lf["anchor"], forecast_points)
         conf_label = "korkea" if conf >= 0.7 else "kohtalainen" if conf >= 0.4 else "matala"
         calib_note = ""
-        if calib > 1.05:
-            calib_note = "Aiemmat ennusteet aliarvioivat — tahtia nostettu. "
-        elif calib < 0.95:
-            calib_note = "Aiemmat ennusteet yliarvioivat — tahtia laskettu. "
+        if lf["log_calibration"] > 1.05:
+            calib_note = "Aiemmat tallennetut ennusteet aliarvioivat toteumaa — tahtia nostettu. "
+        elif lf["log_calibration"] < 0.95:
+            calib_note = "Aiemmat tallennetut ennusteet yliarvioivat toteumaa — tahtia laskettu. "
         if bt["n"] >= 3:
             if bt["rate_ratio"] >= 1.15:
                 calib_note += "Kehityksesi on ollut poikkeuksellisen vahvaa (data ylitti mallin) — tahti pidetty korkeana. "
@@ -240,16 +324,28 @@ def exercise_history(
             calib_note += (f"Taustakyselyn kokemustaso ({exp_lbl}) "
                            f"{'nostaa' if exp_calib > 1 else 'laskee'} arvioitua tahtia "
                            "kunnes omaa dataa kertyy tarpeeksi. ")
+        prior_note = ""
+        if lf["prior"]:
+            pr = lf["prior"]
+            src = f" ({pr['source']}, toinen variaatio, −{round((1 - CROSS_VARIANT_PRIOR_FACTOR) * 100)} %)" if pr["source"] else ""
+            prior_note = (f"Aiempi huippu {pr['value']} kg{src} on {pr['years_ago']} v takaa: lihasmuisti "
+                          f"nopeuttaa paluuta sinne (etu {round(pr['memory_strength'] * 100)} %"
+                          + (" — yli 2 v vanha huippu antaa pienemmän etulyönnin, keho ja tekniikka ovat muuttuneet"
+                             if pr["years_ago"] > 2 else "") + "). ")
         forecast_meta = {
             "confidence": conf, "confidence_label": conf_label,
-            "bodyweight_trend": bw_trend, "sessions": len(valid_pts), "calibration": calib,
-            "note": ("Ennuste perustuu toteutuneeseen tahtiin ja naturaalinostajan "
-                     "realistiseen kattoon (jopa 1 v eteenpäin; loukkaantuminen tai "
-                     "sairaus voi tuoda takapakkia). " + calib_note +
+            "bodyweight_trend": bw_trend, "sessions": lf["sessions"], "calibration": calib,
+            "anchor": lf["anchor"], "anchor_date": lf["anchor_date"].isoformat(),
+            "prior": lf["prior"],
+            "note": (f"Ennuste lähtee nykytasosta {lf['anchor']} kg (paras arvio {window_days} pv sisällä — "
+                     "yksittäinen kevyt treeni ei pudota sitä) ja perustuu toteutuneeseen tahtiin sekä "
+                     "naturaalinostajan realistiseen kattoon (jopa 1 v eteenpäin; loukkaantuminen tai "
+                     "sairaus voi tuoda takapakkia). " + prior_note + calib_note +
                      ("Painon lasku hidastaa arvioitua kehitystä. " if bw_trend < -0.1 else "") +
-                     f"Luottamus: {conf_label} ({len(valid_pts)} treenikertaa). Lisää dataa tarkentaa."),
+                     f"Luottamus: {conf_label} ({lf['sessions']} treenikertaa). Lisää dataa tarkentaa."),
         }
 
+    level = {d: v for d, v in _level_series(points, window_days)}
     return {
         "exercise_id": exercise_id,
         "exercise_name": ex.name if ex else None,
@@ -258,6 +354,7 @@ def exercise_history(
             {
                 "date": p["date"].isoformat(),
                 "estimated_1rm": p["estimated_1rm"],
+                "level_1rm": level.get(p["date"]),
                 "volume": round(p["volume"], 1),
                 "best_set": p["best_set"],
             }
@@ -351,26 +448,28 @@ def total(
         total_high += e_high
 
     # Total-kehityskäyrä: yhdistetty päiväakseli, kullakin päivällä summa
-    # kunkin liikkeen viimeisimmästä tunnetusta arviosta siihen mennessä.
+    # kunkin liikkeen NYKYTASOSTA (paras tuoreen ikkunan sisällä) siihen
+    # mennessä — sama sääntö kuin total_mid:ssä, joten käyrän viimeinen piste
+    # on sama luku kuin näytetty yhteistulos eikä kevyt treenipäivä pudota sitä.
     all_dates = sorted({p["date"] for pts in lift_timeseries.values() for p in pts})
+    level_by_lift = {name: dict(_level_series(pts, window_days)) for name, pts in lift_timeseries.items()}
     timeline = []
     last_known: dict[str, float] = {}
     for d in all_dates:
-        for name, pts in lift_timeseries.items():
-            for p in pts:
-                if p["date"] == d and p["estimated_1rm"] > 0:
-                    last_known[name] = p["estimated_1rm"]
+        for name, lv in level_by_lift.items():
+            if d in lv:
+                last_known[name] = lv[d]
         if last_known:
             timeline.append({"date": d.isoformat(), "total": round(sum(last_known.values()), 1)})
 
-    # Total-uran ennuste: ennusta jokainen pääliike ja summaa viikoittain.
+    # Total-uran ennuste: sama yhteinen laskuri (_lift_forecast) kuin liikkeen
+    # kehitysgraafissa, summattuna viikoittain.
     # TÄRKEÄÄ: kaikki liikkeet ankkuroidaan YHTEISEEN tulevaisuusakseliin, joka
     # alkaa viimeisimmästä toteutuneesta totalista (ref_date) eikä kunkin
     # liikkeen omasta viimeisestä päivästä. Muuten liike, jonka tuorein merkintä
     # on vanha (esim. kirjattu vanha ennätys), vetäisi koko ennusteen alkamaan
     # menneisyydestä. Ennuste projisoidaan aina NYKYHETKESTÄ vuosi eteenpäin.
     bw = _latest_bodyweight(db, profile_id)
-    bw_trend = _bodyweight_trend(db, profile_id) or 0.0
     profile = db.get(models.Profile, profile_id) if profile_id else None
     sex = profile.sex if profile else None
     horizon = 52  # ~1 vuosi (pidemmälle ei ennusteta luotettavasti)
@@ -381,27 +480,12 @@ def total(
     # Yhteinen ankkuripäivä = tuorein toteutunut total (tai tänään jos ei dataa)
     ref_date = all_dates[-1] if all_dates else date.today()
     for ex in lifts:
-        pts = [p for p in lift_timeseries.get(ex.name, []) if p["estimated_1rm"] > 0]
-        cur = last_known.get(ex.name)  # liikkeen nykyarvo ref_date-hetkellä
-        if len(pts) < 2:
+        pts = lift_timeseries.get(ex.name, [])
+        cur = last_known.get(ex.name)  # liikkeen nykytaso ref_date-hetkellä
+        lf = _lift_forecast(db, profile_id, ex, pts, horizon, window_days)
+        if not lf:
             # Ei ennustettavaa dataa -> pidetään nykyarvo tasaisena (jottei
             # total-ennuste tipahda alle nykytason puuttuvan liikkeen takia).
-            if cur:
-                for i in range(horizon):
-                    fc_mid[i] += cur; fc_low[i] += cur; fc_high[i] += cur
-            continue
-        lk = engine.classify_lift(ex.name)
-        ceiling = engine.natural_ceiling(lk, bw, sex) if (lk and bw) else None
-        span = (pts[-1]["date"] - pts[0]["date"]).days
-        conf = engine.forecast_confidence(len(pts), span)
-        best_ever = max(p["estimated_1rm"] for p in pts)
-        prior_best = best_ever if best_ever > pts[-1]["estimated_1rm"] + 0.5 else None
-        lift_hist = [(p["date"], p["estimated_1rm"]) for p in pts]
-        bt = engine.backtest_forecast(lift_hist)
-        fc = engine.forecast_progress(lift_hist, horizon, ceiling, bodyweight_trend_per_week=bw_trend,
-                                      confidence=conf, prior_best=prior_best,
-                                      rate_calibration=bt["rate_ratio"], error_scale=bt["error_scale"])
-        if not fc:
             if cur:
                 for i in range(horizon):
                     fc_mid[i] += cur; fc_low[i] += cur; fc_high[i] += cur
@@ -409,7 +493,7 @@ def total(
         have_fc = True
         # Summataan viikkoindeksillä (viikko i liikkeen nykyarvosta eteenpäin);
         # kalenteripäivä otetaan yhteisestä ref_date-akselista, ei liikkeeltä.
-        for i, m in enumerate(fc):
+        for i, m in enumerate(lf["forecast"]):
             fc_mid[i] += m["mid"]; fc_low[i] += m["low"]; fc_high[i] += m["high"]
 
     total_forecast = []
@@ -665,20 +749,16 @@ def target_weights(profile_id: int | None = Query(None), db: Session = Depends(g
             "3x3": engine.round_to_increment(engine.weight_for_reps(one_rm, 3, 1), inc),
             "1RM": engine.round_to_increment(one_rm, inc),
         }
-        # Ennuste ~1 v: käytä liikkeen kehityskäyrää jos dataa riittää
-        forecast_1rm = None
-        pts = [(p["date"], p["estimated_1rm"]) for p in points if p["estimated_1rm"] > 0]
-        if len(pts) >= 2:
-            lk = engine.classify_lift(ex.name)
-            ceiling = engine.natural_ceiling(lk, bw, sex) if (lk and bw) else None
-            span = (pts[-1][0] - pts[0][0]).days
-            conf = engine.forecast_confidence(len(pts), span)
-            fc = engine.forecast_progress(pts, 52, ceiling, confidence=conf)
-            if fc:
-                forecast_1rm = fc[-1]["mid"]
+        # Ennuste ~1 v: SAMA laskuri kuin kehitysgraafissa (kalibroitu,
+        # nykytasosta lähtevä), jotta tavoitepainojen luku ja graafi täsmäävät.
+        forecast_1rm = forecast_4wk = None
+        lf = _lift_forecast(db, profile_id, ex, points, 52, DEFAULT_WINDOW_DAYS)
+        if lf:
+            forecast_1rm = lf["forecast"][-1]["mid"]
+            forecast_4wk = lf["forecast"][3]["mid"] if len(lf["forecast"]) >= 4 else None
         lifts.append({
             "exercise_name": ex.name, "current_1rm": one_rm, "increment": inc,
-            "schemes": schemes, "forecast_1rm_1y": forecast_1rm,
+            "schemes": schemes, "forecast_1rm_1y": forecast_1rm, "forecast_1rm_4wk": forecast_4wk,
             "last_trained": rec["last_trained"].isoformat() if rec["last_trained"] else None,
         })
     return {"bodyweight": bw, "lifts": lifts}
@@ -1069,7 +1149,9 @@ def forecast_accuracy(profile_id: int = Query(...), db: Session = Depends(get_db
                 pts = _exercise_session_points(db, int(ref), profile_id)
             except (ValueError, TypeError):
                 continue
-            actual_series = [(p["date"], p["estimated_1rm"]) for p in pts if p["estimated_1rm"] > 0]
+            # Toteuma = nykytaso (paras tuoreen ikkunan sisällä) — sama luku
+            # josta ennuste lähti, ei yksittäisen treenin arvio.
+            actual_series = _level_series(pts, DEFAULT_WINDOW_DAYS)
             ex = db.get(models.Exercise, int(ref))
             label = ex.name if ex else f"liike {ref}"
         else:  # measurement

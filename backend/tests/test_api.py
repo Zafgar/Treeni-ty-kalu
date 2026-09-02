@@ -856,3 +856,86 @@ def test_measurement_guidance_and_strength_link(client):
     s = client.get(f"/api/body/summary?profile_id={pid}").json()
     assert s["weight_guidance"]["avg7"] is not None
     assert "keskiarvo" in s["weight_guidance"]["message"]
+
+
+def test_planned_session_does_not_create_zero_point(client):
+    """Ohjelmasta luotu, vielä tekemätön treeni (sarjat completed=False) ei saa
+    näkyä kehityskäyrässä nollapisteenä eikä ennusteen lähtökohtana."""
+    from datetime import date, timedelta
+    today = date.today()
+    ex = client.post("/api/exercises", json={"name": "Penkkipunnerrus", "is_main_lift": True}).json()
+    client.post("/api/body/entries?profile_id=1", json={"bodyweight": 100})
+    for wk, w in [(6, 140), (4, 142.5), (2, 145), (1, 147.5)]:
+        client.post("/api/workouts", json={
+            "profile_id": 1, "session_date": (today - timedelta(weeks=wk)).isoformat(),
+            "status": "completed",
+            "exercises": [{"exercise_id": ex["id"], "sets": [
+                {"set_index": 0, "reps": 5, "weight": w, "completed": True}]}]})
+    # Tämän päivän suunniteltu treeni: sarjat tekemättä
+    client.post("/api/workouts", json={
+        "profile_id": 1, "session_date": today.isoformat(), "status": "planned",
+        "exercises": [{"exercise_id": ex["id"], "sets": [
+            {"set_index": i, "reps": 5, "weight": 150, "completed": False} for i in range(3)]}]})
+    h = client.get(f"/api/stats/exercises/{ex['id']}/history?profile_id=1").json()
+    assert all(p["estimated_1rm"] > 0 for p in h["points"])
+    assert h["points"][-1]["date"] != today.isoformat()
+    assert h["forecast_meta"]["anchor"] == h["records"]["current_1rm"]
+    assert h["forecast"][0]["mid"] >= h["forecast_meta"]["anchor"]
+
+
+def test_forecast_anchor_ignores_light_session_and_matches_total(client):
+    """Kevyt volyymitreeni viimeisimpänä ei pudota ennustetta; graafi, total ja
+    tavoitepainot käyttävät samaa laskuria."""
+    from datetime import date, timedelta
+    today = date.today()
+    client.patch("/api/profiles/1", json={"sex": "mies", "height_cm": 180})
+    client.post("/api/body/entries?profile_id=1", json={"bodyweight": 110})
+    ids = {}
+    for name in ("Takakyykky", "Penkkipunnerrus", "Maastaveto"):
+        ids[name] = client.post("/api/exercises", json={
+            "name": name, "is_main_lift": True, "sport": "voimanosto"}).json()["id"]
+
+    def sess(d, w, r, eid):
+        client.post("/api/workouts", json={"profile_id": 1, "session_date": d.isoformat(),
+            "status": "completed", "exercises": [{"exercise_id": eid, "sets": [
+                {"set_index": 0, "reps": r, "weight": w, "completed": True}]}]})
+    for name, base in (("Takakyykky", 180), ("Penkkipunnerrus", 130), ("Maastaveto", 220)):
+        for wk, add in [(8, 0), (6, 2.5), (4, 5), (2, 7.5)]:
+            sess(today - timedelta(weeks=wk), base + add, 3, ids[name])
+        sess(today, base * 0.8, 5, ids[name])  # kevyt volyymipäivä viimeisimpänä
+    sq = client.get(f"/api/stats/exercises/{ids['Takakyykky']}/history?profile_id=1").json()
+    cur = sq["records"]["current_1rm"]
+    assert sq["points"][-1]["estimated_1rm"] < cur - 10   # kevyt päivä on selvästi alle tason
+    assert sq["forecast_meta"]["anchor"] == cur
+    assert sq["forecast"][0]["mid"] >= cur                  # ei tiputusta
+    t = client.get("/api/stats/total?sport=voimanosto&profile_id=1").json()
+    assert abs(t["timeline"][-1]["total"] - t["total_mid"]) < 0.2
+    assert t["forecast"][0]["mid"] >= t["total_mid"] - 0.2
+    tw = client.get("/api/stats/target-weights?profile_id=1").json()
+    sq_tw = next(l for l in tw["lifts"] if l["exercise_name"] == "Takakyykky")
+    assert sq_tw["forecast_1rm_1y"] == sq["forecast"][-1]["mid"]
+    assert sq_tw["forecast_1rm_4wk"] == sq["forecast"][3]["mid"]
+
+
+def test_cross_variant_prior_best_counts_as_muscle_memory(client):
+    """Vanha low bar -kyykyn ennätys eri liikkeenä huomioidaan high bar
+    -kyykyn ennusteessa alennettuna (lihasmuisti), ikä huomioiden."""
+    from datetime import date, timedelta
+    today = date.today()
+    client.post("/api/body/entries?profile_id=1", json={"bodyweight": 110})
+    low = client.post("/api/exercises", json={"name": "Takakyykky (low bar)", "is_main_lift": True}).json()
+    high = client.post("/api/exercises", json={"name": "Takakyykky (high bar)", "is_main_lift": True}).json()
+    client.post("/api/workouts", json={"profile_id": 1, "status": "completed",
+        "session_date": (today - timedelta(days=5 * 365)).isoformat(),
+        "exercises": [{"exercise_id": low["id"], "sets": [{"set_index": 0, "reps": 1, "weight": 240, "completed": True}]}]})
+    for wk, w in [(6, 150), (4, 152.5), (2, 155), (0, 157.5)]:
+        client.post("/api/workouts", json={"profile_id": 1, "status": "completed",
+            "session_date": (today - timedelta(weeks=wk)).isoformat(),
+            "exercises": [{"exercise_id": high["id"], "sets": [{"set_index": 0, "reps": 3, "weight": w, "completed": True}]}]})
+    h = client.get(f"/api/stats/exercises/{high['id']}/history?profile_id=1").json()
+    pr = h["forecast_meta"]["prior"]
+    assert pr and pr["source"] == "Takakyykky (low bar)"
+    assert abs(pr["value"] - 240 * 0.92) < 0.2
+    assert pr["memory_strength"] < 0.7             # 5 v vanha -> pienempi etulyönti
+    assert pr["years_ago"] >= 4.9
+    assert "low bar" in h["forecast_meta"]["note"]

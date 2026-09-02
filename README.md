@@ -196,7 +196,12 @@ python -m pytest backend/tests/ -q
   (vähenevä tuotto kohti realistista kattoa). Painon lasku hidastaa ennustetta
   ja laskee maksimipotentiaalia; ennusteen **luottamus** kasvaa datan määrän
   myötä (vähemmän dataa → leveämpi haarukka). Myös **lajitotalin ura** (mihin
-  esim. voimanoston total on menossa ~6 kk) ennustetaan haarukkana
+  esim. voimanoston total on menossa ~1 v) ennustetaan haarukkana. Ennuste
+  lähtee aina **nykytasosta** (paras arvio 8 viikon sisällä — sama luku kuin
+  ennätystaulukon "nykyinen 1RM"), ei yksittäisestä kevyestä treenistä, ja
+  kehitysgraafi, lajitotal ja tavoitepainot käyttävät **samaa laskuria**.
+  Aiempi huippu (myös saman noston toinen variaatio, esim. low bar -kyykky)
+  huomioidaan lihasmuistina — yli 2 v vanha huippu painaa vähemmän
 - **Kehon pisteet:** suhdepisteet ympärysmitoista (vyötärö/pituus,
   hartia/vyötärö, rintakehä/vyötärö), fysiikkataso (FFMI) ja voimataso
   yhdistettynä yhteispisteiksi — kuva sekä ulkonäön että voiman tasosta

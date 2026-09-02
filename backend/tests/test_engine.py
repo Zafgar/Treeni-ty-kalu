@@ -95,7 +95,8 @@ def test_backtest_learns_from_data():
     bt = engine.backtest_forecast(steady)
     fc = engine.forecast_progress(steady, 52, ceiling=210, error_scale=bt["error_scale"],
                                   rate_calibration=bt["rate_ratio"])
-    assert (fc[-1]["high"] - fc[-1]["low"]) < 20  # kapea kun data on tasaista
+    # Kapea kun data on tasaista — mutta vuoden päähän pohja on ~±7.5 % (ei ±2 kg)
+    assert (fc[-1]["high"] - fc[-1]["low"]) < 30
 
     # Liian vähän dataa -> neutraali (ei opi)
     assert engine.backtest_forecast(mk([100, 110]))["n"] == 0
@@ -781,3 +782,54 @@ def test_robust_rate_ignores_single_outlier():
     assert abs(E._robust_rate(flat_spike)) < 0.05
     # OLS reagoi poikkeamaan selvästi enemmän (osoittaa miksi robusti on parempi)
     assert E._linear_rate(flat_spike) > E._robust_rate(flat_spike)
+
+
+def test_rolling_best_series_is_current_level():
+    from datetime import date, timedelta
+    from app import engine as E
+    base = date(2026, 1, 1)
+    hist = [(base, 200), (base + timedelta(days=7), 210), (base + timedelta(days=14), 195),
+            (base + timedelta(days=100), 190)]
+    lvl = E.rolling_best_series(hist, 56)
+    # Kevyt treeni ei pudota tasoa ikkunan sisällä; ikkunan ulkopuolella pudottaa
+    assert [v for _, v in lvl] == [200, 210, 210, 190]
+
+
+def test_muscle_memory_strength_decays_with_age():
+    from app import engine as E
+    assert E.muscle_memory_strength(None) == 1.0
+    assert E.muscle_memory_strength(52) == 1.0             # 1 v: täysi etu
+    assert abs(E.muscle_memory_strength(260) - 0.6) < 1e-6  # 5 v: 60 %
+    assert E.muscle_memory_strength(600) == 0.4             # 8+ v: pohja
+    f3 = E.muscle_memory_strength(156)
+    assert 0.6 < f3 < 1.0
+
+
+def test_forecast_anchor_starts_from_current_level_not_light_session():
+    """Viimeisin treeni kevyt (esim. volyymipäivä) -> ennuste ei saa alkaa
+    sen arviosta vaan nykytasosta."""
+    from datetime import date, timedelta
+    from app import engine as E
+    base = date(2026, 1, 1)
+    hist = [(base + timedelta(days=7 * i), 200 + i) for i in range(8)]
+    hist.append((base + timedelta(days=56), 185))  # kevyt päivä
+    plain = E.forecast_progress(hist, 4, ceiling=300)
+    anchored = E.forecast_progress(hist, 4, ceiling=300, anchor=207)
+    assert plain[0]["mid"] < 195
+    assert anchored[0]["mid"] >= 207
+
+
+def test_old_prior_best_pulls_less_than_fresh():
+    """5 v vanha huippu (eri kyykkytyyli, vanhempi keho) ei saa toimia samana
+    lihasmuisti-kohteena kuin tuore huippu."""
+    from datetime import date, timedelta
+    from app import engine as E
+    base = date(2026, 1, 1)
+    hist = [(base + timedelta(days=7 * i), 200 + 2 * i) for i in range(10)]
+    fresh = E.forecast_progress(hist, 52, ceiling=320, prior_best=300, prior_best_age_weeks=30)
+    old = E.forecast_progress(hist, 52, ceiling=320, prior_best=300, prior_best_age_weeks=280)
+    assert fresh[-1]["mid"] > old[-1]["mid"]
+    # Vanha huippu on yhä realistinen kohde, mutta paluu on hitaampaa
+    assert all(p["mid"] <= 320 for p in old)
+    none = E.forecast_progress(hist, 52, ceiling=320)
+    assert old[-1]["mid"] >= none[-1]["mid"]  # vanhakin muisti auttaa vähän
